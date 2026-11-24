@@ -37,12 +37,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 import numpy as np
-from PIL import Image, ImageChops, ImageEnhance, ImageOps
+from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageOps
 
 from ..workspace import Case, CaseError, ensure_dir
 from . import ffmpeg as ffmpeg_engine
 from . import media as media_engine
-from . import stitch, thumbnails
+from . import seams, stitch, thumbnails
 
 logger = logging.getLogger(__name__)
 
@@ -1308,6 +1308,57 @@ def _warp_piece(
     return warped, (left, top), rel, time
 
 
+_OPAQUE = [0] * 255 + [255]
+
+
+class _Seams:
+    """Where the stitched pieces of one ``width`` × ``height`` canvas meet (engine/seams.py).
+
+    Fed the pieces in stack order, it cuts each stitched one where the owner of a
+    cell drawn below it is fully opaque, then marks where that piece is opaque in its
+    own cell. Only an opaque pixel already painted hides anything, so the canvas
+    keeps the cover plain stacking gives it, pixel for pixel."""
+
+    def __init__(self, nodes: list[dict[str, Any]], width: int, height: int):
+        index: list[int] = []
+        middles: list[seams.Point] = []
+        for i, node in enumerate(nodes):
+            if not seams.stitched((node.get("src") or {}).get("ops")):
+                continue
+            try:
+                at = seams.middle(node["quad"])
+            except (KeyError, TypeError, ValueError, IndexError):
+                continue
+            if all(math.isfinite(v) for v in at):
+                index.append(i)
+                middles.append(at)
+        self.cells: dict[int, list[seams.Point]] = {}
+        if len(index) >= 2:
+            self.cells = dict(zip(index, seams.cells(middles, (0.0, 0.0, float(width), float(height)))))
+        # one byte a pixel: 255 where a cell's owner is painted opaque
+        self.taken = Image.new("L", (width, height), 0) if self.cells else None
+
+    def cut(self, index: int, piece: Image.Image, at: tuple[int, int]) -> Image.Image:
+        """The ``index``-th piece, warped and laid at ``at``, with what the stitch hides of it gone."""
+        cell = self.cells.get(index)
+        if cell is None or self.taken is None:
+            return piece
+        left, top = at
+        box = (left, top, left + piece.width, top + piece.height)
+        alpha = piece.getchannel("A")
+        below = self.taken.crop(box)
+        if below.getbbox() is not None:
+            alpha = ImageChops.subtract(alpha, below)
+            piece.putalpha(alpha)
+        if len(cell) >= 3:
+            own = Image.new("L", piece.size, 0)
+            ImageDraw.Draw(own).polygon([(x - left, y - top) for x, y in cell], fill=255)
+            mark = ImageChops.multiply(own, alpha.point(_OPAQUE))
+            if mark.getbbox() is not None:
+                self.taken.paste(255, box, mark)
+        return piece
+
+
 def _compose_canvas(
     case: Case,
     *,
@@ -1320,7 +1371,8 @@ def _compose_canvas(
     piece's file and the instant it was cut at (None for a picture).
 
     A transparent canvas lays each piece over the ones before it as alpha does, so a
-    soft edge over nothing keeps its colour rather than darkening with its cover."""
+    soft edge over nothing keeps its colour rather than darkening with its cover. The
+    pieces Azimut stitched meet halfway between their middles (:class:`_Seams`)."""
     if not nodes:
         raise ValueError("collage needs at least one image")
     width = max(16, min(int(width), 8192))
@@ -1333,9 +1385,11 @@ def _compose_canvas(
 
     sources: list[str] = []
     times: list[float | None] = []
-    for node in nodes:
+    meet = _Seams(nodes, width, height)
+    for index, node in enumerate(nodes):
         piece, at, rel, time = _warp_piece(case, node, width, height)
         if piece is not None:
+            piece = meet.cut(index, piece, at)
             if background:
                 canvas.paste(piece.convert("RGB"), at, piece.getchannel("A"))
             else:
@@ -1403,7 +1457,8 @@ def compose_perspective(
 ) -> dict[str, Any]:
     """Composite frames and case images, each warped into a 4-point quad, onto a canvas.
 
-    ``nodes`` are painted in order (later = on top); each is
+    ``nodes`` are painted in order (later = on top), save that pieces Azimut stitched
+    meet halfway between their middles (engine/seams.py); each is
     ``{"src": {path, time?, ops[]}, "quad": [[x,y]×4]}`` with the quad in canvas
     pixels (top-left, top-right, bottom-right, bottom-left). A falsy ``background``
     yields a transparent (RGBA) canvas so the saved PNG carries only the pieces.
@@ -1428,26 +1483,24 @@ def compose_perspective(
 
 
 def bend_piece(
-    case: Case, node: dict[str, Any], width: int, height: int, shifts: Sequence[float]
-) -> tuple[Image.Image, tuple[int, int, int, int], str, float | None]:
+    piece: Image.Image, at: tuple[int, int], height: int, shifts: Sequence[float]
+) -> tuple[Image.Image, tuple[int, int, int, int]]:
     """One piece of a collage bent as the whole collage would bend (Collage → Straighten).
 
-    The piece is drawn on the columns of the ``width`` × ``height`` canvas it covers,
-    the canvas's whole height, and each column moved by its own of ``shifts``: the very
-    pixels it shows on the canvas the whole collage is bent on. Returns the bent
-    picture trimmed to what it holds, its box on that canvas (left, top, right,
-    bottom), its file and its instant.
+    ``piece`` is what it shows, warped and laid at ``at`` on the canvas the whole
+    collage is bent on, ``height`` pixels high. It is drawn on the columns it covers,
+    the canvas's whole height, and each column moved by its own of ``shifts``.
+    Returns the bent picture trimmed to what it holds and its box on that canvas
+    (left, top, right, bottom).
     """
-    piece, (left, top), rel, time = _warp_piece(case, node, width, height)
-    if piece is None:
-        raise ValueError("a piece lies off the canvas it is bent on")
+    left, top = at
     strip = Image.new("RGBA", (piece.width, height), (0, 0, 0, 0))
     strip.paste(piece, (0, top))
     bent = _bent(strip, shifts[left : left + piece.width])
     box = bent.getchannel("A").getbbox()
     if box is None:
         raise ValueError("the bend left nothing of a piece")
-    return bent.crop(box), (box[0] + left, box[1], box[2] + left, box[3]), rel, time
+    return bent.crop(box), (box[0] + left, box[1], box[2] + left, box[3])
 
 
 def straighten_pieces(
@@ -1467,7 +1520,8 @@ def straighten_pieces(
     included) and ``bend`` one downward shift for each of its columns. Each piece is
     bent as :func:`bend_piece` says and filed under its ``label``, its record naming
     the file and instant it was bent from, so a collage of one video's frames still
-    reads back to the video. Laid at their boxes in the same order, the pictures
+    reads back to the video. A stitched piece keeps only what the collage shows of
+    it (:class:`_Seams`), so laid at their boxes in the same order, the pictures
     compose the collage as bending it whole would have, seams included.
 
     Returns each piece as filed, in order, with its ``box`` on that canvas. All or
@@ -1477,9 +1531,13 @@ def straighten_pieces(
     if len(bend) != width or not all(math.isfinite(s) for s in bend):
         raise ValueError("a bend needs one shift for every column")
     filed: list[dict[str, Any]] = []
+    meet = _Seams(nodes, width, height)
     try:
-        for node in nodes:
-            picture, box, rel, time = bend_piece(case, node, width, height, bend)
+        for index, node in enumerate(nodes):
+            piece, at, rel, time = _warp_piece(case, node, width, height)
+            if piece is None:
+                raise ValueError("a piece lies off the canvas it is bent on")
+            picture, box = bend_piece(meet.cut(index, piece, at), at, height, bend)
             label = node.get("label")
             source = _derivation(
                 "", None, op="collage", sources=[rel], times=[time], perspective=True, straightened=True
