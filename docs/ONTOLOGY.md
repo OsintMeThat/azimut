@@ -1076,9 +1076,10 @@ that deletes it withdraws it. Its POV is read off **this** proof's own footage �
 second proof's clip recorded at the same place answers for that proof and not this
 one.
 
-`proof_place_auto` (Settings → General → Proofs, on by default) decides whether
-the save files them or the composer asks first. Both write the same thing, and the
-question is plural when the list is.
+The save files them without a question: the place is how the footage behind the
+proof stands on the map. Such a place is not listed or drawn where a collected file
+stands on it, since the file's mark already draws the point
+(`satellite.behind_its_file`).
 
 **Only the conclusion is looked up at save.** Geography is a paced Nominatim call
 (`engine/geo._pace`, 1.1 s apart under one lock), so resolving three points would

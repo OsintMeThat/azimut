@@ -805,10 +805,8 @@ def test_a_refused_import_writes_nothing(client):
     assert import_engine.staged_path(case, token, "panel") is not None
 
 
-def test_the_place_is_filed_even_when_the_composer_would_have_asked(client):
-    """`proof_place_auto` off makes the composer ask before pinning a point. The
-    import already asked — the preview said "place: new" — so it files."""
-    client.put("/api/settings", json={"proof_place_auto": False})
+def test_the_import_files_its_place(client):
+    """The preview said "place: new", and the commit files it, as every proof save does."""
     case_id = make_case(client)
     token = start(client, case_id)
     attach(client, case_id, token, "panel", picture(), "panel.png")

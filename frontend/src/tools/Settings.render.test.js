@@ -59,7 +59,6 @@ function settingsBlob() {
     post_target: 'x',
     post_template: '',
     update_check_on_start: true,
-    proof_place_auto: true,
   };
 }
 

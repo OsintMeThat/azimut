@@ -139,7 +139,6 @@ export const PAGES = {
       { anchor: 'settings.home-view', title: 'Satellite home view', text: 'Where Satellite opens when the case gives it no place of its own.' },
       { anchor: 'settings.map-tabs', title: 'Map tabs', text: 'Satellite, Compare, Detect and Horizon look at the same place, or each at its own.' },
       { anchor: 'settings.quality-3d', title: '3D views', text: 'Full, Balanced or Light: how much the 3D globe and Horizon draw on this computer. Lighter for a slow one.' },
-      { anchor: 'settings.proofs', title: 'Proofs', text: 'Whether saving a proof files its point as a place without asking.' },
       { anchor: 'settings.reverse', title: 'Reverse search', text: 'Whether the extension hands the picture to the engine it opens.' },
     ],
     tips: [

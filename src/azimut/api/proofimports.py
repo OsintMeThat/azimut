@@ -339,12 +339,6 @@ def write_import(
         "id": (proof_entity or {}).get("id"),
     }
 
-    place = saved.get("place")
-    if isinstance(place, dict) and place.get("asking") and proof_entity is not None:
-        # `proof_place_auto` is off, so the composer's own save would have asked.
-        # The import already asked — that is what the preview was — so the answer
-        # is filed here rather than handed back as a second question.
-        proofs.file_proof_points(case, proof_entity)
     # Read off the edge rather than off the save's answer: the save reports
     # nothing when the point was already in the case, and "which place did this
     # land on" has to be answerable whether the import pinned it or reused it.

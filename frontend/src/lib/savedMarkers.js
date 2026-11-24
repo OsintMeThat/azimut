@@ -47,8 +47,9 @@ export function markLook(mark) {
     kind,
     glyph: media ? (items.every((row) => row.media_kind === 'video') ? 'video' : 'image') : (GLYPH[kind] ?? 'pin'),
     count: items.length,
-    // a proof stands on the point it argues, and appears as a dot on it
-    worked: items.some((row) => row.proofs > 0),
+    // a proof stands on the point it argues, and appears as a dot on it: on its place,
+    // or on the file it placed there, whose mark stands in for that place
+    worked: items.some((row) => row.proofs > 0 || row.linked_proofs?.length > 0),
     colour: kind === 'place' ? placeColour(place?.color) : null,
   };
 }

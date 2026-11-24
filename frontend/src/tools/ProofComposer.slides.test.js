@@ -150,7 +150,6 @@ describe('moving between slides', () => {
   it('names the slide a place question is about once the strip has moved on', () => {
     expect(source).toContain("const offersOver = $derived(offersOf && offersOf.name !== savedName ? `${offersOf.title}: ` : '');");
     expect(bodyOfFn('performSave')).toContain('offersOf = { name: result.name, title: result.title };');
-    expect(source).toContain("title={`${offersOver}${placeOffer.points.length === 1 ? 'Save this point as a place?' : 'Save these points as places?'}`}");
     expect(source).toContain("title={`${offersOver}${orphanOffer.length === 1 ? 'Delete the old place?' : 'Delete the old places?'}`}");
   });
 });

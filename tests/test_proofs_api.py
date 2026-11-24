@@ -531,10 +531,7 @@ def test_saving_a_proof_files_the_point_it_carries(client):
     assert (places[0]["attrs"]["lat"], places[0]["attrs"]["lon"]) == (50.4501, 30.5234)
     # the analyst's own answer, so there is nothing left to review
     assert places[0]["provenance"]["status"] == "confirmed"
-    assert saved["place"] == {
-        "filed": [{"id": places[0]["id"], "label": places[0]["label"]}],
-        "asking": [],
-    }
+    assert saved["place"] == {"filed": [{"id": places[0]["id"], "label": places[0]["label"]}]}
 
     # and the proof says it shows that place
     edges = _depicts(cid)
@@ -579,34 +576,19 @@ def test_resaving_a_proof_stays_silent(client):
     assert len(_places(cid)) == 1
 
 
-def test_the_composer_is_asked_when_the_setting_is_off(client):
-    client.put("/api/settings/prefs", json={"proof_place_auto": False})
+def test_an_old_setting_to_ask_first_is_read_no_more(client):
+    """The place is how the footage behind a proof stands on the map, so it is filed
+    without a question. A settings file from before still holding the old switch off
+    changes nothing, and the route that answered the question is gone."""
+    from azimut import config
+
+    config.save_settings({**config.load_settings(), "proof_place_auto": False})
     cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
     saved = _save(client, cid, "Roof match", _with_coords("50.4501, 30.5234"))
 
-    assert saved["place"] == {
-        "filed": [],
-        "asking": [{"lat": 50.4501, "lon": 30.5234, "label": "", "pov": False}],
-    }
-    assert _places(cid) == []  # nothing is written until the analyst says yes
-
-    filed = client.post(f"/api/cases/{cid}/proofs/Roof match/place").json()
-    assert len(filed) == 1
+    assert saved["place"] == {"filed": [{"id": _places(cid)[0]["id"], "label": _places(cid)[0]["label"]}]}
     assert _depicts(cid)[0]["from"] == graph_read.entity(cid, spec=layout.proof_spec_rel("Roof match"))["id"]
-
-
-def test_answering_twice_files_one_place(client):
-    """Two tabs answering the same question must not pin the point twice."""
-    client.put("/api/settings/prefs", json={"proof_place_auto": False})
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    _save(client, cid, "Roof match", _with_coords("50.4501, 30.5234"))
-
-    first = client.post(f"/api/cases/{cid}/proofs/Roof match/place").json()
-    second = client.post(f"/api/cases/{cid}/proofs/Roof match/place").json()
-    # the second answer finds the point standing and joins it: nothing new to file
-    assert first[0]["id"] == _places(cid)[0]["id"]
-    assert second == []
-    assert len(_places(cid)) == 1
+    assert client.post(f"/api/cases/{cid}/proofs/Roof match/place").status_code in (404, 405)
 
 
 def test_the_material_the_proof_composes_states_the_same_point(client, sat_tiles):
@@ -755,21 +737,16 @@ def test_pov_reaches_a_recording_the_other_verb_refuses(client):
     assert [lk["from"] for lk in _located_at(cid)] == [audio["id"]]
 
 
-def test_the_answer_to_the_question_reads_pov_off_the_saved_proof(client):
-    client.put("/api/settings/prefs", json={"proof_place_auto": False})
+def test_pov_is_read_off_the_saved_proof(client):
     cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
     case = Case.open(cid)
     video = case.add_entity(
         "media", "clip.mp4", {"path": "media/clip.mp4", "kind": "video"}, by="user"
     )
-    saved = _save(client, cid, "From the roof", _with_coords(
+    _save(client, cid, "From the roof", _with_coords(
         "50.4501, 30.5234", None, "media/clip.mp4", pov=True
     ))
-    # so the question can say what the point will mean
-    assert saved["place"]["asking"][0]["pov"] is True
-
-    client.post(f"/api/cases/{cid}/proofs/From the roof/place")
-    # POV is a property of the point, not of the answer: the request carries nothing
+    # POV is a property of the point: the footage says it was recorded there
     assert [lk["from"] for lk in _located_at(cid)] == [video["id"]]
 
 
@@ -1128,23 +1105,15 @@ def test_a_spec_cannot_file_a_hundred_places_on_one_save(client):
     assert len(_places(cid)) == MAX_PROOF_POINTS
 
 
-def test_the_composer_is_asked_about_every_point_it_cannot_file(client):
-    client.put("/api/settings/prefs", json={"proof_place_auto": False})
+def test_every_point_a_proof_states_is_filed_under_its_label(client):
     cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
     saved = _save(client, cid, "Harbour strike", _points(
         ("64.1466, -21.9426", "impact 1", False),
         ("64.1502, -21.9350", "caméra", True),
     ))
 
-    assert saved["place"]["asking"] == [
-        {"lat": 64.1466, "lon": -21.9426, "label": "impact 1", "pov": False},
-        {"lat": 64.1502, "lon": -21.9350, "label": "caméra", "pov": True},
-    ]
-    assert _places(cid) == []
-
-    filed = client.post(f"/api/cases/{cid}/proofs/Harbour strike/place").json()
-    assert sorted(one["label"] for one in filed) == ["caméra", "impact 1"]
-    # the yes reads the spec, so POV lands on the line that carries it
+    assert sorted(one["label"] for one in saved["place"]["filed"]) == ["caméra", "impact 1"]
+    assert len(_places(cid)) == 2
     assert [lk["to"] for lk in _located_at(cid)] == []  # no material to place
 
 
@@ -1345,22 +1314,6 @@ def test_an_unchecked_point_is_not_filed(client):
 
     assert [p["attrs"]["lat"] for p in _places(cid)] == [64.1466]
     assert [one["label"] for one in saved["place"]["filed"]] == ["hangar"]
-    # never asked about either: the composer just offered to check it
-    assert saved["place"]["asking"] == []
-
-
-def test_an_unchecked_point_is_not_asked_about_when_filing_asks(client):
-    client.put("/api/settings/prefs", json={"proof_place_auto": False})
-    cid = client.post("/api/cases", json={"name": "Proofs"}).json()["id"]
-    spec = _points(("64.1466, -21.9426", "", False))
-    spec["points"][0]["proposed"] = True
-    saved = _save(client, cid, "Airbase", spec)
-
-    assert saved.get("place") is None
-    # and the yes to an earlier question files nothing unchecked either
-    name = saved["name"]
-    assert client.post(f"/api/cases/{cid}/proofs/{name}/place").json() == []
-    assert _places(cid) == []
 
 
 def test_the_panels_unchecked_answer_is_not_filed(client, sat_tiles):

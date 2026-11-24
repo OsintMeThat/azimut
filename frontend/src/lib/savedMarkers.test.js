@@ -159,6 +159,13 @@ describe('how a mark is drawn', () => {
     expect(markLook(mark([video, photo])).glyph).toBe('image');
   });
 
+  it('marks a file a proof placed, whose mark stands in for the proof\'s place', () => {
+    const video = { id: 'v', kind: 'media', media_kind: 'video', lat: 1, lon: 2 };
+    expect(markLook(mark([{ ...video, linked_proofs: [{ id: 'p1', name: 'Roofline' }] }])).worked).toBe(true);
+    expect(markLook(mark([{ ...video, linked_proofs: [] }])).worked).toBe(false);
+    expect(markLook(mark([video])).worked).toBe(false);
+  });
+
   it('draws a stack of imagery as a capture, and marks a point a proof stands on', () => {
     const look = markLook(mark([at('c', 1, 2), at('d', 1, 2, { kind: 'comparison', proofs: 1 })]));
     expect(look).toMatchObject({ kind: 'capture', glyph: 'satellite', worked: true });
