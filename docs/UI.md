@@ -2116,10 +2116,12 @@ frames** files every frame not in the case yet the same way.
 
 **A collage is a document.** New starts an empty canvas, filed once the first piece
 lands; the name in the header renames it and refuses a name another collage holds.
-Pieces come from **Frames**, the works of any file with the files last worked on
-first, or **Images**, any case image with the last added first. Each file shows its own
-thumbnail, one unfolds at a time, a search box beside the tabs narrows either list, and
-the list scrolls on its own so the controls below it stay in reach. A piece is a recipe
+Pieces come from **Videos**, any case video, which a press plays in the rail under the
+canvas, or **Images**, any case image, laid in one press, the last added first in both.
+Each file shows its own thumbnail and the pieces it has on the collage, a search box
+beside the tabs narrows either list, and the list scrolls on its own so the controls below
+it stay in reach. A piece is laid beside the last one, in a row at its height, and starts
+a row below once the canvas runs out. A piece is a recipe
 frozen when it is placed, so editing the frame later does not change the collage. A
 piece still rendering holds its place with a spinner. A renamed file is followed; a
 piece whose file was deleted keeps its place as a hatched gap, and the export waits
@@ -2144,8 +2146,27 @@ last folder, its arrow unfolds the name, folder and note, and the export size is
 under it. **Add pieces** takes the room left and scrolls on its own; the
 piece in hand sits at the foot (Scale, Rotate, Crop, Unwarp, Front, Back, Remove, or the
 block selected) and keeps its place and height whatever is selected. An empty collage
-says *Add frames from a video, or pictures* on its canvas, with Frames and Images opening
-those lists, or Cut frames in Inspect while no frame is cut.
+says *Add frames from a video, or pictures* on its canvas, with Videos, in a case that
+holds one, and Images opening those lists.
+
+**The video plays in a rail, so a collage needs no trip to Inspect.** It is Inspect's player
+and bar, under the canvas, or beside it for a clip filmed upright, and it opens on the
+video the pieces were last cut from, or on the video of a piece taken in hand. Its edge
+drags it larger or smaller, the size kept in this browser, and its title folds it away.
+**Add frame**, or C, lays the frame on screen as Inspect shows the clip, its turn and
+light included; a frame Inspect cut there comes with its own crop and light, and a frame
+already on the collage is taken in hand instead of laid twice. Each piece of the clip is a
+dot on the bar, ringed while it is in hand: a dot reached paused, by a press or a step,
+takes its piece in hand, and a piece taken in hand on the canvas brings the clip to its
+frame. Frames cut in Inspect and not on the collage are marked on the bar. While the
+hand is in the rail it answers the player's keys, Space, the arrows, J and L, and +/-,
+so the canvas's arrows are left alone. **Panorama** takes the A–B loop as the stretch of
+a pan, and a press on a scene's band sets the loop to that scene: the server picks the
+frames, the clip's order is kept, the frames go on in a row, and the collage is stitched
+in the projection picked last, Cylindrical when that was Planar. The message says how many
+pieces moved and, in a panorama projection, about how wide an angle they cover; its Undo,
+like one Ctrl+Z, takes the frames back with their stitch. A stretch the camera barely
+turns in says so and lays nothing.
 
 **The canvas answers the hand.** The mouse wheel zooms toward the pointer a notch at a
 time; on a touchpad two fingers pan and a pinch zooms; a drag on the background pans. The
