@@ -108,13 +108,14 @@
   /**
    * Collage's Panorama stitches its frames as the button would, in the projection picked
    * last unless that is Planar, which a pan breaks, so then Cylindrical. `note` rides on
-   * the message after what the stitch says. Answers how many pieces moved, or null.
+   * the message after what the stitch says, and `undoAll` is its Undo, which takes the
+   * frames back with their stitch. Answers how many pieces moved, or null.
    */
-  export function stitchPan(note = null) {
-    return runStitch(mode === 'planar' ? 'cylindrical' : mode, note);
+  export function stitchPan(note = null, undoAll = null) {
+    return runStitch(mode === 'planar' ? 'cylindrical' : mode, note, undoAll);
   }
 
-  async function runStitch(asked, note = null) {
+  async function runStitch(asked, note = null, undoAll = null) {
     if (few || stitching) return null;
     stitching = true;
     if (cut) cut.editing = false;
@@ -162,7 +163,7 @@
       selectedIds = left.map((piece) => piece.id);
       fit?.();
       // The undo rides on the message, and stays in the arrow's menu after it goes.
-      const undo = { label: 'Undo', onClick: undoStitch };
+      const undo = { label: 'Undo', onClick: undoAll ?? undoStitch };
       const words = stitchedWords(res.nodes.length, left.map((piece) => piece.why), asked, res.span_deg ?? null);
       toast(note ? `${words}. ${note.replace(/\.$/, '')}` : words, left.length ? 'warn' : 'ok', null, undo);
       return res.nodes.length;

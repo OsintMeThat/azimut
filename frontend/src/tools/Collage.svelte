@@ -167,9 +167,9 @@
   function storedRail() {
     try {
       const kept = JSON.parse(localStorage.getItem(RAIL_KEY) ?? 'null');
-      return { bottom: Number(kept?.bottom) || 260, left: Number(kept?.left) || 300 };
+      return { bottom: Number(kept?.bottom) || 260, left: Number(kept?.left) || 240 };
     } catch {
-      return { bottom: 260, left: 300 };
+      return { bottom: 260, left: 240 };
     }
   }
   const railSizes = $state(storedRail());
@@ -760,7 +760,8 @@
       const note = [res.note, missed ? `${missed} frame${missed === 1 ? '' : 's'} could not be read` : '']
         .filter(Boolean)
         .join('. ');
-      await toolbar?.stitchPan(note || null);
+      // the message's Undo takes the frames back with their stitch, as Ctrl+Z does
+      await toolbar?.stitchPan(note || null, undo);
     } catch (e) {
       if (run === docRun) toast(e.message, 'danger');
     } finally {

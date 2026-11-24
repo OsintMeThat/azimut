@@ -15,8 +15,9 @@ const strip = {
   name: 'Strip', title: 'Strip',
   spec: { width: 1200, height: 400, transparent: true, nodes: [panel('nd_1', 40), panel('nd_2', 600)] },
 };
-const manyWorks = Array.from({ length: 40 }, (_, i) => ({
-  name: `clip-${i}`, title: `clip_${String(i).padStart(2, '0')}_8f3a.mp4`, source: `media/clip-${i}.mp4`, frames: 3, kind: 'video',
+const PANEL_ITEM = { path: PANEL_PATH, filename: 'panel.svg', kind: 'image', source: { type: 'upload' }, thumbnail: null };
+const manyVideos = Array.from({ length: 40 }, (_, i) => ({
+  path: `media/clip-${i}.mp4`, filename: `clip_${String(i).padStart(2, '0')}_8f3a.mp4`, kind: 'video', source: { type: 'upload' }, thumbnail: null,
 }));
 
 /** Where the surface sits and how close it is looked at, off its transform. */
@@ -25,9 +26,9 @@ const surface = (page) => page.locator('.surface').evaluate((el) => {
   return { x: m.e, y: m.f, scale: m.a };
 });
 
-async function openStrip(page, { works = manyWorks } = {}) {
+async function openStrip(page, { videos = manyVideos } = {}) {
   const fixture = await installAppFixture(page, {
-    inspectWorks: works,
+    media: [PANEL_ITEM, ...videos],
     collages: [{ name: 'Strip', title: 'Strip', pieces: 2, updated_at: '2026-09-20T10:00:00Z', outline: null }],
   });
   const writes = [];
@@ -222,7 +223,7 @@ test('stitches from its press, and takes the stitch back from its message', asyn
 });
 
 test('opens an empty collage on its ways in', async ({ page }) => {
-  await installAppFixture(page, { inspectWorks: manyWorks.slice(0, 2) });
+  await installAppFixture(page, { media: [PANEL_ITEM, ...manyVideos.slice(0, 2)] });
   await page.route(`**/api/cases/${CASE_ID}/collages`, (route) => (route.request().method() === 'GET' ? route.fulfill({ json: [] }) : route.fallback()));
   await page.goto('/#collage');
   await page.getByRole('button', { name: 'New collage' }).click();
@@ -231,8 +232,8 @@ test('opens an empty collage on its ways in', async ({ page }) => {
   await expect(card).toContainText('Add frames from a video, or pictures');
   await card.getByRole('button', { name: 'Images' }).click();
   await expect(page.locator('.picker [role="tab"].on')).toHaveText('Images');
-  await card.getByRole('button', { name: 'Frames' }).click();
-  await expect(page.locator('.picker [role="tab"].on')).toHaveText('Frames');
+  await card.getByRole('button', { name: 'Videos' }).click();
+  await expect(page.locator('.picker [role="tab"].on')).toHaveText('Videos');
   await expect(page.getByRole('button', { name: /^Auto-stitch/ })).toBeDisabled();
 });
 
@@ -490,4 +491,96 @@ test('changes the moment its collage was marked over, the video playing it besid
   await expect.poll(() => written).toEqual({ video: VIDEO, start: 0.4, end: 1 });
   await expect(editor).toHaveCount(0);
   await expect(page.getByText('Scene now 0:00–0:01')).toBeVisible();
+});
+
+/** A collage whose rail plays the steps clip, with the server's answers stood in for. */
+async function railCase(page, { width = 32, height = 32 } = {}) {
+  const VIDEO = 'media/steps.webm';
+  const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360"><rect width="640" height="360" fill="#38bdf8"/></svg>';
+  await installAppFixture(page, {
+    media: [PANEL_ITEM, { path: VIDEO, filename: 'steps.webm', kind: 'video', title: 'Steps', source: { type: 'upload' }, thumbnail: null }],
+  });
+  const asked = { panorama: null, stitch: null };
+  await page.route(`**/api/cases/${CASE_ID}/collages`, (route) => {
+    const method = route.request().method();
+    if (method === 'GET') return route.fulfill({ json: [] });
+    if (method !== 'POST') return route.fallback();
+    const body = route.request().postDataJSON();
+    return route.fulfill({ json: { name: body.name ?? body.title, title: body.title } });
+  });
+  await page.route(`**/api/cases/${CASE_ID}/collages/*/thumb`, (route) => route.fulfill({ json: {} }));
+  await page.route(`**/api/cases/${CASE_ID}/inspect/render-preview`, (route) => {
+    const body = route.request().postDataJSON();
+    const named = body.snap ? { 'X-Frame-Time': String(Math.floor(body.time * STEPS_FPS + 1e-6) / STEPS_FPS) } : {};
+    return route.fulfill({ contentType: 'image/svg+xml', body: SVG, headers: named });
+  });
+  await page.route(`**/api/cases/${CASE_ID}/inspect/probe?*`, (route) => route.fulfill({ json: { kind: 'video', duration: STEPS_DURATION, fps: STEPS_FPS, width, height } }));
+  await page.route(`**/files/${CASE_ID}/${VIDEO}`, (route) => serveRange(route, STEPS_WEBM, 'video/webm'));
+  await page.route(`**/api/cases/${CASE_ID}/inspect/work?*`, (route) => route.fulfill({ json: { work: null } }));
+  await page.route(`**/api/cases/${CASE_ID}/scenes?*`, (route) => route.fulfill({ json: { video: VIDEO, scenes: [], taken: [], collages: [], geolocating: null } }));
+  await page.route(`**/api/cases/${CASE_ID}/inspect/panorama-frames`, (route) => {
+    asked.panorama = route.request().postDataJSON();
+    return route.fulfill({ json: { times: [0.2, 0.52, 0.84], note: null } });
+  });
+  await page.route(`**/api/cases/${CASE_ID}/inspect/auto-stitch`, (route) => {
+    asked.stitch = route.request().postDataJSON();
+    const nodes = asked.stitch.nodes.map((_n, index) => ({ index, quad: [[40 + index * 300, 40], [520 + index * 300, 40], [520 + index * 300, 310], [40 + index * 300, 310]], op: null }));
+    return route.fulfill({ json: { nodes, dropped: [], canvas: { width: 1400, height: 400 }, span_deg: 96 } });
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.goto('/#collage');
+  await page.getByRole('button', { name: 'New collage' }).click();
+  await page.locator('.picker .group-head', { hasText: 'Steps' }).click();
+  const rail = page.getByTestId('collage-rail');
+  await expect(rail.locator('video')).toHaveAttribute('src', /steps\.webm$/);
+  return { rail, asked };
+}
+
+test('plays a video under the canvas, lays its frame, and stitches a panorama of A to B in one undo', async ({ page }) => {
+  const { rail, asked } = await railCase(page);
+  // under the canvas, its acts in view on a laptop
+  const [viewer, box] = [await page.locator('.viewer').boundingBox(), await rail.boundingBox()];
+  expect(box.y).toBeGreaterThanOrEqual(viewer.y + viewer.height - 1);
+  for (const name of ['Add frame', 'Panorama']) await expect(rail.getByRole('button', { name })).toBeInViewport();
+
+  await rail.getByRole('button', { name: 'Forward one frame' }).click();
+  await rail.getByRole('button', { name: 'Add frame' }).click();
+  await expect(page.locator('img.node')).toHaveCount(1);
+  await expect(rail.locator('.frame')).toHaveCount(1);
+  await rail.getByRole('button', { name: 'Add frame' }).click();
+  await expect(page.getByText('This frame is already on the collage')).toBeVisible();
+  await expect(page.locator('img.node')).toHaveCount(1);
+  await page.locator('.tool-header button[title^="Undo"]').click();
+  await expect(page.locator('img.node')).toHaveCount(0);
+
+  await expect(rail.getByRole('button', { name: 'Panorama' })).toBeDisabled();
+  await rail.getByRole('button', { name: 'A', exact: true }).click();
+  for (let i = 0; i < 20; i += 1) await rail.getByRole('button', { name: 'Forward one frame' }).click();
+  await rail.getByRole('button', { name: 'B', exact: true }).click();
+  await rail.getByRole('button', { name: 'Panorama' }).click();
+  await expect(page.getByText('Stitched 3 pieces, about 96° across')).toBeVisible();
+  // A where the clip stood, B twenty frames on
+  expect(asked.panorama.path).toBe('media/steps.webm');
+  expect(asked.panorama.end - asked.panorama.start).toBeGreaterThan(0.7);
+  expect(asked.stitch.mode).toBe('cylindrical');
+  expect(asked.stitch.nodes.map((n) => n.time)).toEqual([0.2, 0.52, 0.84]);
+  await expect(page.locator('img.node')).toHaveCount(3);
+  await expect(rail.locator('.frame')).toHaveCount(3);
+  if (process.env.COLLAGE_SHOT) await page.screenshot({ path: process.env.COLLAGE_SHOT.replace('.png', '-rail.png') });
+
+  // the message's Undo takes the frames back with their stitch
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(page.locator('img.node')).toHaveCount(0);
+});
+
+test('stands the rail beside the canvas for a clip filmed upright, and folds it under', async ({ page }) => {
+  const { rail } = await railCase(page, { width: 32, height: 64 });
+  await expect(page.locator('.workspace')).toHaveClass(/upright/);
+  const [viewer, box] = [await page.locator('.viewer').boundingBox(), await rail.boundingBox()];
+  expect(box.x + box.width).toBeLessThanOrEqual(viewer.x + 1);
+  if (process.env.COLLAGE_SHOT) await page.screenshot({ path: process.env.COLLAGE_SHOT.replace('.png', '-rail-upright.png') });
+
+  await rail.getByRole('button', { name: 'Fold the video' }).click();
+  await expect(rail.locator('video')).toHaveCount(0);
+  await expect(page.locator('.workspace')).not.toHaveClass(/upright/);
 });
