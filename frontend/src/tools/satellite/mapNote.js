@@ -74,27 +74,31 @@ const ASSUMES = {
 
 /**
  * A measure as the note writes it: the lines its Copy gives, then what it
- * assumes, and for a shadow the day it was read for, each on its own line.
+ * assumes, each on its own line. A shadow read in Sun and moon is written the
+ * same way, its Copy already naming the day it was read for.
  */
-export function measureNoteText({ text = '', use = '', ground = false, shadowDate = '' } = {}) {
+export function measureNoteText({ text = '', use = '', ground = false } = {}) {
   const lines = String(text ?? '').split('\n').map((line) => line.trim()).filter(Boolean);
   if (!lines.length) return '';
-  if (use === 'shadow' && shadowDate) lines.push(`Sun read for ${shadowDate}.`);
   const assumes = ASSUMES[use] ?? (ground ? ASSUMES.ground : '');
   if (assumes) lines.push(assumes);
   return lines.map((line) => `- ${line}`).join('\n');
 }
 
-/** The measure in hand offered to a pinned note. `measure()` answers what `measureNoteText` reads, or null. */
-export function measureOffer({ measure }) {
+/**
+ * The measure in hand offered to a pinned note. `measure()` answers what
+ * `measureNoteText` reads, or null. An alignment and a shadow are offered the
+ * same way, under their own name.
+ */
+export function measureOffer({ measure, id = 'measure', label = 'This measure', icon = 'ruler', missing = 'Draw a measure first' }) {
   return {
-    id: 'measure',
-    label: 'This measure',
+    id,
+    label,
     hint: 'What it reads, with its points and what it assumes',
-    icon: 'ruler',
+    icon,
     put: async () => {
       const text = measureNoteText(measure() ?? {});
-      if (!text) throw new Error('Draw a measure first');
+      if (!text) throw new Error(missing);
       return { text };
     },
   };

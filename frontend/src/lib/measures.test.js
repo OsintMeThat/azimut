@@ -24,7 +24,6 @@ import {
   pathOf,
   REACH,
   runsOn,
-  shadowSentence,
   sightRuns,
   summary,
   useShapes,
@@ -119,8 +118,8 @@ describe('what a line of two points is used as', () => {
     expect(coneWidth(line([A, B], { aperture: 90 }))).toBeCloseTo(2 * length, 0);
   });
 
-  it('draws nothing more for a plain line, a shadow or a viewshed', () => {
-    for (const use of [null, 'shadow', 'viewshed']) expect(useShapes(line([A, B], { use }))).toEqual([]);
+  it('draws nothing more for a plain line or a viewshed', () => {
+    for (const use of [null, 'viewshed']) expect(useShapes(line([A, B], { use }))).toEqual([]);
   });
 
   it('runs an alignment on past both ends, the reach out from each', () => {
@@ -389,33 +388,6 @@ describe('the measure as text', () => {
     const loose = summary(line([A, B], { use: 'align', tolerance: 5 }), 'metric', { coords });
     expect(loose).toContain('Alignment run on 20.0 km past both ends, within ±5°');
     expect(loose).toMatch(/At ±5° it rules nothing out past 8\.\d\d km/);
-  });
-});
-
-describe('a shadow read', () => {
-  const moment = (local, height, azimuth = 213, altitude = 41.2) => ({
-    local,
-    abbreviation: 'CEST',
-    height_m: height,
-    sun_azimuth: azimuth,
-    sun_altitude: altitude,
-  });
-
-  it('gives the height first, then the sun and the hour it says', () => {
-    const text = shadowSentence({ date: '2024-06-21', moments: [moment('2024-06-21T14:12:05+02:00', 23.4)] }, 'metric');
-    expect(text).toBe('About 23 m tall (sun at 213°, 41.2° up at 14:12 CEST)');
-  });
-
-  it('gives both hours when the sun crossed that bearing twice', () => {
-    const text = shadowSentence(
-      { date: '2024-06-21', moments: [moment('2024-06-21T11:02:00+03:00', 4), moment('2024-06-21T12:40:00+03:00', 6)] },
-      'metric'
-    );
-    expect(text).toContain(', or 6 m at 12:40');
-  });
-
-  it('says so when no hour of the day casts it', () => {
-    expect(shadowSentence({ date: '2024-06-21', moments: [] }, 'metric')).toBe('No hour of 2024-06-21 casts this shadow');
   });
 });
 

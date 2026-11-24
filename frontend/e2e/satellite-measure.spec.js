@@ -2,11 +2,13 @@ import { test, expect } from '@playwright/test';
 import { awaitMapReady, CASE_ID, installAppFixture, mapPicture, repainted } from './app.fixture.js';
 
 /**
- * The Measure tool on the flat map, driven in a real browser.
+ * The Measure tool, and Align in its own seat, on the flat map, driven in a
+ * real browser.
  *
- * What the terrain server and the sky answer is routed here, so each test asks
- * only what an analyst can see and what the backend was told. The same tool on
- * the globe is in satellite-3d.spec.js.
+ * What the terrain server answers is routed here, so each test asks only what
+ * an analyst can see and what the backend was told. The same tool on the globe
+ * is in satellite-3d.spec.js, and a shadow read in Sun and moon in
+ * satellite-overlays.spec.js.
  */
 
 const PROFILE = {
@@ -23,10 +25,10 @@ const PROFILE = {
   },
 };
 
-/** The map, the Measure tool open, and the servers it asks answered. */
-async function openTool(page, options = {}) {
+/** The map, a seat open (Measure unless told), and the servers it asks answered. */
+async function openTool(page, options = {}, seat = 'Measure') {
   const fixture = await installAppFixture(page, options);
-  const asked = { profile: [], viewshed: [], shadow: [], shapes: [] };
+  const asked = { profile: [], viewshed: [], shapes: [] };
   await page.route('**/api/terrain/profile', async (route) => {
     asked.profile.push(route.request().postDataJSON());
     await route.fulfill({ json: PROFILE });
@@ -36,15 +38,6 @@ async function openTool(page, options = {}) {
     asked.viewshed.push(body);
     await route.fulfill({
       json: { lat: body.lat, lon: body.lon, radius_m: body.radius_m, step_deg: 90, runs: [[0, 400], [0, 200], [], [0, 300]], share: 0.27 },
-    });
-  });
-  await page.route('**/api/geo/shadow?**', async (route) => {
-    asked.shadow.push(Object.fromEntries(new URL(route.request().url()).searchParams));
-    await route.fulfill({
-      json: {
-        date: '2024-06-21', zone: 'Europe/Zurich', sun_azimuth: 270,
-        moments: [{ local: '2024-06-21T17:40:00+02:00', utc: '2024-06-21T15:40:00Z', abbreviation: 'CEST', sun_azimuth: 270, sun_altitude: 30, height_m: 23.4 }],
-      },
     });
   });
   await page.route(`**/api/cases/${CASE_ID}/layer-targets`, (route) =>
@@ -58,7 +51,7 @@ async function openTool(page, options = {}) {
   });
   await page.goto('/#satellite?ll=46.6,7.9&z=15&p=esri-world-imagery');
   await awaitMapReady(page);
-  await page.getByRole('button', { name: 'Measure', exact: true }).click();
+  await page.getByRole('button', { name: seat, exact: true }).click();
   const box = await page.locator('.map').boundingBox();
   return { fixture, asked, box, at: (x, y) => [box.x + x, box.y + y] };
 }
@@ -145,13 +138,14 @@ test('two lines crossing are marked where they meet', async ({ page }) => {
   await expect(page.locator('.measure-crossing')).toHaveAttribute('title', /The lines cross at .*Click to copy/);
 });
 
-test('two things lined up run on as an alignment, the next lines follow, and three meet', async ({ page }) => {
-  const { at } = await openTool(page);
+test('Align has its own seat: two clicks an alignment, the next ones follow, and three meet', async ({ page }) => {
+  const { at } = await openTool(page, {}, 'Align');
+  await expect(page.locator('.measure-panel .title')).toHaveText('Align');
+  await expect(page.locator('.measure-panel')).toContainText('Click two things lined up in the picture.');
   await page.mouse.click(...at(500, 300));
-  await page.mouse.dblclick(...at(600, 300));
-  await page.getByRole('button', { name: 'Align', exact: true }).click();
+  await page.mouse.click(...at(600, 300));
   await expect(reading(page)).toHaveText('Alignment · 090°');
-  await expect(page.locator('.measure-panel .aligning')).toContainText('Click two things lined up in the picture');
+  await expect(page.locator('.measure-panel .tiles')).toHaveCount(0);
   await expect(page.getByLabel('How far the line runs on')).toHaveValue('20');
   // a tolerance lays a band either side, and the next lines take it
   await page.getByLabel('Tolerance in degrees').fill('2');
@@ -173,14 +167,19 @@ test('two things lined up run on as an alignment, the next lines follow, and thr
   await expect(page.locator('.measure-panel .detail')).toContainText(/3 alignments meet within \d+ m/);
   await expect(page.getByTitle('Copy where they meet')).toContainText(/\d+\.\d+/);
 
-  // Escape lets go of the line, then of the alignments, then puts the tool away
+  // Escape lets go of the line, then puts the seat away
   await page.keyboard.press('Escape');
-  await expect(page.locator('.measure-panel .aligning')).toBeVisible();
+  await expect(page.locator('.measure-panel .detail')).toHaveCount(0);
   await page.keyboard.press('Escape');
-  await expect(page.locator('.measure-panel .aligning')).toHaveCount(0);
+  await expect(page.locator('.measure-panel')).toHaveCount(0);
+  await expect(page.locator('.measure-crossing:visible')).toHaveCount(0);
+
+  // Measure keeps its own lines: none of the alignments are there
+  await page.getByRole('button', { name: 'Measure', exact: true }).click();
+  await expect(page.locator('.measure-panel')).toContainText('Click on the map to start a measure.');
+  await expect(page.getByRole('button', { name: 'Align', exact: true })).toHaveCount(1);
   await page.mouse.click(...at(420, 120));
   await page.mouse.click(...at(520, 120));
-  await expect(page.locator('.measure-panel .list li')).toHaveCount(4);
   await expect(page.locator('.measure-panel')).toContainText('Double-click or Enter to finish');
 });
 
@@ -263,21 +262,6 @@ test('a line used as a viewshed reads the ground in sight from A', async ({ page
   expect(asked.viewshed[0]).toMatchObject({ eye_height: 1.7, target_height: 0 });
   await expect(words(page, 'use')).toHaveText('27% in sight');
   expect(repainted(bare, await mapPicture(page))).toBe(true);
-});
-
-test('a shadow drawn on a dated day says how tall its caster is and the hour', async ({ page }) => {
-  const { at, asked } = await openTool(page);
-  await page.mouse.click(...at(760, 300));
-  await page.mouse.dblclick(...at(680, 300));
-  await page.getByRole('button', { name: 'Shadow' }).click();
-  // the picture's own day is the one read, else the one typed
-  const day = page.getByLabel('The day the picture was taken');
-  await day.fill('21/06/2024');
-  await day.press('Enter');
-  await expect(page.locator('.measure-panel .answer')).toHaveText('About 23 m tall (sun at 270°, 30.0° up at 17:40 CEST)');
-  expect(asked.shadow.at(-1)).toMatchObject({ date: '2024-06-21' });
-  expect(Number(asked.shadow.at(-1).bearing)).toBeGreaterThan(260);
-  await expect(words(page, 'use')).toHaveText('≈ 23 m tall');
 });
 
 test('a measure is kept in a layer, named by what it reads', async ({ page }) => {

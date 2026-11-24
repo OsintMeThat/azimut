@@ -49,11 +49,23 @@ export const MAP_MODES = [
     rail: false,
   },
   {
-    // Lines and areas, a line of two points used as rings, a cone, a shadow or
-    // a viewshed, and the ground under a line once the analyst asks for it.
+    // Lines and areas, a line of two points used as rings, a cone or a
+    // viewshed, and the ground under a line once the analyst asks for it.
     id: 'measure',
     label: 'Measure',
     icon: 'ruler',
+    group: 'work',
+    cursor: 'measuring',
+    panel: true,
+  },
+  {
+    // The line through two things lined up in a picture, run on: the camera
+    // stood on it, and a few of them meet near it. The Measure tool's own lines
+    // in a seat of their own, since finding a camera is not measuring.
+    id: 'align',
+    label: 'Align',
+    hint: 'Align things lined up in a picture',
+    icon: 'alignment',
     group: 'work',
     cursor: 'measuring',
     panel: true,

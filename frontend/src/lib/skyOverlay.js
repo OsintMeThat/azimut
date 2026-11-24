@@ -14,6 +14,7 @@
  * close to the centre.
  */
 
+import { formatBearing, formatHeight } from './measure.js';
 import { glyphRotation, litPath } from './moonphase.js';
 
 /**
@@ -133,4 +134,19 @@ export function bodySvg(kind, colour, illuminated, waxing, size = 20) {
 /** One body's reading, as the tooltip states it. */
 export function bodyReading(label, clock, azimuth, altitude) {
   return `${label} ${clock} · az ${Math.round(azimuth)}° · alt ${Math.round(altitude)}°`;
+}
+
+/** The wall clock of a moment the backend dated, `HH:MM` as the day's samples are. */
+export function clockOf(moment) {
+  return String(moment?.local ?? '').slice(11, 16);
+}
+
+/** A shadow's answer (`/api/geo/shadow`) as one sentence, or why it has none. */
+export function shadowSentence(shadow, units) {
+  const [first, second] = shadow.moments ?? [];
+  if (!first) return `No hour of ${shadow.date} casts this shadow`;
+  const height = `About ${formatHeight(first.height_m, units)} tall`;
+  const when = `sun at ${formatBearing(first.sun_azimuth)}, ${first.sun_altitude.toFixed(1)}° up at ${clockOf(first)} ${first.abbreviation}`;
+  const also = second ? `, or ${formatHeight(second.height_m, units)} at ${clockOf(second)}` : '';
+  return `${height} (${when}${also})`;
 }

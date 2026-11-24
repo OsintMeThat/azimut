@@ -3,11 +3,14 @@
  *
  * A measure is points clicked on the map, open (a line) or closed (an area).
  * A line of two points can also be *used as* something: a range ring round A,
- * a view cone from A toward B, an alignment run on past two things lined up in
- * a picture, a shadow from an object's foot at A to its tip at B, or the reach
- * of a viewshed from A. One gesture and then a choice,
- * rather than a tool per question: each of those is a distance and a bearing
- * from a point, and drawing one is the same two clicks whatever it is for.
+ * a view cone from A toward B, or the reach of a viewshed from A. One gesture
+ * and then a choice, rather than a tool per question: each of those is a
+ * distance and a bearing from a point, and drawing one is the same two clicks
+ * whatever it is for.
+ *
+ * An alignment is the same two clicks in a seat of its own (Align), run on past
+ * two things lined up in a picture; its geometry and where several meet are
+ * read here too, since it is drawn and kept as a measure is.
  *
  * Everything here is arithmetic over plain data (`{ points, closed, use,
  * rings, aperture, past, reach, tolerance }`), so the readings, the words on the map and the copied
@@ -35,8 +38,6 @@ import {
 export const USES = [
   { id: 'ring', label: 'Ring', title: 'Circles round A, as wide as the line' },
   { id: 'cone', label: 'Cone', title: 'What a camera at A facing B takes in' },
-  { id: 'align', label: 'Align', title: 'Two things lined up in a picture, the line run on: the camera stands on it' },
-  { id: 'shadow', label: 'Shadow', title: 'A shadow from a foot at A to its tip at B: how tall, and the hour' },
   { id: 'viewshed', label: 'Viewshed', title: 'The ground in sight from A, out as far as B' },
 ];
 
@@ -500,7 +501,7 @@ export function parseDistance(text, unit) {
  * with the ground and the answer of its use when they are known. `coords`
  * writes a point the way the analyst's coordinates read everywhere else.
  */
-export function summary(measure, units, { coords, ground = null, shadow = null, viewshed = null } = {}) {
+export function summary(measure, units, { coords, ground = null, viewshed = null } = {}) {
   const { points } = measure;
   const at = (point) => coords(point.lat, point.lon);
   const lines = [];
@@ -536,7 +537,6 @@ export function summary(measure, units, { coords, ground = null, shadow = null, 
     const opens = bands(measure).find((band) => band.opensAt != null)?.opensAt;
     if (opens != null) lines.push(`At ${formatTolerance(tolerance)} it rules nothing out past ${formatDistance(opens, units)}`);
   }
-  if (measure.use === 'shadow' && shadow) lines.push(shadowSentence(shadow, units));
   if (measure.use === 'viewshed' && viewshed) {
     lines.push(`Viewshed: ${Math.round(viewshed.share * 100)}% of the ground within ${formatDistance(viewshed.radius_m, units)} in sight`);
   }
@@ -554,15 +554,4 @@ function sightSentence(sight, units) {
   return sight.visible
     ? 'B is in sight from A'
     : `B is out of sight from A: ground in the way at ${formatDistance(sight.blocked_at_m, units)}`;
-}
-
-/** A shadow's answer (`/api/geo/shadow`) as one sentence, or why it has none. */
-export function shadowSentence(shadow, units) {
-  const [first, second] = shadow.moments ?? [];
-  if (!first) return `No hour of ${shadow.date} casts this shadow`;
-  const clock = (moment) => moment.local.slice(11, 16);
-  const height = `About ${formatHeight(first.height_m, units)} tall`;
-  const when = `sun at ${formatBearing(first.sun_azimuth)}, ${first.sun_altitude.toFixed(1)}° up at ${clock(first)} ${first.abbreviation}`;
-  const also = second ? `, or ${formatHeight(second.height_m, units)} at ${clock(second)}` : '';
-  return `${height} (${when}${also})`;
 }

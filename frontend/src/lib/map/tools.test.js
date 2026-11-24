@@ -49,8 +49,14 @@ describe('the rail', () => {
   it('cuts the entries into the sections it draws a line between', () => {
     const sections = railSections(railEntries());
     expect(sections.map((section) => section.group)).toEqual(['work', 'read']);
-    expect(sections[0].entries.map((entry) => entry.id)).toEqual(['measure', 'grid']);
+    expect(sections[0].entries.map((entry) => entry.id)).toEqual(['measure', 'align', 'grid']);
     expect(sections[1].entries.map((entry) => entry.id)).toEqual(['sky', 'reference']);
+  });
+
+  it('gives Align a seat of its own, which says what it is for', () => {
+    const align = railEntries().find((entry) => entry.id === 'align');
+    expect(align).toMatchObject({ kind: 'mode', icon: 'alignment', panel: true, hint: 'Align things lined up in a picture' });
+    expect(cursorOf('align')).toBe('measuring');
   });
 
   it('keeps the rail short enough to read', () => {
