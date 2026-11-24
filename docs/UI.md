@@ -2131,7 +2131,7 @@ it was cut at.
 **The Collage tool is laid out for a laptop.** A bar over the canvas holds what acts on
 the whole collage: **Auto-stitch**, whose arrow picks Planar, Cylindrical or Spherical
 (the last pick named on the button and kept in this browser), **Ignore areas**,
-**Straighten** with Draw the line, **Cut**, and **Fit**, which frames every piece, with the
+**Straighten** with Draw the line, **Cut** with **Trim edges**, and **Fit**, which frames every piece, with the
 zoom beside it. Narrower than its tools, beside the case sidebar on a laptop, the bar keeps
 one line: the secondary tools show their icon alone, named on hover. A collage opens framed
 on its pieces, as Fit frames them, and a framed view stays framed as the pane changes size.
@@ -2163,7 +2163,14 @@ hand is in the rail it answers the player's keys, Space, the arrows, J and L, an
 so the canvas's arrows are left alone. **Panorama** takes the A–B loop as the stretch of
 a pan, and a press on a scene's band sets the loop to that scene: the server picks the
 frames, the clip's order is kept, the frames go on in a row, and the collage is stitched
-in the projection picked last, Cylindrical when that was Planar. The message says how many
+in the projection picked last, Cylindrical when that was Planar. The frames are picked
+from one quick grey pass over the stretch (`/inspect/panorama-frames`, `engine/panorama.py`):
+the camera is followed block by block, the blocks a burnt-in logo or caption holds left out,
+and a frame is kept each time the picture has travelled about a third of itself, the
+sharpest near that point, with the stretch's first and last views; a shot cut is never
+crossed, the longest part kept, and sixteen frames at most, spread wider over a long pan.
+A camera solve with no believable lens places nothing rather than a strip claiming a full
+turn. The message says how many
 pieces moved and, in a panorama projection, about how wide an angle they cover; its Undo,
 like one Ctrl+Z, takes the frames back with their stitch. A stretch the camera barely
 turns in says so and lays nothing.
@@ -2191,6 +2198,17 @@ Every piece stays whole and its own, and shows whole again while the frame is dr
 to the collage (`clip: {x, y, w, h}` in canvas pixels, one Ctrl+Z). The saved picture is
 the pieces within it at the same sharpness (`/inspect/compose` with `clip`), and a new cut
 makes the last saved picture out of date. Find reads a cut picture from its frame's corner.
+**Trim edges** cuts to the largest frame the pieces fill, read from them as drawn, in one
+Ctrl+Z; it rests saying why when there is no piece or no empty edge left.
+
+**Stitched pieces meet halfway.** Where two pieces a panorama stitch warped overlap, each
+point shows the one whose middle is nearest, so the seam runs down the middle of the
+overlap rather than along a frame's edge, where the lens bends most. Where that piece's
+warp left a corner empty, the pieces show as they stack. Pieces laid by hand, Planar
+stitches, and a stitched piece whose corner was pulled or that was turned keep their order.
+The canvas, the list's preview, the saved picture and Straighten's pictures all draw it
+so; a piece shows whole while it is dragged. Find still reads each point through the piece
+drawn on top.
 
 **A collage of one video is marked as that video.** When every piece is one video at an
 instant, or a frame saved from it, or a picture composed from them such as a piece straightened, the panel reads *From channel_departure · 0:01–0:03*;
