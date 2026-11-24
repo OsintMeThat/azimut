@@ -510,11 +510,12 @@ def followup_last_passes(case_id: str, ident: str) -> dict[str, dict[str, Any]]:
     return found
 
 
-def start(case: Any, body: RunInput) -> dict[str, Any]:
+def start(case: Any, body: RunInput, *, behind: bool = False) -> dict[str, Any]:
     """Queue one run. Runs of a case wait their turn behind each other, so a
     whole list of saved detections can be started at once; only the same
     detection twice is refused, since the second would sweep what the first
-    is already sweeping."""
+    is already sweeping. `behind` is a catch-up queueing the days it settled
+    one after the other: each reads its own pass, so none repeats another."""
     with engine.LOCK, case._lock:
         try:
             body = engine.hydrate(case, body)
@@ -522,8 +523,7 @@ def start(case: Any, body: RunInput) -> dict[str, Any]:
             raise HTTPException(404, "an area of this detection was deleted; choose its areas again") from exc
         if body.followup_id:
             read(case, "followups", body.followup_id)
-            if any(row.get("status") in engine.ACTIVE and row.get("followup_id") == body.followup_id
-                   for row in engine.listing(case, "runs")):
+            if not behind and routine_busy(case, body.followup_id):
                 raise HTTPException(409, "this detection is already queued or running")
         prepared, area_runs = engine.prepare_areas(case, body)
         bad_order = next((row for row in area_runs if row["status"] == "failed"
@@ -553,6 +553,12 @@ def start(case: Any, body: RunInput) -> dict[str, Any]:
                             "results": [], "frames": {}, "count": 0, "message": ""})
         workqueue.enqueue(case, engine.JOB, key=saved["id"], payload={"run_id": saved["id"]})
         return saved
+
+
+def routine_busy(case: Any, followup_id: str) -> bool:
+    """Whether a run of this routine is queued or sweeping now."""
+    return any(row.get("status") in engine.ACTIVE and row.get("followup_id") == followup_id
+               for row in engine.listing(case, "runs"))
 
 
 @router.post("/cases/{case_id}/analysis/runs")
@@ -599,12 +605,146 @@ def run_followup(case_id: str, ident: str, body: RunAgain | None = None) -> dict
     return start(case, run.model_copy(update={"run_anyway": chosen.run_anyway}))
 
 
-@router.get("/cases/{case_id}/analysis/followups/{ident}/findings")
-def followup_findings(case_id: str, ident: str) -> list[dict[str, Any]]:
-    """Everything this routine has found and nobody has dismissed."""
+#: The most passes one catch-up queues: two months of Sentinel-2 over one place.
+MAX_CATCH_UP = 30
+
+
+class MissedPass(Model):
+    date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    #: A radar pass's time of day, which keeps its track; empty for Sentinel-2.
+    time: str = Field(default="", max_length=8)
+
+
+class CatchUp(Model):
+    """The passes a routine missed, each to be read as one run of its own."""
+    passes: list[MissedPass] = Field(min_length=1, max_length=MAX_CATCH_UP)
+
+
+def _read_passes(case: Any, followup_id: str) -> dict[str, list[dict[str, Any]]]:
+    """The passes each area of a routine was read on, from its finished runs."""
+    read_on: dict[str, list[dict[str, Any]]] = {}
+    for row in engine.series(case, followup_id):
+        for area in row["areas"]:
+            if area["status"] == "ready" and area["b"]:
+                read_on.setdefault(area["area_id"], []).append({"date": area["b"], "time": area["time"]})
+    return read_on
+
+
+@router.post("/cases/{case_id}/analysis/followups/{ident}/catch-up")
+def catch_up(case_id: str, ident: str, body: CatchUp) -> dict[str, Any]:
+    """Queue one run per missed pass, oldest first, behind each other.
+
+    Each run names its pass and its reference, settled now: a routine that
+    compares with the pass before takes the newest pass read or queued before
+    that day for each area, so a gap filled late still compares like with like;
+    one with a fixed reference keeps it. A day every area was already read on is
+    left out and said so.
+    """
+    case = get_case(case_id)
+    saved = read(case, "followups", ident)
+    if routine_busy(case, ident):
+        raise HTTPException(409, "this detection is already queued or running")
+    fields = {key: saved[key] for key in RunInput.model_fields if key in saved}
+    try:
+        routine = engine.hydrate(case, stored(RunInput, {**fields, "followup_id": ident}))
+    except (FileNotFoundError, ValidationError, ValueError) as exc:
+        raise HTTPException(422, "this detection needs editing before it can run") from exc
+    single = is_single(routine.recipe)
+    read_on = _read_passes(case, ident)
+    days = sorted({(entry.date, entry.time) for entry in body.passes})
+    queued: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+    for day, time in days:
+        pairs = routine.area_dates or [AreaDates(area_id=zone.id, a=routine.a, b=routine.b,
+                                                 date_rule=routine.date_rule) for zone in routine.zones]
+        if all(any(seen["date"] == day for seen in read_on.get(pair.area_id, [])) for pair in pairs):
+            skipped.append({"date": day, "message": f"{day}: already read"})
+            continue
+        settled = []
+        for pair in pairs:
+            reference = pair.a
+            if not single and pair.date_rule == "latest_previous":
+                before = [seen for seen in read_on.get(pair.area_id, []) if seen["date"] < day]
+                if before:
+                    newest = max(before, key=lambda seen: (seen["date"], seen["time"]))
+                    reference = pair.a.model_copy(update=newest)
+            settled.append(AreaDates(area_id=pair.area_id, a=reference,
+                                     b=pair.b.model_copy(update={"date": day, "time": time}),
+                                     date_rule="manual"))
+        try:
+            run = RunInput.model_validate({**routine.model_dump(), "area_dates": [p.model_dump() for p in settled],
+                                           "b": {**routine.b.model_dump(), "date": day, "time": time},
+                                           "run_anyway": True})
+            started = start(case, run, behind=True)
+        except (HTTPException, ValidationError) as exc:
+            detail = exc.detail if isinstance(exc, HTTPException) else (unreadable(exc) or "unreadable dates")
+            skipped.append({"date": day, "message": f"{day}: {detail}"})
+            continue
+        if "id" not in started:
+            skipped.append({"date": day, "message": started.get("message") or f"{day}: nothing to read"})
+            continue
+        queued.append(started)
+        for pair in settled:
+            read_on.setdefault(pair.area_id, []).append({"date": day, "time": time})
+    return {"queued": queued, "skipped": skipped}
+
+
+@router.get("/cases/{case_id}/analysis/followups/{ident}/series")
+def followup_series(case_id: str, ident: str) -> list[dict[str, Any]]:
+    """Every finished run of this routine and what it found, oldest pass first."""
     case = get_case(case_id)
     read(case, "followups", ident)
-    return engine.findings(case, ident)
+    return engine.series(case, ident)
+
+
+class Picked(Model):
+    run_id: ShortId
+    result_id: str = Field(min_length=1, max_length=64)
+
+
+class ReviewMany(Model):
+    """One verdict for candidates of several runs: a spot seen pass after pass."""
+    review: Literal["dismissed", "new", "noted"]
+    results: list[Picked] = Field(min_length=1, max_length=2000)
+
+
+@router.post("/cases/{case_id}/analysis/followups/{ident}/review")
+def review_many(case_id: str, ident: str, body: ReviewMany) -> dict[str, Any]:
+    """Give one verdict to candidates across this routine's runs, in one write per run.
+
+    A candidate pinned in the case keeps its pin: it is left as it is and counted
+    in `pinned`, since taking a pin back is done from the pin.
+    """
+    case = get_case(case_id)
+    wanted: dict[str, set[str]] = {}
+    for pick in body.results:
+        wanted.setdefault(pick.run_id, set()).add(pick.result_id)
+    changed = pinned = 0
+    with engine.LOCK, case._lock:
+        read(case, "followups", ident)
+        for run_id, ids in wanted.items():
+            saved = read(case, "runs", run_id)
+            if saved.get("status") != "ready" or saved["input"].get("followup_id") != ident:
+                raise HTTPException(409, "these candidates are not all in finished runs of this routine")
+            stamp = engine.now()
+            touched = False
+            for result in saved["results"]:
+                if result["id"] not in ids or result.get("review") == body.review:
+                    continue
+                if kept_entity(case, result):
+                    pinned += 1
+                    continue
+                result.update(review=body.review, reviewed_at=stamp, entity_id=None)
+                changed += 1
+                touched = True
+            if body.review == "dismissed":
+                kept = [row for row in saved["results"] if row.get("review") != "dismissed"]
+                touched = touched or len(kept) != len(saved["results"])
+                saved["results"] = kept
+                saved["count"] = len(kept)
+            if touched:
+                engine.persist_run(case, saved)
+    return {"changed": changed, "pinned": pinned}
 
 
 @router.post("/cases/{case_id}/analysis/{kind}/{ident}/export")

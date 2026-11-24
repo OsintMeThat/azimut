@@ -515,21 +515,50 @@ def listing(case: Case, kind: str) -> list[dict[str, Any]]:
 KEPT = ("kept", "noted")
 
 
-def findings(case: Case, followup_id: str) -> list[dict[str, Any]]:
-    """What a routine has found and nobody has dismissed, newest run first.
+#: What the series of a routine says of each candidate: enough to place, count and
+#: judge it. The crop's frames and the outline stay in the run, read when it opens.
+SERIES_FIELDS = ("id", "area_id", "coordinates", "review", "strength", "phenomenon", "measure",
+                 "area", "origin", "entity_id")
 
-    A routine is worth coming back to only if it remembers: its runs are
-    separate sweeps, but what they found is one growing list, and this is it.
+
+def _read_areas(run: dict[str, Any]) -> list[dict[str, Any]]:
+    """Each area a finished run read or tried to: its pass, its reference and how it went.
+
+    A run made before areas were read one by one names one pair for all of them.
+    """
+    if run.get("area_runs"):
+        return [{"area_id": row.get("area_id", ""), "name": row.get("name", ""),
+                 "status": row.get("status", ""),
+                 "a": (row.get("a") or {}).get("date", ""), "b": (row.get("b") or {}).get("date", ""),
+                 "time": (row.get("b") or {}).get("time", "")}
+                for row in run["area_runs"]]
+    body = run["input"]
+    return [{"area_id": zone.get("id", ""), "name": zone.get("name", ""), "status": "ready",
+             "a": (body.get("a") or {}).get("date", ""), "b": (body.get("b") or {}).get("date", ""),
+             "time": (body.get("b") or {}).get("time", "")}
+            for zone in body.get("zones", [])]
+
+
+def series(case: Case, followup_id: str) -> list[dict[str, Any]]:
+    """Every finished run of a routine with what it found, oldest pass first.
+
+    A routine is worth coming back to only if it remembers: its runs are separate
+    sweeps, but read together they are one record of the same ground over time.
+    Each run says which areas it read on which pass, so a place seen empty can be
+    told from a place nobody looked at; a dismissed candidate is no longer in it.
     """
     rows: list[dict[str, Any]] = []
-    for _, run in ready_runs(case, followup_id):
-        day = (run["input"].get("b") or {}).get("date", "")
-        for result in run.get("results", []):
-            if result.get("review") not in KEPT:
-                continue
-            rows.append({**result, "run_id": run["id"], "run_title": run["title"],
-                         "date": result.get("sources", {}).get("b", {}).get("date", day)})
-    return rows
+    # listed newest first; reversed, two runs of one second keep the order they were made in
+    for _, run in reversed(ready_runs(case, followup_id)):
+        body = run["input"]
+        rows.append({
+            "id": run["id"], "title": run.get("title", ""), "created_at": run.get("created_at", ""),
+            "dates": [(body.get(side) or {}).get("date", "") for side in ("a", "b")],
+            "areas": _read_areas(run),
+            "results": [{key: result.get(key) for key in SERIES_FIELDS}
+                        for result in run.get("results", [])],
+        })
+    return sorted(rows, key=lambda row: (row["dates"][1], row["created_at"]))
 
 
 def save(case: Case, kind: str, data: dict[str, Any], ident: str | None = None,

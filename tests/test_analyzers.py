@@ -471,18 +471,19 @@ def test_a_candidate_can_be_kept_in_the_detections_view_without_touching_the_cas
     assert noted["review"] == "noted" and noted["entity_id"] is None
     # nothing reaches the case: no pin, no evidence file
     assert len(case.list_entities()) == before
-    [found] = client.get(f"{base}/followups/{watch['id']}/findings").json()
-    assert found["id"] == row["id"] and found["run_id"] == saved["id"]
-    assert found["date"] == body["b"]["date"] and found["run_title"] == saved["title"]
-    # a dismissal takes it back out of the findings
+    [ran] = client.get(f"{base}/followups/{watch['id']}/series").json()
+    assert ran["id"] == saved["id"] and ran["dates"] == [body["a"]["date"], body["b"]["date"]]
+    assert [(found["id"], found["review"]) for found in ran["results"]] == [(row["id"], "noted")]
+    # a dismissal takes it out of the routine's record
     client.patch(endpoint, json={"review": "dismissed"})
-    assert client.get(f"{base}/followups/{watch['id']}/findings").json() == []
+    assert client.get(f"{base}/followups/{watch['id']}/series").json()[0]["results"] == []
     assert client.post(endpoint + "/promote", json={"title": "Gone"}).status_code == 404
     # A later sweep can find the dismissed candidate again.
     saved = run(client, case, {**body, "followup_id": watch["id"], "run_anyway": True})
     endpoint = f"{base}/runs/{saved['id']}/results/{saved['results'][0]['id']}"
     client.post(endpoint + "/promote", json={"title": "Kept change"})
-    [pinned] = client.get(f"{base}/followups/{watch['id']}/findings").json()
+    [pinned] = next(row for row in client.get(f"{base}/followups/{watch['id']}/series").json()
+                    if row["id"] == saved["id"])["results"]
     assert pinned["review"] == "kept" and pinned["entity_id"]
     assert next(r for r in client.get(f"{base}/runs").json() if r["id"] == saved["id"])["marked"] == 1
 
@@ -551,6 +552,112 @@ def test_a_routine_skips_current_areas_and_only_sweeps_the_area_with_a_new_pass(
     assert saved["area_runs"][1]["a"]["date"] == body["b"]["date"]
     assert saved["area_runs"][0]["status"] == "no_new_imagery"
     assert saved["area_runs"][1]["status"] == "ready"
+
+
+def _routine(client, case, body, rule="latest_previous"):
+    base = f"/api/cases/{case.id}/analysis"
+    watch = client.post(f"{base}/followups", json={**deepcopy(body), "title": "Harbour", "date_rule": rule}).json()
+    first = client.post(f"{base}/followups/{watch['id']}/run", json={"date": body["b"]["date"]}).json()
+    workqueue.drain(case)
+    return base, watch, first
+
+
+def test_a_routine_catches_up_one_run_per_missed_pass_each_against_the_pass_before(client, scenario):
+    case, body = scenario
+    base, watch, first = _routine(client, case, body)
+    days = ["2026-05-18", "2026-05-14"]
+    seed_images({**body, "a": body["b"], "b": {**body["b"], "date": "2026-05-14"}})
+    seed_images({**body, "a": {**body["b"], "date": "2026-05-14"}, "b": {**body["b"], "date": "2026-05-18"}})
+    # `scenario` shuts the network: a catch-up names its passes and looks nothing up
+    answer = client.post(f"{base}/followups/{watch['id']}/catch-up",
+                         json={"passes": [{"date": day} for day in [*days, body["b"]["date"]]]})
+    assert answer.status_code == 200, answer.text
+    queued, skipped = answer.json()["queued"], answer.json()["skipped"]
+    # oldest first, and the day already read is said, not swept again
+    assert [row["input"]["b"]["date"] for row in queued] == ["2026-05-14", "2026-05-18"]
+    assert skipped == [{"date": body["b"]["date"], "message": f"{body['b']['date']}: already read"}]
+    # a routine busy with its catch-up refuses another start until it settles
+    assert client.post(f"{base}/followups/{watch['id']}/run").status_code == 409
+    assert client.post(f"{base}/followups/{watch['id']}/catch-up",
+                       json={"passes": [{"date": "2026-05-20"}]}).status_code == 409
+    workqueue.drain(case)
+    pairs = [[row["area_runs"][0]["a"]["date"], row["area_runs"][0]["b"]["date"], row["status"]]
+             for row in (client.get(f"{base}/runs/{started['id']}").json() for started in queued)]
+    assert pairs == [[body["b"]["date"], "2026-05-14", "ready"], ["2026-05-14", "2026-05-18", "ready"]]
+    assert [row["dates"][1] for row in client.get(f"{base}/followups/{watch['id']}/series").json()] == \
+        [body["b"]["date"], "2026-05-14", "2026-05-18"]
+
+
+def test_a_catch_up_keeps_a_fixed_reference_and_fills_a_gap_against_the_pass_before_it(client, scenario):
+    case, body = scenario
+    base, watch, _ = _routine(client, case, body, rule="latest_reference")
+    seed_images({**body, "b": {**body["b"], "date": "2026-05-18"}})
+    [fixed] = client.post(f"{base}/followups/{watch['id']}/catch-up",
+                          json={"passes": [{"date": "2026-05-18"}]}).json()["queued"]
+    assert fixed["area_runs"][0]["a"]["date"] == body["a"]["date"]
+    workqueue.drain(case)
+
+    _, routine, _ = _routine(client, case, body)
+    # a day between two passes already read compares with the one before it
+    seed_images({**body, "b": {**body["b"], "date": "2026-05-25"}})
+    client.post(f"{base}/followups/{routine['id']}/run", json={"date": "2026-05-25"})
+    workqueue.drain(case)
+    [gap] = client.post(f"{base}/followups/{routine['id']}/catch-up",
+                        json={"passes": [{"date": "2026-05-18"}]}).json()["queued"]
+    assert [gap["area_runs"][0]["a"]["date"], gap["area_runs"][0]["b"]["date"]] == [body["b"]["date"], "2026-05-18"]
+
+
+def test_a_catch_up_is_bounded_and_dated(client, scenario):
+    case, body = scenario
+    base, watch, _ = _routine(client, case, body)
+    endpoint = f"{base}/followups/{watch['id']}/catch-up"
+    assert client.post(endpoint, json={"passes": []}).status_code == 422
+    assert client.post(endpoint, json={"passes": [{"date": "18/05/2026"}]}).status_code == 422
+    many = [{"date": f"2026-06-{day:02d}"} for day in range(1, 32)][:analyzers_api.MAX_CATCH_UP + 1]
+    assert client.post(endpoint, json={"passes": many}).status_code == 422
+    assert client.post(f"{base}/followups/abcdefabcdef/catch-up",
+                       json={"passes": [{"date": "2026-05-18"}]}).status_code == 404
+
+
+def test_a_routine_s_series_says_what_each_pass_read_and_found_without_the_pictures(client, scenario):
+    case, body = scenario
+    base, watch, first = _routine(client, case, body)
+    [ran] = client.get(f"{base}/followups/{watch['id']}/series").json()
+    assert ran["id"] == first["id"] and ran["title"] == "Harbour"
+    [area] = ran["areas"]
+    assert area["area_id"] == watch["area_dates"][0]["area_id"] and area["status"] == "ready"
+    assert [area["a"], area["b"]] == [body["a"]["date"], body["b"]["date"]]
+    [found] = ran["results"]
+    assert set(found) == set(analyzers.SERIES_FIELDS)
+    assert found["review"] == "new" and len(found["coordinates"]) == 2
+    # a run still working, or another routine's, is not in it
+    client.post(f"{base}/followups/{watch['id']}/run", json={"date": "2026-05-18"})
+    assert len(client.get(f"{base}/followups/{watch['id']}/series").json()) == 1
+    assert client.get(f"{base}/followups/abcdefabcdef/series").status_code == 404
+
+
+def test_one_verdict_reaches_a_spot_across_runs_and_leaves_a_pin_alone(client, scenario):
+    case, body = scenario
+    base, watch, first = _routine(client, case, body)
+    second = run(client, case, {**body, "followup_id": watch["id"], "run_anyway": True})
+    third = run(client, case, {**body, "followup_id": watch["id"], "run_anyway": True})
+    pinned = third["results"][0]
+    client.post(f"{base}/runs/{third['id']}/results/{pinned['id']}/promote", json={"title": "Pinned"})
+    picks = [{"run_id": row["id"], "result_id": row["results"][0]["id"]}
+             for row in client.get(f"{base}/followups/{watch['id']}/series").json()]
+    endpoint = f"{base}/followups/{watch['id']}/review"
+    assert client.post(endpoint, json={"review": "noted", "results": picks}).json() == {"changed": 2, "pinned": 1}
+    reviews = [row["results"][0]["review"] for row in client.get(f"{base}/followups/{watch['id']}/series").json()]
+    assert sorted(reviews) == ["kept", "noted", "noted"]
+    assert client.post(endpoint, json={"review": "dismissed", "results": picks}).json() == {"changed": 2, "pinned": 1}
+    left = {row["id"]: len(row["results"]) for row in client.get(f"{base}/followups/{watch['id']}/series").json()}
+    assert left == {first["id"]: 0, second["id"]: 0, third["id"]: 1}
+    assert {row["id"]: row["count"] for row in client.get(f"{base}/runs").json()}[second["id"]] == 0
+    # only finished runs of this routine
+    other = run(client, case, body)
+    refused = client.post(endpoint, json={"review": "noted",
+                                          "results": [{"run_id": other["id"], "result_id": other["results"][0]["id"]}]})
+    assert refused.status_code == 409
 
 
 def test_a_comparison_rejects_a_date_that_is_not_before_b(client, scenario):
