@@ -61,6 +61,7 @@
   import AnnotationCanvas from './compare/AnnotationCanvas.svelte';
   import AnalysisOverlay from './detect/AnalysisOverlay.svelte';
   import DetectAreas from './detect/DetectAreas.svelte';
+  import DetectSpots from './detect/DetectSpots.svelte';
   import DetectPanel from './detect/DetectPanel.svelte';
   import CheckBench from './detect/CheckBench.svelte';
   import CheckMarks from './detect/CheckMarks.svelte';
@@ -184,6 +185,10 @@
   let resultMarkers = $state(true);
   let resultOutlines = $state(true);
   let areaGroups = $state([]);
+  // A routine's spots while its dashboard is open: they stand for its runs on the map.
+  let spots = $state([]);
+  let spotRadius = $state(40);
+  let selectedSpot = $state(null);
   let highlight = $state([]);
   let manual = $state(null);
   let manualTool = $state('select');
@@ -856,6 +861,8 @@
               onturn={() => { builder.flipPin(builder.probe.pin); builder.closeProbe(); }}
               onremove={() => { builder.removePin(builder.probe.pin); builder.closeProbe(); }} />
           {/if}
+        {:else if spots.length && !manual && !bare}
+          <DetectSpots {engine} {spots} radius={spotRadius} selected={selectedSpot} onpick={(id) => panel?.pickSpot(id)} />
         {:else if !bare && (focusedRunId || savedVisible) && visibleRunLayers.some((layer) => layer.visible)}
           <AnalysisOverlay {engine} layers={visibleRunLayers} selected={selectedResult} active={!manual}
             markers={resultMarkers} outlines={resultOutlines}
@@ -947,6 +954,9 @@
       bind:markers={resultMarkers}
       bind:outlines={resultOutlines}
       bind:areaGroups
+      bind:spots
+      bind:spotRadius
+      bind:selectedSpot
       bind:highlight
       bind:bare
       bind:blinking

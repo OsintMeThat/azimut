@@ -11,6 +11,8 @@ export const ACTIVE = Object.freeze(['queued', 'running']);
 export const isActive = (row) => ACTIVE.includes(row?.status);
 
 export const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+/** `1 pass`, `3 passes`: the one word `plural` cannot make. */
+export const passCount = (count) => `${count} ${count === 1 ? 'pass' : 'passes'}`;
 
 /**
  * Each saved detection with its runs, newest first, and the one working now.
@@ -23,9 +25,35 @@ export const byRecency = (one, two) =>
 export function detectionsWithRuns(watches, runs) {
   return watches.map((watch) => {
     const history = runs.filter((run) => run.followup_id === watch.id).sort(byRecency);
-    return { ...watch, history, latest: history[0] ?? null, active: history.find(isActive) ?? null };
+    const working = history.filter(isActive);
+    // A catch-up queues several passes; the one sweeping now leads, then the oldest waiting.
+    const active = working.find((run) => run.status === 'running') ?? working.at(-1) ?? null;
+    const ready = history.filter((run) => run.status === 'ready');
+    return { ...watch, history, latest: history[0] ?? null, active, working,
+      lastPass: ready.map((run) => run.dates?.[1] ?? '').filter(Boolean).sort().at(-1) ?? '' };
   });
 }
+
+/** The candidates of a routine's finished runs, oldest pass first, for a sparkline. */
+export function countsOf(history) {
+  return (history ?? []).filter((run) => run.status === 'ready' && run.dates?.[1])
+    .sort((one, two) => one.dates[1].localeCompare(two.dates[1]))
+    .map((run) => ({ value: run.count ?? 0, toReview: run.to_review ?? 0, date: run.dates[1] }));
+}
+
+/** `3 Nov · 21 days ago`: when a routine last read a pass, said against today. */
+export function freshness(day, today = new Date().toISOString().slice(0, 10)) {
+  const found = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day ?? '');
+  if (!found) return { text: '', stale: false, days: null };
+  const days = Math.round((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${day}T00:00:00Z`)) / 86400000);
+  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(found[2]) - 1];
+  const ago = days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+  // Sentinel-2 comes back every two to five days: past ten, passes have been missed
+  return { text: `${Number(found[3])} ${month} · ${ago}`, stale: days > STALE_DAYS, days };
+}
+
+/** Days after the last pass read past which a routine has surely missed some. */
+export const STALE_DAYS = 10;
 
 /** Runs no saved detection claims: started once, or left by one since deleted. */
 export function singleRuns(watches, runs) {

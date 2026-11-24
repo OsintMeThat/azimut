@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  countsOf,
   detectionsWithRuns,
+  freshness,
   isActive,
   routineMatches,
   ruleLabel,
@@ -23,6 +25,34 @@ describe('detections and their runs', () => {
     expect(one.latest.id).toBe('r3');
     expect(one.active.id).toBe('r3');
     expect(two.active).toBe(null);
+  });
+
+  it('leads a catch-up with the pass sweeping now, then the oldest waiting, and knows the last pass read', () => {
+    const runs = [
+      run('r1', 'w1', { created_at: '2026-11-01T10:00:00', dates: ['2026-07-24', '2026-11-03'] }),
+      run('q2', 'w1', { status: 'queued', created_at: '2026-11-24T10:00:00', dates: ['2026-07-24', '2026-11-08'] }),
+      run('q1', 'w1', { status: 'queued', created_at: '2026-11-24T10:00:00', dates: ['2026-07-24', '2026-11-06'] }),
+    ];
+    const [one] = detectionsWithRuns([watch('w1')], runs);
+    expect(one.active.id).toBe('q1');
+    expect(one.working.map((r) => r.id)).toEqual(['q2', 'q1']);
+    expect(one.lastPass).toBe('2026-11-03');
+    const [two] = detectionsWithRuns([watch('w1')], [...runs, run('q0', 'w1', { status: 'running', dates: ['', '2026-11-05'] })]);
+    expect(two.active.id).toBe('q0');
+  });
+
+  it('reads the counts of a routine oldest pass first, for its sparkline', () => {
+    expect(countsOf([
+      run('b', 'w', { dates: ['', '2026-10-02'], count: 8, to_review: 1 }),
+      run('a', 'w', { dates: ['', '2026-09-27'], count: 7 }),
+      run('c', 'w', { status: 'failed', dates: ['', '2026-10-04'] }),
+    ])).toEqual([{ value: 7, toReview: 0, date: '2026-09-27' }, { value: 8, toReview: 1, date: '2026-10-02' }]);
+  });
+
+  it('says how long ago a routine last read a pass, and when that is too long', () => {
+    expect(freshness('2026-11-03', '2026-11-24')).toEqual({ text: '3 Nov · 21 days ago', stale: true, days: 21 });
+    expect(freshness('2026-11-23', '2026-11-24')).toMatchObject({ text: '23 Nov · yesterday', stale: false });
+    expect(freshness('', '2026-11-24').text).toBe('');
   });
 
   it('keeps runs of a deleted detection among the single runs rather than losing them', () => {

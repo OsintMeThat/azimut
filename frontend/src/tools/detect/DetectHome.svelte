@@ -8,8 +8,11 @@
   import Icon from '../../components/Icon.svelte';
   import SearchInput from '../../components/SearchInput.svelte';
   import {
-    ROUTINE_SEARCH_FROM, isActive, plural, routineMatches, ruleLabel, runDays, runState, savedGroups,
+    ROUTINE_SEARCH_FROM, countsOf, freshness, isActive, plural, routineMatches, ruleLabel, runState, savedGroups,
   } from '../../lib/map/detections.js';
+  import { shortDay } from '../../lib/map/detectSeries.js';
+  import { isOpen, setOpen } from '../../lib/map/detectFolds.svelte.js';
+  import SeriesSpark from './SeriesSpark.svelte';
 
   let {
     tab = 'routines',
@@ -23,6 +26,8 @@
     onrun = () => {},
     onrunall = () => {},
     oncancel = () => {},
+    /** Stop every run of a routine at once, a whole catch-up included. */
+    oncancelall = () => {},
     onopen = () => {},
     onopenrun = () => {},
     oncolour = () => {},
@@ -42,14 +47,24 @@
   const listed = $derived(searchable && routineSearch.trim()
     ? routines.filter((item) => routineMatches(item, routineSearch)) : routines);
   const groups = $derived(savedGroups(routines, passes));
-  /** Groups folded shut; every group opens unfolded. */
-  let folded = $state({});
+  /** A routine's group opens folded to one line, the passes swept once unfolded (`detectFolds`). */
+  const isFolded = (group) => !isOpen(group.id, group.kind !== 'routine');
+  const toggleFold = (group) => setOpen(group.id, isFolded(group));
+  const routineOf = (id) => routines.find((item) => item.id === id) ?? null;
+  /** The reference every run of a group compared against, when they all share one. */
+  function sharedReference(runs) {
+    const refs = new Set(runs.filter((run) => run.status === 'ready').map((run) => run.dates?.[0] ?? ''));
+    const [only] = refs;
+    return refs.size === 1 && only ? only : '';
+  }
+  /** What a finished run found, short enough for a row beside its day. */
+  const found = (run) => (run.count ? plural(run.count, 'candidate') : 'nothing found');
 
   const layerOf = (run) => layers.find((row) => row.id === run.id);
   /** A SAT layer holds what was kept or pinned, so a run with none has nothing to give it. */
   const kept = (runs) => runs.reduce((total, run) => total + (run.status === 'ready' ? run.marked ?? 0 : 0), 0);
-  /** A routine's runs share its title, so under it a run is named by its days too. */
-  const rowName = (group, run) => (group.kind === 'routine' && runDays(run) ? `${run.title} · ${runDays(run)}` : run.title);
+  /** A routine's runs share its title, so under it a run is named by its day too. */
+  const rowName = (group, run) => (group.kind === 'routine' && run.dates?.[1] ? `${run.title} · ${run.dates[1]}` : run.title);
   const layerTitle = (count) => (count ? 'Add to the SAT layers: what was kept or pinned'
     : 'Keep or pin a candidate first: the SAT layer holds only those');
   const groupLayers = (group) => group.runs.map(layerOf).filter(Boolean);
@@ -90,14 +105,16 @@
     {/if}
     {#each listed as item (item.id)}
       {@const state = runState(item.active ?? item.latest)}
+      {@const fresh = freshness(item.lastPass)}
       <article class="card" style={`--tint: ${item.colour || 'var(--accent)'}`}>
         <div class="row">
           <button class="title grow" disabled={busy} title="Open this routine" onclick={() => onopen(item)}
             onmouseenter={() => onhover(item.id)} onmouseleave={() => onhover(null)}
             onfocus={() => onhover(item.id)} onblur={() => onhover(null)}>{item.title}</button>
           {#if item.active}
-            <button class="cmp-icon" title="Stop this run" aria-label={`Stop ${item.title}`} disabled={busy}
-              onclick={() => oncancel(item.active)}><Icon name="square" size={12} /></button>
+            <button class="cmp-icon" title={item.working?.length > 1 ? `Stop its ${item.working.length} runs` : 'Stop this run'}
+              aria-label={`Stop ${item.title}`} disabled={busy}
+              onclick={() => oncancelall(item.working ?? [item.active])}><Icon name="square" size={12} /></button>
           {:else}
             <button class="cmp-icon go" title="Run the newest pass" aria-label={`Run ${item.title}`} disabled={busy}
               onclick={() => onrun(item)}><Icon name="play" size={13} /></button>
@@ -108,7 +125,13 @@
         {#if item.note}<p class="note">{item.note}</p>{/if}
         <p class="meta">{[item.analyzer, plural(item.areas ?? 0, 'area'),
           ruleLabel(item.date_rule, item.single ?? single(item.method))].filter(Boolean).join(' · ')}</p>
-        <p class={`state ${state.tone}`}>{state.text}</p>
+        <div class="glance">
+          <SeriesSpark values={countsOf(item.history)} tint={item.colour || 'var(--info)'} />
+          <p class={`state ${state.tone}`}>{state.text}{item.working?.length > 1 ? ` · ${item.working.length - 1} more queued` : ''}</p>
+        </div>
+        {#if !item.active && fresh.stale}
+          <p class="stale"><Icon name="clock" size={11} /> No pass read for {fresh.days} days. Open it to catch up.</p>
+        {/if}
         {#if item.active?.status === 'running'}
           <progress max={item.active.total || 1} value={item.active.progress ?? 0}></progress>
         {/if}
@@ -130,11 +153,11 @@
         {@const allOn = shown.length > 0 && shown.every((layer) => layer.visible)}
         <div class="group" style={`--tint: ${group.colour || 'var(--text-3)'}`}>
           <div class="row group-head">
-            <button class="fold-toggle" aria-label={`${folded[group.id] ? 'Expand' : 'Collapse'} ${group.title}`}
-              title={folded[group.id] ? 'Expand group' : 'Collapse group'}
-              aria-expanded={!folded[group.id]}
-              onclick={() => (folded = { ...folded, [group.id]: !folded[group.id] })}>
-              <Icon name={folded[group.id] ? 'chevronRight' : 'chevronDown'} size={12} />
+            <button class="fold-toggle" aria-label={`${isFolded(group) ? 'Expand' : 'Collapse'} ${group.title}`}
+              title={isFolded(group) ? 'Expand group' : 'Collapse group'}
+              aria-expanded={!isFolded(group)}
+              onclick={() => toggleFold(group)}>
+              <Icon name={isFolded(group) ? 'chevronRight' : 'chevronDown'} size={12} />
             </button>
             {#if group.kind === 'routine'}
               <label class="colour-control" title={`Colour of ${group.title}`}>
@@ -144,8 +167,7 @@
                   onchange={(event) => oncolour(group, event.currentTarget.value)} />
               </label>
             {/if}
-            <button class="fold grow" aria-expanded={!folded[group.id]}
-              onclick={() => (folded = { ...folded, [group.id]: !folded[group.id] })}>
+            <button class="fold grow" aria-expanded={!isFolded(group)} onclick={() => toggleFold(group)}>
               <span class="name">{group.title}</span>
               <small>{plural(group.runs.length, 'run')}</small>
             </button>
@@ -163,7 +185,22 @@
               </button>
             {/if}
           </div>
-          {#if !folded[group.id]}
+          {#if group.kind === 'routine'}
+            {@const newest = group.runs.find((run) => run.status === 'ready')}
+            {@const reference = sharedReference(group.runs)}
+            {@const waiting = group.runs.filter((run) => run.status === 'ready' && run.to_review).reduce((sum, run) => sum + run.to_review, 0)}
+            <button class="summary" onclick={() => { const item = routineOf(group.id); if (item) onopen(item); }}
+              disabled={busy || !routineOf(group.id)} title="Open its dashboard">
+              <SeriesSpark values={countsOf(group.runs)} tint={group.colour || 'var(--info)'} />
+              <span class="sum-text">
+                {#if newest}Last {shortDay(newest.dates?.[1])} · {found(newest)}{:else}No finished pass{/if}
+                {#if reference}<small>against {shortDay(reference, true)}</small>{/if}
+              </span>
+              {#if waiting}<span class="badge">{waiting} to review</span>{/if}
+            </button>
+          {/if}
+          {#if !isFolded(group)}
+            {@const reference = group.kind === 'routine' ? sharedReference(group.runs) : ''}
             {#each group.runs as run (run.id)}
               {@const state = runState(run)}
               {@const layer = layerOf(run)}
@@ -179,8 +216,13 @@
                 {/if}
                 <button class="past grow" disabled={busy} onclick={() => onopenrun(run)}>
                   {#if group.kind === 'routine'}
-                    <span class={state.tone}>{state.text}</span>
-                    {#if runDays(run)}<small class="what">{runDays(run)}</small>{/if}
+                    {#if run.status === 'ready'}
+                      <span class="day-line"><strong>{shortDay(run.dates?.[1], true)}</strong>
+                        <span class={run.to_review ? 'new' : ''}>{run.to_review ? `${run.to_review} to review of ${run.count}` : found(run)}</span></span>
+                      {#if !reference && run.dates?.[0] && run.dates[0] !== run.dates[1]}<small class="what">against {shortDay(run.dates[0], true)}</small>{/if}
+                    {:else}
+                      <span class={state.tone}>{state.text}</span>
+                    {/if}
                   {:else}
                     <span>{run.title}</span>
                     <small class={state.tone}>{state.text}</small>
@@ -312,4 +354,35 @@
   .colour-control:hover .swatch, .colour-control:focus-within .swatch { outline: 1px solid var(--text-1); outline-offset: 2px; }
   .colour-control input { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; opacity: 0; cursor: pointer; }
   .colour-control input:disabled { cursor: default; }
+  .glance { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .glance .state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .stale { display: flex; align-items: center; gap: 5px; margin: 0; color: var(--warn); font-size: var(--fs-xs); }
+  .summary {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    margin: -4px 0 0;
+    padding: 4px 6px 9px 30px;
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+    text-align: left;
+  }
+  .summary:hover:not(:disabled) .sum-text { color: var(--text-1); }
+  .sum-text { display: grid; gap: 1px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sum-text small { color: var(--text-3); font-size: 10.5px; }
+  .badge {
+    flex: none;
+    margin-left: auto;
+    padding: 1px 7px;
+    border-radius: 99px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+  .day-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .day-line strong { flex: none; color: var(--text-1); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .day-line span { overflow: hidden; color: var(--text-2); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
+  .day-line span.new { color: var(--info); font-weight: 600; }
 </style>
