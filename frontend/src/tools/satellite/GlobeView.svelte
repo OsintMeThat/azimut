@@ -21,6 +21,7 @@
   import { normaliseAttribution } from '../../lib/copernicusCredit.js';
   import { api } from '../../lib/api.js';
   import { prefs } from '../../lib/state.svelte.js';
+  import NorthPole from './NorthPole.svelte';
 
   let {
     /** What the surface shows: `{ provider, id, cell }` (`imagery.displayed`). */
@@ -114,6 +115,7 @@
 <div class="globe" class:waiting={!visible}>
   <canvas bind:this={canvas} aria-label="3D view of the imagery on its relief"></canvas>
   <canvas class="marks" bind:this={marks} aria-hidden="true"></canvas>
+  {#if globe}<NorthPole engine={globe} {exaggeration} />{/if}
   {#if credits}
     <div class="credits">{credits}</div>
   {/if}
