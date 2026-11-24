@@ -9856,7 +9856,7 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
   colours.
 - **Motion**: short and quiet; things arrive, they never perform. The tokens are in
   `app.css` (`--motion-hover` 120 ms, `--motion-press` 90 ms, `--motion-pop` 160 ms,
-  `--motion-move`, `--motion-slide` and `--motion-draw` 220 ms, `--motion-turn` 420 ms, `--ease-out`), and only `transform`
+  `--motion-move` and `--motion-slide` 220 ms, `--motion-turn` 420 ms, `--motion-draw` 450 ms, `--ease-out`), and only `transform`
   and `opacity` move. A floating menu drops 4 px from its opener with its first
   eight rows in a 14 ms cascade; a modal's veil fades and its card rises 8 px; a
   toast rises with a thread running out over its timeout; a button gives to 97 %

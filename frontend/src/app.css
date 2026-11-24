@@ -104,7 +104,7 @@
   --motion-slide: 220ms;   /* the rail's and the tabs' amber mark following the choice */
   --motion-stagger: 14ms;  /* between two rows of a menu */
   --motion-turn: 420ms;    /* an icon turning or lifting on hover, slow enough to follow */
-  --motion-draw: 220ms;    /* a tick drawn into its box */
+  --motion-draw: 450ms;    /* a tick drawn into its box, slow enough to be seen */
   --motion-shift: 4px;
   --motion-shift-lg: 8px;
   --motion-scale: 0.98;
@@ -362,7 +362,7 @@ progress {
   background-size: 100% 100%, 100% 100%;
   background-position: 0 0, center;
   cursor: pointer;
-  transition: border-color var(--motion-hover) var(--ease), background-position var(--motion-draw) var(--ease-out);
+  transition: border-color var(--motion-hover) var(--ease), background-position var(--motion-draw) cubic-bezier(0.45, 0, 0.25, 1);
 }
 :where(input[type='checkbox']:hover:not(:disabled, :checked, :indeterminate)) {
   border-color: var(--text-3);
