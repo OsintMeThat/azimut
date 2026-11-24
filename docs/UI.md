@@ -3803,7 +3803,8 @@ distance is searched only on ground that far, which also sets how far the turn
 is read and how fine the grid is; lines given none are kept off the ground at
 the eye's feet. A collage of a pan Azimut stitched is read frame by frame, each
 frame through its own camera at the stitch's lens, held level as the collage is
-laid (the stitch's own level drifts on a few frames). The lens or span a stitch
+laid (the stitch's own level drifts on a few frames). A frame cropped before the
+stitch is read through the crop's camera, the picture the stitch solved. The lens or span a stitch
 says is what joining the frames worked out, so Find searches it 20% either way.
 Looking from a place a
 search found lays the photo as the search read it: a collage's frames, or a cut
