@@ -103,21 +103,31 @@
     await Promise.all(Array.from({ length: Math.min(at, queue.length) }, next));
   }
 
-  async function autoStitch() {
-    if (few) return;
+  const autoStitch = () => runStitch(mode);
+
+  /**
+   * Collage's Panorama stitches its frames as the button would, in the projection picked
+   * last unless that is Planar, which a pan breaks, so then Cylindrical. `note` rides on
+   * the message after what the stitch says. Answers how many pieces moved, or null.
+   */
+  export function stitchPan(note = null) {
+    return runStitch(mode === 'planar' ? 'cylindrical' : mode, note);
+  }
+
+  async function runStitch(asked, note = null) {
+    if (few || stitching) return null;
     stitching = true;
     if (cut) cut.editing = false;
     // the whole stitch is one undo, however many steps its pieces come back in
     const release = hold?.();
     try {
       const nodes = active.nodes;
-      const asked = mode;
       const before = { nodes: nodes.map(snapshot), width: active.width, height: active.height, clip: active.clip ?? null };
       const exclude = excludeRequest(nodes);
       const res = await api.post(`/api/cases/${caseState.current.id}/inspect/auto-stitch`, {
         width: active.width,
         height: active.height,
-        mode,
+        mode: asked,
         // frozen snapshot recipes (path/time/ops), stripped back to pinhole pixels
         nodes: nodes.map((n) => ({ ...n.save, ops: pinholeOps(n.save) })),
         // the areas painted out of a piece's matching, sent only when a piece has some
@@ -153,9 +163,12 @@
       fit?.();
       // The undo rides on the message, and stays in the arrow's menu after it goes.
       const undo = { label: 'Undo', onClick: undoStitch };
-      toast(stitchedWords(res.nodes.length, left.map((piece) => piece.why), asked), left.length ? 'warn' : 'ok', null, undo);
+      const words = stitchedWords(res.nodes.length, left.map((piece) => piece.why), asked, res.span_deg ?? null);
+      toast(note ? `${words}. ${note.replace(/\.$/, '')}` : words, left.length ? 'warn' : 'ok', null, undo);
+      return res.nodes.length;
     } catch (e) {
       toast(e.message, 'danger');
+      return null;
     } finally {
       stitching = false;
       release?.();

@@ -36,7 +36,13 @@
     stripUrl = null,
     waveform = null,
     original = false,
-    oncapture,
+    oncapture = null,
+    // The A–B loop, which a tool may read and set: Collage takes it as the stretch a panorama is made of.
+    loop = $bindable({ a: null, b: null }),
+    // What the tool adds to the controls, after the loop (Collage's Add frame and Panorama).
+    actions = null,
+    // The keys the tool answers, named on the keyboard icon.
+    keys = INSPECT_HELP.keys,
     // The scene whose time is open, and where a handle dragged on the bar puts it.
     editing = null,
     onedit,
@@ -53,7 +59,6 @@
   let paused = $state(true);
   let muted = $state(false);
   let rate = $state(1);
-  let loop = $state({ a: null, b: null });
   let mediaDuration = $state(0);
   let speedAnchor = $state(null);
   let speedOpen = $state(false);
@@ -316,6 +321,7 @@
           </button>
         {/if}
       </span>
+      {@render actions?.()}
       <!-- One group at the end, so a row too narrow for it wraps it whole, still on the right. -->
       <span class="end">
       {#if barZoom}
@@ -327,16 +333,18 @@
           title={INSPECT_HELP.barZoom}
         ><Icon name="search" size={13} />{label}</button>
       {/if}
-      <span class="player-btn keys" title={INSPECT_HELP.keys}><Icon name="keyboard" size={16} /></span>
+      <span class="player-btn keys" title={keys}><Icon name="keyboard" size={16} /></span>
       <button class="player-btn" onclick={toggleMute} aria-label={muted ? 'Unmute' : 'Mute'} title={INSPECT_HELP.mute}>
         <Icon name={muted ? 'volumeOff' : 'volume'} size={16} />
       </button>
       <button class="player-btn" onclick={toggleFullscreen} aria-label="Full screen" title={INSPECT_HELP.fullscreen}>
         <Icon name="maximize" size={16} />
       </button>
-      <button class="player-btn capture" onclick={() => oncapture?.()} aria-label="Capture this frame" title={INSPECT_HELP.captureIcon}>
-        <Icon name="camera" size={17} />
-      </button>
+      {#if oncapture}
+        <button class="player-btn capture" onclick={() => oncapture()} aria-label="Capture this frame" title={INSPECT_HELP.captureIcon}>
+          <Icon name="camera" size={17} />
+        </button>
+      {/if}
       </span>
     </div>
   </div>

@@ -8,6 +8,8 @@ const props = (extra = {}) => ({
   duration: 125,
   fps: 25,
   shared: { currentTime: 5.01, frameTime: null, seekTo: null },
+  // Inspect captures; Collage's rail puts its own buttons in instead
+  oncapture: () => {},
   ...extra,
 });
 
@@ -83,6 +85,15 @@ describe('Inspect video player on a narrow window', () => {
     expect(css).toContain('container-type: inline-size;');
     expect(css).toMatch(/@container \(max-width: 700px\) \{\s*\.of\.count \{\s*display: none;/);
     expect(css).toMatch(/@container \(max-width: 600px\) \{\s*\.of\.total,\s*\.player-btn\.keys \{\s*display: none;/);
+  });
+
+  it('leaves the capture out for a tool that has none, and puts that tool’s buttons after the loop', async () => {
+    const { createRawSnippet } = await import('svelte');
+    const actions = createRawSnippet(() => ({ render: () => '<span class="tool-acts">Add frame</span>' }));
+    const { body } = render(VideoPlayer, { props: props({ oncapture: null, actions, keys: 'C add frame' }) });
+    expect(body).not.toContain('aria-label="Capture this frame"');
+    expect(body.indexOf('tool-acts')).toBeGreaterThan(body.indexOf('aria-label="Loop"'));
+    expect(body).toContain('title="C add frame"');
   });
 
   it('wraps its last buttons whole, still on the right, rather than clipping the capture', () => {

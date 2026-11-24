@@ -1,5 +1,5 @@
 <script>
-  import { onDestroy } from 'svelte';
+  import { onDestroy, untrack } from 'svelte';
   import { api, detailLine } from '../lib/api.js';
   import { fileUrl } from '../lib/fileUrl.js';
   import { caseState, uiState, reloadCase, toast } from '../lib/state.svelte.js';
@@ -9,10 +9,9 @@
   } from '../lib/inspect.js';
   import { BRUSH_DEFAULT, recrop } from '../lib/excludeBrush.js';
   import { shortClock, spanLabel } from '../lib/scenes.js';
-  import {
-    workState, collageSpec, collageSignature, missingPieces, isFiled,
-  } from '../lib/inspectWork.svelte.js';
+  import { collageSpec, collageSignature, missingPieces, isFiled } from '../lib/inspectWork.svelte.js';
   import { exportBend } from '../lib/straighten.js';
+  import { frameDuration } from '../lib/inspectPlayer.js';
   import { nextName } from '../lib/naming.js';
   import { lookupEntity } from '../lib/catalog.js';
   import { offerPuts, withdrawNote } from '../lib/noteHere.svelte.js';
@@ -36,17 +35,17 @@
   import CollageScene from './inspect/CollageScene.svelte';
   import CollagePreview from './inspect/CollagePreview.svelte';
   import PiecePicker from './inspect/PiecePicker.svelte';
+  import CollageVideoRail from './inspect/CollageVideoRail.svelte';
   import PieceCropModal from './inspect/PieceCropModal.svelte';
   import SaveToCase from './inspect/SaveToCase.svelte';
   import NoCase from '../components/NoCase.svelte';
   import { shortcut } from '../lib/keys.js';
 
-  // A collage lays out pieces from any number of files on one canvas: frames cut
-  // in Inspect, or images already in the case. It is a document of its own, saved
-  // as it is made (engine/inspectwork.py), and the picture it exports is media.
+  // A collage lays out pieces from any number of files on one canvas: frames of a video
+  // played in the rail under the canvas, or images already in the case. It is a document
+  // of its own, saved as it is made (engine/inspectwork.py), and the picture it exports is media.
 
   let mediaList = $state([]);
-  let works = $state([]);
   let collages = $state([]);
   let filters = $state([]);
   let loadedFor = $state(null);
@@ -71,6 +70,7 @@
 
   const mediaPaths = $derived(new Set(mediaList.map((m) => m.path)));
   const images = $derived(mediaList.filter((m) => m.kind === 'image'));
+  const videos = $derived(mediaList.filter((m) => m.kind === 'video'));
   // A work is listed under its file's name as the file has it now, whatever the
   // work itself is called.
   const fileTitles = $derived(new Map(mediaList.map((m) => [m.path, m.title || m.filename])));
@@ -81,10 +81,6 @@
     const origin = mediaOrigin(m);
     return origin ? [[m.path, origin]] : [];
   })));
-  const fileThumbs = $derived(new Map(mediaList.map((m) => [m.path, m.thumbnail])));
-  const pickerWorks = $derived(
-    works.map((w) => ({ ...w, title: fileTitles.get(w.source) ?? w.title, thumb: fileThumbs.get(w.source) ?? null }))
-  );
 
   // The open collage. `name` is the file it is saved under, absent until the
   // first piece makes it worth filing.
@@ -112,8 +108,8 @@
   let view = $state({ zoom: 1, x: 0, y: 0 });
   // Counts the collages opened, so each one gets its canvas, bar and panel afresh.
   let opened = $state(0);
-  // The list of pieces the panel shows, Frames or Images, and a flash when the empty canvas points to it.
-  let pickerTab = $state('frames');
+  // The list of pieces the panel shows, Videos or Images, and a flash when the empty canvas points to it.
+  let pickerTab = $state('videos');
   let pointed = $state(0);
   // The brush that paints, on a piece, what auto-stitch must not match on (lib/excludeBrush.js).
   let brush = $state({ on: false, size: BRUSH_DEFAULT, erase: false });
@@ -122,13 +118,15 @@
   // Whether the view shows the pieces whole, as Fit would; the canvas knows, and fits them.
   let fitted = $state(true);
   let canvas = $state(null);
+  let toolbar = $state(null);
   let docRun = 0;
   const blobs = new Set();
 
-  const used = $derived.by(() => {
-    const counts = new Map();
-    for (const n of doc.nodes) if (n.frameId) counts.set(n.frameId, (counts.get(n.frameId) ?? 0) + 1);
-    return counts;
+  // How many pieces of the collage each file gives it, which the lists say.
+  const counts = $derived.by(() => {
+    const out = new Map();
+    for (const n of doc.nodes) out.set(n.save.path, (out.get(n.save.path) ?? 0) + 1);
+    return out;
   });
   const lost = $derived(missingPieces(doc).length);
   const exportedPath = $derived(
@@ -147,7 +145,6 @@
     const when = !found.times.length ? '' : found.from === found.to ? shortClock(found.from) : spanLabel(found.from, found.to);
     return { ...found, title: fileTitles.get(found.path) ?? found.path.split('/').pop(), when };
   });
-  const hasFrames = $derived(works.some((w) => w.frames));
   // Why the picture cannot be saved as the layout stands, if it cannot.
   const saveBlocked = $derived(
     !doc.nodes.length
@@ -159,7 +156,67 @@
           : '',
   );
 
-  /** The empty canvas's ways in: the list of frames or of images, shown in the panel. */
+  // -- the video rail ------------------------------------------------------------------
+  // The video the rail plays under the canvas, or beside it for a clip filmed upright: the
+  // one the pieces come from as the collage opens, one picked in Videos, or the video of a
+  // piece taken in hand. Its height, or its width beside the canvas, stays in this browser.
+  let railPath = $state(null);
+  let railUpright = $state(false);
+  let railFolded = $state(false);
+  const RAIL_KEY = 'azimut:collageRail';
+  function storedRail() {
+    try {
+      const kept = JSON.parse(localStorage.getItem(RAIL_KEY) ?? 'null');
+      return { bottom: Number(kept?.bottom) || 260, left: Number(kept?.left) || 300 };
+    } catch {
+      return { bottom: 260, left: 300 };
+    }
+  }
+  const railSizes = $state(storedRail());
+  $effect(() => {
+    const kept = JSON.stringify({ bottom: railSizes.bottom, left: railSizes.left });
+    try {
+      localStorage.setItem(RAIL_KEY, kept);
+    } catch {
+      /* a private window keeps it for this visit only */
+    }
+  });
+  const railSide = $derived(railUpright && !railFolded ? 'left' : 'bottom');
+  const railVideo = $derived.by(() => {
+    const item = railPath ? videos.find((m) => m.path === railPath) : null;
+    return item ? { path: item.path, title: item.title || item.filename } : null;
+  });
+  // the collage's pieces cut from the rail's video, dots on its bar
+  const railPieces = $derived(
+    railPath ? doc.nodes.filter((n) => n.save.path === railPath && n.save.time != null).map((n) => ({ id: n.id, time: n.save.time })) : [],
+  );
+  const railSelected = $derived(selectedIds.length === 1 && railPieces.some((p) => p.id === selectedIds[0]) ? selectedIds[0] : null);
+  // what Panorama is doing, said on its button
+  let panoramaStep = $state('');
+
+  /** The video the collage's pieces were last cut from, which the rail opens on. */
+  function videoOfPieces(nodes) {
+    const cut = nodes.filter((n) => n.save?.time != null && videos.some((v) => v.path === n.save.path));
+    return cut.at(-1)?.save.path ?? null;
+  }
+
+  // A piece of another video taken in hand puts that video in the rail.
+  $effect(() => {
+    const ids = selectedIds;
+    untrack(() => {
+      if (ids.length !== 1) return;
+      const node = doc.nodes.find((n) => n.id === ids[0]);
+      if (node?.save.time == null || node.save.path === railPath) return;
+      if (videos.some((v) => v.path === node.save.path)) railPath = node.save.path;
+    });
+  });
+
+  function showVideo(item) {
+    railPath = item.path;
+    railFolded = false;
+  }
+
+  /** The empty canvas's ways in: the list of videos or of images, shown in the panel. */
   function showPieces(tab) {
     pickerTab = tab;
     pointed += 1;
@@ -299,12 +356,15 @@
 
   // A change made in many steps, such as an auto-stitch whose pieces come back one by
   // one, is one undo: the layout before it is kept, nothing is recorded meanwhile, and
-  // the release records what it made.
+  // the release records what it made. A hold inside another, the stitch a Panorama ends
+  // on, records nothing of its own: the outer one's undo takes the whole of it back.
   function holdHistory() {
     if (!doc.open) return () => {};
     clearTimeout(historyTimer);
-    history.push(layoutSnapshot());
-    syncHistory();
+    if (!held) {
+      history.push(layoutSnapshot());
+      syncHistory();
+    }
     held += 1;
     let done = false;
     return () => {
@@ -381,19 +441,10 @@
     }
   }
 
-  async function refreshWorks(id = caseState.current?.id) {
-    if (!id) return;
-    try {
-      works = await api.get(`/api/cases/${id}/inspect/works`);
-    } catch {
-      works = [];
-    }
-  }
-
   async function refresh(id = caseState.current?.id) {
     if (!id) return;
     mediaList = await api.get(`/api/cases/${id}/media`);
-    await Promise.all([refreshList(id), refreshWorks(id)]);
+    await refreshList(id);
   }
 
   $effect(() => {
@@ -403,7 +454,6 @@
       loadedFor = id;
       mediaList = [];
       collages = [];
-      works = [];
       autosave.flush().finally(() => {
         if (doc.caseId && doc.caseId !== caseState.current?.id) closeDoc();
       });
@@ -414,12 +464,6 @@
     } else if (id) {
       refresh(id).then(recheckOpenDoc);
     }
-  });
-
-  // A capture in Inspect adds frames the piece picker should offer.
-  $effect(() => {
-    workState.rev;
-    if (caseState.current?.id) refreshWorks();
   });
 
   /** A delete or a rename elsewhere may concern the open collage, or a file one of its pieces uses. */
@@ -472,6 +516,10 @@
     Object.assign(view, { zoom: 1, x: 0, y: 0 });
     Object.assign(brush, { on: false, erase: false });
     unstitched = [];
+    railPath = null;
+    railFolded = false;
+    railUpright = false;
+    panoramaStep = '';
     opened += 1;
     savedSignature = null;
     selectedIds = [];
@@ -532,6 +580,7 @@
         })),
       });
       savedSignature = signature();
+      railPath = videoOfPieces(doc.nodes);
       if (collages.find((c) => c.name === saved.name)?.thumb) thumbDrawnFrom = thumbKey();
       anchorHistory();
       renderPieces(run);
@@ -602,22 +651,121 @@
     });
   }
 
-  async function addPiece({ frameId, save }) {
+  // A piece lands beside the last one, in a row at its height, and starts a row below it
+  // once the canvas runs out; past the canvas's foot it falls back to a cascade at the top.
+  function nextQuad(w, h) {
+    const last = doc.nodes.at(-1);
+    const cascade = () => {
+      const off = 30 + (doc.nodes.length % 4) * 40;
+      return initialQuad(w, h, doc.width * 0.5, off, off);
+    };
+    if (!last?.quad?.length) return cascade();
+    const xs = last.quad.map(([x]) => x);
+    const ys = last.quad.map(([, y]) => y);
+    const box = { x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) };
+    const tall = Math.max(1, Math.round(box.y1 - box.y0));
+    const wide = Math.max(1, Math.round((w / Math.max(1, h)) * tall));
+    const GAP = 12;
+    let x = box.x1 + GAP;
+    let y = box.y0;
+    if (x + wide > doc.width) {
+      x = 30;
+      y = box.y1 + GAP;
+    }
+    if (y < 0 || x < 0 || y + tall > doc.height || x + wide > doc.width) return cascade();
+    return [[x, y], [x + wide, y], [x + wide, y + tall], [x, y + tall]];
+  }
+
+  // a frame of a video already on the collage, at the same instant
+  const twinOf = (save) =>
+    save.time == null
+      ? null
+      : doc.nodes.find((n) => n.save.path === save.path && n.save.time != null && Math.abs(n.save.time - save.time) < 1e-4) ?? null;
+
+  /** Lay a piece on the collage. `blob` is its picture when the caller already drew it. */
+  async function addPiece({ frameId, save, blob = null }) {
     const run = docRun;
+    const twin = twinOf(save);
+    if (twin) {
+      // taken in hand rather than laid twice
+      selectedIds = [twin.id];
+      toast('This frame is already on the collage', 'info', 2500);
+      return;
+    }
     try {
-      const url = await pieceUrl(save.path, save.time, save.ops);
+      let url;
+      if (blob) {
+        url = URL.createObjectURL(blob);
+        blobs.add(url);
+      } else {
+        url = await pieceUrl(save.path, save.time, save.ops);
+      }
       const dim = await imageSize(url);
       if (run !== docRun) return;
-      const off = 30 + (doc.nodes.length % 4) * 40;
       const node = {
         id: uid('nd'), frameId, url, baseUrl: url, w: dim.w, h: dim.h,
-        frameOps: save.ops, crop: null, save,
-        quad: initialQuad(dim.w, dim.h, doc.width * 0.5, off, off),
+        frameOps: save.ops, crop: null, save, quad: nextQuad(dim.w, dim.h),
       };
       doc.nodes.push(node);
       selectedIds = [node.id];
     } catch (e) {
       toast(e.message, 'danger');
+    }
+  }
+
+  // Panorama: the server picks the frames of the rail's A–B stretch, they go on the
+  // collage in a row, in the order of the clip, and the collage is stitched in the pan's
+  // projection. All of it is one Ctrl+Z.
+  async function makePanorama({ path, start, end, ops }) {
+    if (panoramaStep || !doc.open) return;
+    const run = docRun;
+    const release = holdHistory();
+    panoramaStep = 'Reading…';
+    try {
+      const res = await api.post(`/api/cases/${doc.caseId}/inspect/panorama-frames`, { path, start, end });
+      if (run !== docRun) return;
+      const times = (res?.times ?? []).filter((time) => !twinOf({ path, time }));
+      if ((res?.times ?? []).length < 2) {
+        toast(res?.note || 'No panorama in this stretch', 'warn');
+        return;
+      }
+      panoramaStep = 'Adding…';
+      // drawn three at a time, laid in the clip's order
+      const drawn = new Array(times.length).fill(null);
+      let next = 0;
+      const draw = async () => {
+        while (next < times.length) {
+          const i = next++;
+          try {
+            const url = await pieceUrl(path, times[i], ops);
+            drawn[i] = { url, dim: await imageSize(url) };
+          } catch {
+            drawn[i] = null;
+          }
+        }
+      };
+      await Promise.all([draw(), draw(), draw()]);
+      if (run !== docRun) return;
+      const missed = drawn.filter((d) => !d).length;
+      times.forEach((time, i) => {
+        const got = drawn[i];
+        if (!got) return;
+        doc.nodes.push({
+          id: uid('nd'), frameId: null, url: got.url, baseUrl: got.url, w: got.dim.w, h: got.dim.h,
+          frameOps: ops, crop: null, save: { path, time, ops }, quad: nextQuad(got.dim.w, got.dim.h),
+        });
+      });
+      selectedIds = [];
+      panoramaStep = 'Stitching…';
+      const note = [res.note, missed ? `${missed} frame${missed === 1 ? '' : 's'} could not be read` : '']
+        .filter(Boolean)
+        .join('. ');
+      await toolbar?.stitchPan(note || null);
+    } catch (e) {
+      if (run === docRun) toast(e.message, 'danger');
+    } finally {
+      release();
+      if (run === docRun) panoramaStep = '';
     }
   }
 
@@ -981,9 +1129,10 @@
     </div>
   {:else}
     {#key opened}
-      <div class="workspace">
+      <div class="workspace" class:upright={railVideo && railSide === 'left'}>
         <div class="stage">
           <CollageToolbar
+            bind:this={toolbar}
             collage={doc}
             bind:selectedIds
             {renderPiece}
@@ -1014,14 +1163,14 @@
               <div class="empty-canvas">
                 <div class="ways-in">
                   <Icon name="layers" size={26} />
-                  <p>Add frames from a video, or pictures</p>
+                  {#if railVideo && !railFolded}
+                    <p>Add frames from the video {railSide === 'left' ? 'beside' : 'below'}, or make a panorama of a pan between A and B</p>
+                  {:else}
+                    <p>Add frames from a video, or pictures</p>
+                  {/if}
                   <div class="ways">
-                    {#if hasFrames}
-                      <button class="btn btn-sm" onclick={() => showPieces('frames')}><Icon name="video" size={14} /> Frames</button>
-                    {:else}
-                      <button class="btn btn-sm" onclick={() => (uiState.tool = 'inspect')} title="Frames are cut from a video in Inspect">
-                        <Icon name="video" size={14} /> Cut frames in Inspect
-                      </button>
+                    {#if videos.length}
+                      <button class="btn btn-sm" onclick={() => showPieces('videos')}><Icon name="video" size={14} /> Videos</button>
                     {/if}
                     <button class="btn btn-sm" onclick={() => showPieces('images')}><Icon name="image" size={14} /> Images</button>
                   </div>
@@ -1030,6 +1179,23 @@
             {/if}
           </div>
         </div>
+        {#if railVideo}
+          <CollageVideoRail
+            caseId={doc.caseId}
+            video={railVideo}
+            {filters}
+            pieces={railPieces}
+            selected={railSelected}
+            busy={panoramaStep}
+            side={railSide}
+            bind:upright={railUpright}
+            bind:size={railSizes[railSide]}
+            bind:folded={railFolded}
+            onadd={addPiece}
+            onpanorama={makePanorama}
+            onpick={(id) => (selectedIds = [id])}
+          />
+        {/if}
         <aside class="panel">
           <div class="top">
             <div data-guide="collage.save">
@@ -1070,11 +1236,11 @@
             <div class="section-head"><span><Icon name="plus" size={14} /> Add pieces</span></div>
             <PiecePicker
               caseId={doc.caseId}
-              {filters}
-              works={pickerWorks}
+              {videos}
               {images}
-              {used}
-              rev={workState.rev}
+              inRail={railPath}
+              {counts}
+              onvideo={showVideo}
               onadd={addPiece}
               bind:tab={pickerTab}
             />
@@ -1319,15 +1485,29 @@
       transform: rotate(360deg);
     }
   }
+  /* The canvas with the video's rail under it, or beside it for a clip filmed upright,
+     and the panel on the right the whole height. */
   .workspace {
     flex: 1;
-    display: flex;
     min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas: 'stage panel' 'rail panel';
+  }
+  .workspace.upright {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: 'rail stage panel';
+  }
+  .workspace > :global([data-testid='collage-rail']) {
+    grid-area: rail;
   }
   /* The canvas and the bar over it, for what acts on the whole collage. */
   .stage {
-    flex: 1;
+    grid-area: stage;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
   }
@@ -1375,6 +1555,7 @@
   /* The panel: the save always on top, the pieces taking what room there is, and the
      piece in hand at the foot, where nothing pushes it. */
   .panel {
+    grid-area: panel;
     width: 320px;
     flex-shrink: 0;
     border-left: 1px solid var(--border);

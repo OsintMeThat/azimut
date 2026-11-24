@@ -88,7 +88,7 @@
 
   // Everything a press may land on, nearest first when two are close.
   const targets = $derived([
-    ...frames.map((f, i) => ({ time: f.time, label: `Frame ${i + 1}` })),
+    ...frames.map((f, i) => ({ time: f.time, label: f.label ?? `Frame ${i + 1}` })),
     ...marks.map((m) => ({ time: m.time, label: m.label || 'Mark' })),
     ...shots.map((s, i) => ({ time: s.start, label: `Shot ${i + 1}` })),
     ...picks.map((p) => ({ time: p.time, label: 'Sharp frame' })),
@@ -356,7 +356,7 @@
       <span class="mark" style:left={at(m.time)}></span>
     {/each}
     {#each frames as f (f.id)}
-      <span class="frame" style:left={at(f.time)}></span>
+      <span class="frame" class:on={f.on} style:left={at(f.time)}></span>
     {/each}
     <span class="head" style:left={at(time)}></span>
     {#if zoom && duration > 0}
@@ -586,6 +586,10 @@
     top: 1px;
     background: var(--accent);
     box-shadow: 0 0 0 1px var(--bg-1);
+  }
+  /* the frame of the piece in hand, in Collage */
+  .frame.on {
+    box-shadow: 0 0 0 1px var(--bg-1), 0 0 0 3px var(--accent);
   }
   .head {
     position: absolute;

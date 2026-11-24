@@ -29,19 +29,22 @@ function tally(reasons) {
 
 /**
  * What the message says of a stitch: how many pieces it placed, and why it left the
- * outlined ones where they were. `reasons` holds one word per piece left out.
+ * outlined ones where they were. `reasons` holds one word per piece left out. `span`
+ * is the angle the placed pieces cover in a panorama mode, in degrees, said as an
+ * estimate after the count.
  */
-export function stitchedWords(placed, reasons, mode = 'planar') {
+export function stitchedWords(placed, reasons, mode = 'planar', span = null) {
   const left = reasons.length;
-  if (!left) return `Stitched ${placed} pieces`;
+  const across = placed && Number.isFinite(span) && span > 0 ? `, about ${Math.round(span)}° across` : '';
+  if (!left) return `Stitched ${placed} pieces${across}`;
   const one = new Set(reasons).size === 1 ? reasons[0] : null;
   const words = one ? leftOutWords(one, mode) : null;
   const why = words ? `${words.say.toLowerCase()}${words.more ? `, ${words.more}` : ''}` : tally(reasons);
   if (!placed) return one === 'no-overlap' ? 'No overlap found between the pieces, so none moved' : `None of the pieces moved: ${why}`;
   if (one === 'no-overlap') {
     const which = left === 1 ? 'the outlined piece' : `the ${left} outlined pieces`;
-    return `Stitched ${placed}. No overlap found for ${which}, left where ${left === 1 ? 'it was' : 'they were'}`;
+    return `Stitched ${placed}${across}. No overlap found for ${which}, left where ${left === 1 ? 'it was' : 'they were'}`;
   }
   const which = left === 1 ? 'The outlined piece stays where it was' : `The ${left} outlined pieces stay where they were`;
-  return `Stitched ${placed}. ${which}: ${why}`;
+  return `Stitched ${placed}${across}. ${which}: ${why}`;
 }
