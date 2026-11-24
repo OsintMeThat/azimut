@@ -9827,7 +9827,11 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
   `data-accent` on `<html>` (amber stamps nothing), kept in `localStorage` and
   applied in `index.html` before first paint, like the theme; `app.css` holds one
   rule per accent, and `lib/accent.test.js` keeps the list and the rules in step.
-  Native checks, radios and sliders follow it through `accent-color`. The logo keeps
+  Radios and sliders follow it through `accent-color`. Check boxes are drawn by the app
+  rather than the browser, alike in every browser: a quiet box filled with the accent when
+  ticked, its tick (a dash when partly ticked) drawn in from the left over `--motion-draw`,
+  white on the quiet accents' ink. They stay plain inputs, and every rule sits in `:where()`
+  so a box a tool styles itself (Website's switch) keeps its look (`lib/checks.test.js`). The logo keeps
   its amber, and exports (plates, proofs, Compare's frame, posts) keep their own
   colours. A canvas that reads `--accent` once repaints on `data-accent` as it does
   on `data-theme` (the Graph).
@@ -9852,7 +9856,7 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
   colours.
 - **Motion**: short and quiet; things arrive, they never perform. The tokens are in
   `app.css` (`--motion-hover` 120 ms, `--motion-press` 90 ms, `--motion-pop` 160 ms,
-  `--motion-move` and `--motion-slide` 220 ms, `--motion-turn` 420 ms, `--ease-out`), and only `transform`
+  `--motion-move`, `--motion-slide` and `--motion-draw` 220 ms, `--motion-turn` 420 ms, `--ease-out`), and only `transform`
   and `opacity` move. A floating menu drops 4 px from its opener with its first
   eight rows in a 14 ms cascade; a modal's veil fades and its card rises 8 px; a
   toast rises with a thread running out over its timeout; a button gives to 97 %
