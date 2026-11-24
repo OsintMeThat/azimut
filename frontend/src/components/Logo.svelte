@@ -6,13 +6,17 @@
      with ink to the west and amber to the east. The split is the convention
      map north arrows have always used, which is why it carries the colour.
      The west flank goes through --brand-ink so it stays legible on both
-     themes; the amber tracks --accent, which app.css pins across themes.
+     themes. The amber is the brand's own and stays when the analyst picks
+     another accent in Settings. The paths sit in a `needle` group that the
+     top bar swings on hover.
      The same two paths are in public/favicon.svg and docs/media/lockup-*.svg,
      and are redrawn by packaging/icons/render_icons.py — move all of them
      together; brandAssets.test.js fails if one drifts. -->
 <svg width={size} height={size} viewBox="0 0 24 24" aria-label="Azimut logo">
-  <path fill="var(--brand-ink, #e3e3e3)" d="M12 1.8 5.8 21.4 12 16.4Z" />
-  <path fill="#e8a33d" d="M12 1.8 18.2 21.4 12 16.4Z" />
+  <g class="needle">
+    <path fill="var(--brand-ink, #e3e3e3)" d="M12 1.8 5.8 21.4 12 16.4Z" />
+    <path fill="#e8a33d" d="M12 1.8 18.2 21.4 12 16.4Z" />
+  </g>
 </svg>
 
 <style>

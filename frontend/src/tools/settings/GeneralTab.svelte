@@ -1,6 +1,6 @@
 <script>
   /**
-   * How every tool prints a coordinate, a distance and an area, plus where the
+   * The accent colour, how every tool prints a coordinate, a distance and an area, plus where the
    * maps open, how much the 3D views draw on this computer, what saving a proof
    * does with its point, how Reverse Search reaches an engine, and whether the
    * heart on Tip beats.
@@ -10,6 +10,8 @@
    */
   import { formatDistance, formatArea } from '../../lib/measure.js';
   import { QUALITIES_3D, qualityOf } from '../../lib/quality3d.js';
+  import { ACCENTS } from '../../lib/accent.js';
+  import { uiState, setAccent } from '../../lib/state.svelte.js';
 
   let {
     prefs,
@@ -22,6 +24,7 @@
     mapSync = $bindable(),
   } = $props();
 
+  const ACCENT_TITLE = 'The colour of selection, the main buttons and the tabs on this computer';
   const HEARTBEAT_TITLE = 'The heart on Tip, in the top bar, beats once every ten minutes until you open it';
 
   const COORD_CHOICES = [
@@ -34,6 +37,30 @@
     { id: 'imperial', label: 'Imperial' },
   ];
 </script>
+
+<section class="group">
+  <h3>Appearance</h3>
+  <div class="row">
+    <div class="row-label">
+      <span title={ACCENT_TITLE}>Accent colour</span>
+      <span class="row-hint">The logo keeps its amber, and exports keep their own colours.</span>
+    </div>
+    <div class="swatches" role="group" aria-label="Accent colour" title={ACCENT_TITLE}>
+      {#each ACCENTS as a, i (a.id)}
+        <!-- the three quiet ones stand apart from the vivid ones -->
+        {#if a.quiet && !ACCENTS[i - 1]?.quiet}<span class="swatch-gap" role="presentation"></span>{/if}
+        <button
+          class="swatch"
+          aria-pressed={uiState.accent === a.id}
+          aria-label={a.label}
+          title={a.label}
+          style:--swatch={uiState.theme === 'light' && a.swatchLight ? a.swatchLight : a.swatch}
+          onclick={() => setAccent(a.id)}
+        ></button>
+      {/each}
+    </div>
+  </div>
+</section>
 
 <section class="group" data-guide="settings.coordinates">
   <h3>Coordinates</h3>
@@ -192,6 +219,51 @@
     margin-top: 4px;
   }
 
+
+  .swatches {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px;
+  }
+  .swatch {
+    flex: none;
+    width: 17px;
+    height: 17px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--swatch);
+    box-shadow: inset 0 0 0 1px var(--border);
+    cursor: pointer;
+    transition: box-shadow var(--motion-pop) var(--ease-out), transform var(--motion-press) var(--ease);
+  }
+  .swatch:hover {
+    transform: scale(1.12);
+  }
+  .swatch:active {
+    transform: scale(0.94);
+  }
+  .swatch[aria-pressed='true'] {
+    box-shadow: inset 0 0 0 1px var(--border), 0 0 0 2px var(--bg-1), 0 0 0 3.5px var(--swatch);
+  }
+  .swatch:focus-visible {
+    outline: 2px solid var(--text-2);
+    outline-offset: 4px;
+  }
+  .swatch-gap {
+    width: 1px;
+    height: 14px;
+    margin: 0 3px;
+    background: var(--border-strong);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .swatch:hover,
+    .swatch:active {
+      transform: none;
+    }
+  }
 
   .grid-3 {
     display: grid;

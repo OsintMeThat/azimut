@@ -269,6 +269,7 @@
   stroke-linecap="round"
   stroke-linejoin="round"
   aria-hidden="true"
+  data-icon={name}
 >
   <path d={paths[name] ?? paths.alert} />
 </svg>

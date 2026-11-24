@@ -9797,14 +9797,27 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
 - **Type**: system font for interface copy, monospace for coordinates, hashes and
   dates, and uppercase micro-labels only for panel sections.
 - **Palette**: neutral gray darks (`--bg-0…3`), white-alpha borders, muted
-  status colors. Azimuth amber is reserved for the primary action, selection and
-  2 px active-edge indicators. It is not a decorative background or glow.
+  status colors. The accent (amber unless the analyst picks another) is reserved
+  for the primary action, selection and 2 px active-edge indicators. It is not a
+  decorative background or glow.
+- **Accent colour**: Settings › General › Appearance offers eleven. Eight vivid ones
+  share amber's lightness (OKLCH L .765, Lemon higher so it reads yellow) and skip
+  the hues already spoken for: green says OK, blue says info, red says delete. Three
+  quiet ones (Sand, Slate, Graphite) turn to a deep ink with white text in the light
+  theme, and keep their dark value on a `.dark-surface`. `lib/accent.js` stamps
+  `data-accent` on `<html>` (amber stamps nothing), kept in `localStorage` and
+  applied in `index.html` before first paint, like the theme; `app.css` holds one
+  rule per accent, and `lib/accent.test.js` keeps the list and the rules in step.
+  Native checks, radios and sliders follow it through `accent-color`. The logo keeps
+  its amber, and exports (plates, proofs, Compare's frame, posts) keep their own
+  colours. A canvas that reads `--accent` once repaints on `data-accent` as it does
+  on `data-theme` (the Graph).
 - **Theme**: dark by default, with a light daylight palette toggled from the
   foot of the rail. Both are the same tokens: `:root` holds dark, a
   `:root[data-theme='light']` block flips the colour tokens, and `lib/theme.js`
   stamps `data-theme` on `<html>` (remembered in `localStorage`, applied in
-  `index.html` before first paint). The amber accent and the annotation palette
-  stay fixed across themes. Surfaces over imagery remain dark through
+  `index.html` before first paint). The accent and the annotation palette stay
+  fixed across themes, apart from the quiet accents' ink. Surfaces over imagery remain dark through
   `.dark-surface`. New chrome must use tokens; hardcoded light colours are limited
   to text on dark image scrims.
 - **Quiet controls stay visible**: a ⋯, a ▾, a handle or any button drawn as an icon
@@ -9818,9 +9831,19 @@ instrument style of QGIS, Google Earth Pro, Resolve and Lightroom.
   gear, the Settings tab holding it, then the button that acts on it — so
   following it always ends somewhere it can be cleared. No counts, no other
   colours.
-- **Motion**: none. Color-only transitions ≤0.15s; no entrance animations,
-  no hover lifts. Transient functional feedback (locate-flash) is the one
-  exception.
+- **Motion**: short and quiet; things arrive, they never perform. The tokens are in
+  `app.css` (`--motion-hover` 120 ms, `--motion-press` 90 ms, `--motion-pop` 160 ms,
+  `--motion-move` and `--motion-slide` 220 ms, `--ease-out`), and only `transform`
+  and `opacity` move. A floating menu drops 4 px from its opener with its first
+  eight rows in a 14 ms cascade; a modal's veil fades and its card rises 8 px; a
+  toast rises with a thread running out over its timeout; a button gives to 97 %
+  under the pointer, a plus turns a quarter and an upload arrow lifts on hover; the
+  accent mark of the rail and of the tabs slides to the choice (`lib/motion/ink.js`);
+  a tool coming into view fades in without travelling; the logo's needle swings and
+  settles when the pointer comes to it. Everything closes at once. Maps, the globe,
+  Horizon, timelines and players never move with these. Reduced motion keeps the
+  fades and drops every travel, scale, slide and bounce (`--motion-shift` 0 and
+  the rest, one `@media` block), and the guide's shots are taken with it.
 - **Copy**: no slogans or self-explanation in chrome. Empty states use one short
   sentence. Visible UI strings use `·`, `:` or a period instead of em dashes.
 - **The analyst's words keep their direction**: the interface stays English, and a

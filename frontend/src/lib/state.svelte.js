@@ -9,6 +9,7 @@ import { api } from './api.js';
 import { formatCoords as renderCoords } from './coords.js';
 import { loadWidth, saveWidth, clampWidth, loadSidebarView } from './sidebar.js';
 import { loadTheme, saveTheme, applyTheme } from './theme.js';
+import { loadAccent, saveAccent, applyAccent, normalizeAccent } from './accent.js';
 import { shouldShowUpdate } from './appUpdate.js';
 import { extensionVersion, pingExtensions, extensionState } from './extBridge.js';
 import { classify } from './extInstall.js';
@@ -321,6 +322,7 @@ export const uiState = $state({
   // state cannot say what any of the rail means. A deep link still wins.
   tool: 'overview',
   theme: loadTheme(), // 'dark' | 'light'; index.html stamps it before first paint
+  accent: loadAccent(), // lib/accent.js ACCENTS id; index.html stamps it too
   sidebarOpen: true,
   sidebarW: loadWidth(), // px, drag-resizable and remembered across reloads
   sidebarView: loadSidebarView(), // 'folders' | 'todo' | 'recent', remembered across reloads
@@ -503,6 +505,13 @@ export function toggleTheme() {
   setTheme(uiState.theme === 'light' ? 'dark' : 'light');
 }
 
+/** Pick the accent colour (Settings › General), mirror it to <html>, and remember it. */
+export function setAccent(accent) {
+  uiState.accent = normalizeAccent(accent);
+  applyAccent(uiState.accent);
+  saveAccent(uiState.accent);
+}
+
 /**
  * Resize the case sidebar (px). Clamped against the live window, so a width
  * dragged out on a big screen can't wedge the canvas shut on a small one.
@@ -534,7 +543,7 @@ export function toast(message, kind = 'info', timeout = null, action = null) {
   const id = ++toastSeq;
   if (kind === 'error') kind = 'danger';
   if (timeout == null) timeout = kind === 'danger' || action ? 8000 : 3800;
-  uiState.toasts.push({ id, message, kind, action });
+  uiState.toasts.push({ id, message, kind, action, timeout });
   if (timeout > 0) setTimeout(() => dismissToast(id), timeout);
   return id;
 }

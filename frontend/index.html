@@ -14,6 +14,12 @@
       } catch (e) {
         document.documentElement.dataset.theme = 'dark';
       }
+      // The accent likewise (lib/accent.js); amber, the default, stamps nothing.
+      // An unknown value has no rule in app.css, so it reads as amber too.
+      try {
+        var a = localStorage.getItem('azimut:accent');
+        if (a && /^[a-z]+$/.test(a) && a !== 'amber') document.documentElement.dataset.accent = a;
+      } catch (e) {}
     </script>
   </head>
   <body>

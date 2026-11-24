@@ -30,6 +30,8 @@
           {action.label}
         </button>
       {/each}
+      <!-- how long it stays, as a thread running out -->
+      {#if t.timeout > 0}<span class="toast-time" style:animation-duration={`${t.timeout}ms`}></span>{/if}
     </div>
   {/each}
 </div>
@@ -48,6 +50,8 @@
     pointer-events: none;
   }
   .toast {
+    position: relative;
+    overflow: hidden;
     display: flex;
     align-items: center;
     gap: 9px;
@@ -59,6 +63,21 @@
     font-size: var(--fs-sm);
     font-weight: 500;
     max-width: 480px;
+    animation: motion-rise-in var(--motion-move) var(--ease-out) backwards;
+  }
+  .toast-time {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: currentColor;
+    opacity: 0.4;
+    transform-origin: left;
+    animation: toast-time linear forwards;
+  }
+  @keyframes toast-time {
+    to { transform: scaleX(0); }
   }
   .toast.ok {
     border-color: var(--ok);

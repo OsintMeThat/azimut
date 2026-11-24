@@ -4565,7 +4565,7 @@
     });
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ['data-theme', 'class'],
+      attributeFilter: ['data-theme', 'data-accent', 'class'],
     });
     return () => observer.disconnect();
   });
