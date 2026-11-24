@@ -3,11 +3,12 @@
  * (engine/seams.py says the rule; the two are held together by
  * `tests/fixtures/collage-seams.json`).
  *
- * Among the stitched pieces, those whose recipe holds the rotation model's `remap`, a
- * point shows the piece whose middle is nearest, so each owns its Voronoi cell among
- * their middles. A stitched piece is hidden only where the owner of a cell, drawn below
- * it, holds its picture: where the owner's warp left a corner empty, the pieces show
- * as they stack. Pieces laid by hand, and planar stitches, keep stack order.
+ * Among the stitched pieces, those whose recipe holds the rotation model's `remap` and
+ * that still lie as the upright rectangle the stitch laid, a point shows the piece whose
+ * middle is nearest, so each owns its Voronoi cell among their middles. A stitched piece
+ * is hidden only where the owner of a cell, drawn below it, holds its picture: where the
+ * owner's warp left a corner empty, the pieces show as they stack. Pieces laid by hand,
+ * a stitched one whose corner was moved by hand, and planar stitches keep stack order.
  *
  * The canvas and the list's preview draw it with polygons: each owner's footprint,
  * traced through its warp, cut to its cell, is a hole in every stitched piece above it.
@@ -15,9 +16,28 @@
 import { quadCentroid, quadMapUnit, quadUnitAt } from './inspect.js';
 import { remapModel } from './excludeBrush.js';
 
-/** Whether a piece's recipe holds the rotation model's warp: a piece Azimut stitched. */
+/**
+ * How far a corner may sit off the upright rectangle a stitch lays, as a share of the
+ * piece's larger side: past it, the analyst has warped the piece by hand.
+ */
+export const SQUARE = 1e-3;
+
+/** Whether four corners (top left, top right, bottom right, bottom left) still form an upright rectangle. */
+export function isUpright(quad) {
+  if (quad?.length !== 4) return false;
+  const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = quad;
+  if (!(x1 > x0 && y3 > y0)) return false;
+  const off = SQUARE * Math.max(x1 - x0, y3 - y0);
+  return Math.abs(y1 - y0) <= off && Math.abs(y2 - y3) <= off && Math.abs(x3 - x0) <= off && Math.abs(x2 - x1) <= off;
+}
+
+/**
+ * A piece Azimut stitched: its recipe holds the rotation model's warp and it lies as the
+ * upright rectangle the stitch laid. Moved or scaled it still is; a corner moved by hand
+ * makes it a piece laid by hand.
+ */
 export function isStitched(node) {
-  return (node?.save?.ops ?? []).some((o) => o?.op === 'remap' && o.params?.r?.length === 9);
+  return (node?.save?.ops ?? []).some((o) => o?.op === 'remap' && o.params?.r?.length === 9) && isUpright(node.quad);
 }
 
 const near = (a, b) => Math.abs(a - b) <= Math.max(1e-9 * Math.max(Math.abs(a), Math.abs(b)), 1e-9);

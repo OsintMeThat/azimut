@@ -5,9 +5,12 @@ its own edge, where its lens bends most, so ridges and skies stepped there. Amon
 the stitched pieces a point now shows the one whose middle is nearest: each owns
 its Voronoi cell among their middles, convex, the seam halfway between two of them.
 
-- A piece is stitched when its recipe holds the rotation model's ``remap`` op. A
-  planar stitch leaves the pixels alone and only places the quad, so nothing tells
-  its pieces from ones laid by hand: they keep stack order with them.
+- A piece is stitched when its recipe holds the rotation model's ``remap`` op and it
+  still lies as the upright rectangle the stitch laid. Moved, scaled or still in
+  place it is; a corner moved by hand (or a turn) makes it a piece laid by hand,
+  which keeps its place in the stack. A planar stitch leaves the pixels alone and
+  only places the quad, so nothing tells its pieces from ones laid by hand: they
+  keep stack order with them.
 - A piece's middle is the mean of its four corners on the canvas. Two middles at
   one place: the piece drawn later owns the cell.
 - A piece is hidden only where the owner of the cell, drawn below it, is fully
@@ -32,13 +35,36 @@ from typing import Any
 Point = tuple[float, float]
 
 
-def stitched(ops: Any) -> bool:
-    """Whether a piece's recipe holds the rotation model's warp: a piece Azimut stitched."""
+# How far a corner may sit off the upright rectangle a stitch lays, as a share of the
+# piece's larger side: past it, the analyst has warped the piece by hand.
+SQUARE = 1e-3
+
+
+def _warped(ops: Any) -> bool:
+    """Whether a recipe holds the rotation model's warp."""
     for op in ops or []:
         params = op.get("params") if isinstance(op, dict) and op.get("op") == "remap" else None
         if isinstance(params, dict) and len(params.get("r") or []) == 9:
             return True
     return False
+
+
+def upright(quad: Sequence[Sequence[float]]) -> bool:
+    """Whether four corners (top left, top right, bottom right, bottom left) still form an
+    upright rectangle, as a stitch lays a piece."""
+    if len(quad) != 4:
+        return False
+    (x0, y0), (x1, y1), (x2, y2), (x3, y3) = ((float(p[0]), float(p[1])) for p in quad)
+    if not (x1 > x0 and y3 > y0):
+        return False
+    off = SQUARE * max(x1 - x0, y3 - y0)
+    return abs(y1 - y0) <= off and abs(y2 - y3) <= off and abs(x3 - x0) <= off and abs(x2 - x1) <= off
+
+
+def stitched(ops: Any, quad: Sequence[Sequence[float]]) -> bool:
+    """A piece Azimut stitched: its recipe holds the rotation model's warp and it lies as the
+    upright rectangle the stitch laid."""
+    return _warped(ops) and upright(quad)
 
 
 def middle(quad: Sequence[Sequence[float]]) -> Point:

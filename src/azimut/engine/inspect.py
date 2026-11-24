@@ -1323,9 +1323,9 @@ class _Seams:
         index: list[int] = []
         middles: list[seams.Point] = []
         for i, node in enumerate(nodes):
-            if not seams.stitched((node.get("src") or {}).get("ops")):
-                continue
             try:
+                if not seams.stitched((node.get("src") or {}).get("ops"), node["quad"]):
+                    continue
                 at = seams.middle(node["quad"])
             except (KeyError, TypeError, ValueError, IndexError):
                 continue

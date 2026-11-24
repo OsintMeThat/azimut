@@ -32,7 +32,9 @@ function inside(poly, [x, y]) {
 function shownAt(nodes, holes, at) {
   for (let i = nodes.length - 1; i >= 0; i -= 1) {
     const node = nodes[i];
-    const own = isStitched(node) ? footprint(node) : node.quad;
+    // a warped picture holds its pixels within its warp's outline, stitched or warped since by hand
+    const warped = (node.save?.ops ?? []).some((o) => o.op === 'remap');
+    const own = warped ? footprint(node) : node.quad;
     if (inside(own, at) && !holes[i].some((hole) => inside(hole, at))) return node.id;
   }
   return null;
@@ -90,6 +92,23 @@ describe('a stitched collage, as the saved picture shows it', () => {
     expect(pan.some((p) => p.stacked === 'b' && p.shows === 'a')).toBe(true);
     expect(pan.some((p) => p.stacked === 'c' && p.shows === 'h')).toBe(true);
     expect(fixture.corner.points.some((p) => p.corner && p.shows === 'f')).toBe(true);
+    expect(fixture.warped.points.some((p) => p.shows === 'r')).toBe(true);
+    expect(fixture.warped.points.some((p) => p.stacked === 'q' && p.shows === 'p')).toBe(true);
+  });
+});
+
+describe('isStitched', () => {
+  const ops = fixture.pan.pieces[0].save.ops;
+  const node = (quad) => ({ save: { ops }, quad });
+
+  it('keeps a stitched piece moved or scaled, still the rectangle the stitch laid', () => {
+    expect(isStitched(node([[400, 5], [700, 5], [700, 185], [400, 185]]))).toBe(true);
+    expect(isStitched(node([[10, 20], [110, 20.05], [110, 80], [10, 80]]))).toBe(true);
+  });
+
+  it('lays by hand a stitched piece whose corner was pulled, or that was turned', () => {
+    expect(isStitched(node([[10, 20], [130, 34], [110, 80], [10, 80]]))).toBe(false);
+    expect(isStitched(node([[60, 0], [110, 50], [60, 100], [10, 50]]))).toBe(false);
   });
 });
 

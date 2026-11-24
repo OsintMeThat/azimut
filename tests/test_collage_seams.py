@@ -33,8 +33,9 @@ def _laid(client, scene):
     cid = client.post("/api/cases", json={"name": "Seams"}).json()["id"]
     nodes = []
     for piece in scene["pieces"]:
-        stitched = seams.stitched(piece["save"]["ops"])
-        size = (seamscene.W, seamscene.H) if stitched else (int(piece["w"]), int(piece["h"]))
+        # a warped piece's picture is the whole frame its warp reshapes, whether or not it still meets halfway
+        warped = any(op["op"] == "remap" for op in piece["save"]["ops"])
+        size = (seamscene.W, seamscene.H) if warped else (int(piece["w"]), int(piece["h"]))
         item = client.post(
             f"/api/cases/{cid}/media/upload",
             files={"file": (f"{piece['id']}.png", io.BytesIO(_png(piece["colour"], size)), "image/png")},
@@ -64,6 +65,11 @@ def test_the_fixture_is_the_rule_worked_point_by_point():
     assert any(p["stacked"] == "c" and p["shows"] == "h" for p in pan)
     assert any(p["stacked"] == "c" and p["shows"] == "c" and p["owner"] == "c" for p in pan)
     assert any(p.get("corner") and p["shows"] == "f" for p in FIXTURE["corner"]["points"])
+    # a stitched frame warped by hand is whole on top, and the two under it meet as if it were not there
+    warped = FIXTURE["warped"]
+    assert "r" not in warped["cells"]
+    assert any(p["shows"] == "r" for p in warped["points"])
+    assert any(p["stacked"] == "q" and p["shows"] == "p" for p in warped["points"])
 
 
 @pytest.mark.parametrize("name", sorted(FIXTURE))
@@ -117,12 +123,24 @@ def test_straightened_pieces_keep_the_seams_once_laid_by_hand(client):
 
 def test_only_the_rotation_models_warp_marks_a_stitched_piece():
     remap = {"op": "remap", "params": {"warp": "cylindrical", "r": [1, 0, 0, 0, 1, 0, 0, 0, 1]}}
-    assert seams.stitched([{"op": "crop", "params": {}}, remap])
+    laid = [[10, 20], [110, 20], [110, 80], [10, 80]]
+    assert seams.stitched([{"op": "crop", "params": {}}, remap], laid)
     # a planar stitch leaves the recipe alone: nothing tells it from a piece laid by hand
-    assert not seams.stitched([])
-    assert not seams.stitched(None)
-    assert not seams.stitched([{"op": "remap", "params": {"warp": "cylindrical", "r": [1, 0, 0]}}])
-    assert not seams.stitched([{"op": "crop", "params": {"x": 0, "y": 0, "w": 1, "h": 1}}])
+    assert not seams.stitched([], laid)
+    assert not seams.stitched(None, laid)
+    assert not seams.stitched([{"op": "remap", "params": {"warp": "cylindrical", "r": [1, 0, 0]}}], laid)
+    assert not seams.stitched([{"op": "crop", "params": {"x": 0, "y": 0, "w": 1, "h": 1}}], laid)
+
+
+def test_a_stitched_piece_warped_by_hand_is_laid_by_hand():
+    remap = [{"op": "remap", "params": {"warp": "cylindrical", "r": [1, 0, 0, 0, 1, 0, 0, 0, 1]}}]
+    # moved and scaled, still the rectangle the stitch laid
+    assert seams.stitched(remap, [[400, 5], [700, 5], [700, 185], [400, 185]])
+    # a corner pulled, or the piece turned: the analyst's hand, so stack order
+    assert not seams.stitched(remap, [[10, 20], [130, 34], [110, 80], [10, 80]])
+    assert not seams.stitched(remap, [[60, 0], [110, 50], [60, 100], [10, 50]])
+    # a hair off, as rounding leaves it, is no warp
+    assert seams.stitched(remap, [[10, 20], [110, 20.05], [110, 80], [10, 80]])
 
 
 def _area(poly):

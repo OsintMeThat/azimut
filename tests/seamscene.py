@@ -11,6 +11,9 @@ here one point at a time, straight from the rule (engine/seams.py), and written 
 - `corner`: a frame looking down, its lower corners empty, and over it a frame its
   analyst drew three times larger, whose middle lies far above: in the first frame's
   cell, where it has no pixel, the second still shows.
+- `warped`: two frames across, and over the first the same view a moment later, one
+  of its corners pulled by hand: no longer the rectangle the stitch laid, it is laid
+  by hand, whole on top, and the other two meet as if it were not there.
 """
 
 import json
@@ -29,22 +32,29 @@ FOCAL = 330.0
 # (and so the canvas's outline, traced a little inside a warp's edge, holds it too)
 MARGIN = 6.0
 PER_KIND = 6
-# each collage, its pieces bottom to top: ("frame", id, yaw, pitch down, drawn larger by) in degrees,
-# or ("hand", id, [left, top] as shares of the stitched frames' extent, [width, height])
+# each collage, its pieces bottom to top: ("frame", id, yaw, pitch down, drawn larger by, its top right
+# corner moved by hand [dx, dy] or None) in degrees, or ("hand", id, [left, top] as shares of the
+# stitched frames' extent, [width, height])
 SCENES = {
     "pan": (
-        ("frame", "a", -26.0, 6.0, 1.0),
-        ("frame", "b", 0.0, 16.0, 1.0),
+        ("frame", "a", -26.0, 6.0, 1.0, None),
+        ("frame", "b", 0.0, 16.0, 1.0, None),
         ("hand", "h", [0.62, 0.55], [150.0, 90.0]),
-        ("frame", "c", 25.0, 4.0, 1.0),
+        ("frame", "c", 25.0, 4.0, 1.0, None),
     ),
     "corner": (
-        ("frame", "e", 0.0, 22.0, 1.0),
-        ("frame", "f", 10.0, -14.0, 3.0),
+        ("frame", "e", 0.0, 22.0, 1.0, None),
+        ("frame", "f", 10.0, -14.0, 3.0, None),
+    ),
+    "warped": (
+        ("frame", "p", -15.0, 8.0, 1.0, None),
+        ("frame", "q", 15.0, 8.0, 1.0, None),
+        ("frame", "r", -12.0, 9.0, 1.0, [34.0, 22.0]),
     ),
 }
 COLOURS = {"a": [220, 60, 50], "b": [50, 170, 70], "c": [60, 90, 220], "h": [240, 200, 40],
-           "e": [150, 60, 200], "f": [230, 140, 30]}
+           "e": [150, 60, 200], "f": [230, 140, 30], "p": [200, 40, 120], "q": [40, 180, 190],
+           "r": [250, 250, 250]}
 
 
 def _rotation(yaw: float, pitch: float) -> np.ndarray:
@@ -59,6 +69,21 @@ def _remap(rotation: np.ndarray) -> dict:
             "r": [round(float(v), 9) for v in rotation.reshape(9)], "scale": round(FOCAL / W, 9), "gain": 1.0}
 
 
+def _to_own(quad: list, w: float, h: float):
+    """Canvas points to a piece's own pixels, through the map its quad warps its picture by."""
+    rows = []
+    for (x, y), (u, v) in zip(quad, [(0, 0), (w, 0), (w, h), (0, h)]):
+        rows.append([x, y, 1, 0, 0, 0, -u * x, -u * y, -u])
+        rows.append([0, 0, 0, x, y, 1, -v * x, -v * y, -v])
+    m = np.linalg.svd(np.asarray(rows, dtype=np.float64))[2][-1].reshape(3, 3)
+
+    def at(x: float, y: float) -> tuple[float, float]:
+        u, v, z = m @ np.array([x, y, 1.0])
+        return u / z, v / z
+
+    return at
+
+
 def _scene(layout: tuple) -> dict:
     from PIL import Image
 
@@ -68,7 +93,7 @@ def _scene(layout: tuple) -> dict:
     for kind, name, *rest in layout:
         if kind != "frame":
             continue
-        yaw, pitch, larger = rest
+        yaw, pitch, larger, _ = rest
         params = _remap(_rotation(yaw, pitch))
         k, r, scale = stitch._camera_at(params, W, H)
         x, y, _, _ = cv2.PyRotationWarper("cylindrical", scale).warpRoi((W, H), k, r)
@@ -88,19 +113,23 @@ def _scene(layout: tuple) -> dict:
             left, top = round(x - x0, 3), round(y - y0, 3)
             w, h = warped.size
             ops = [{"op": "remap", "params": params}]
-            alphas[name] = (np.asarray(warped.getchannel("A")), left, top, qw / w)
+            moved = rest[3] or [0.0, 0.0]
         else:
             (fx, fy), (w, h) = rest
-            left, top, qw, qh, ops = round(fx * right, 3), round(fy * bottom, 3), w, h, []
+            left, top, qw, qh, ops, moved = round(fx * right, 3), round(fy * bottom, 3), w, h, [], [0.0, 0.0]
+        quad = [[left, top], [round(left + qw + moved[0], 3), round(top + moved[1], 3)],
+                [round(left + qw, 3), round(top + qh, 3)], [left, round(top + qh, 3)]]
+        if kind == "frame":
+            alphas[name] = (np.asarray(warped.getchannel("A")), _to_own(quad, w, h))
         pieces.append({
             "id": name, "save": {"path": f"media/{name}.png", "time": None, "ops": ops}, "w": w, "h": h,
-            "quad": [[left, top], [round(left + qw, 3), top], [round(left + qw, 3), round(top + qh, 3)], [left, round(top + qh, 3)]],
-            "colour": COLOURS[name],
+            "quad": quad, "colour": COLOURS[name],
         })
     width, height = math.ceil(right), math.ceil(bottom)
 
-    stitched = [p for p in pieces if seams.stitched(p["save"]["ops"])]
+    stitched = [p for p in pieces if seams.stitched(p["save"]["ops"], p["quad"])]
     middles = [seams.middle(p["quad"]) for p in stitched]
+    laid = {p["id"] for p in stitched}
     cells = seams.cells(middles, (0.0, 0.0, float(width), float(height)))
 
     def cover(piece, x, y):
@@ -110,10 +139,10 @@ def _scene(layout: tuple) -> dict:
             inside = x0 + MARGIN <= x <= x1 - MARGIN and y0 + MARGIN <= y <= y1 - MARGIN
             outside = x < x0 - MARGIN or x > x1 + MARGIN or y < y0 - MARGIN or y > y1 + MARGIN
             return 1 if inside else 0 if outside else None
-        alpha, left, top, larger = alphas[piece["id"]]
+        alpha, own = alphas[piece["id"]]
         # in its own pixels: a piece drawn larger keeps a wider margin on the canvas
         m = math.ceil(MARGIN)
-        cx, cy = int(round((x - left) / larger)), int(round((y - top) / larger))
+        cx, cy = (int(round(v)) for v in own(x, y))
         window = alpha[max(0, cy - m):max(0, cy + m + 1), max(0, cx - m):max(0, cx + m + 1)]
         if window.size == 0 or (window == 0).all():
             return 0
@@ -139,7 +168,7 @@ def _scene(layout: tuple) -> dict:
                 if not on:
                     continue
                 stacked = piece["id"]
-                if piece["id"] not in alphas or not drawn:
+                if piece["id"] not in laid or not drawn:
                     shows = piece["id"]
                 drawn = drawn or piece["id"] == owner
             # on the owner's rectangle where its warp left it nothing: what stacks there shows
