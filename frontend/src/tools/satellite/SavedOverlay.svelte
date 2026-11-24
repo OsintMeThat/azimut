@@ -122,6 +122,8 @@
           surface.closePopup();
           onmove(row, pointer);
         }),
+        // a tall video known only once loaded makes the card taller than it opened
+        onresize: () => surface?.fitCard(),
       },
     });
     return host;

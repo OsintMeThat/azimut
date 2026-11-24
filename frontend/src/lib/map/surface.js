@@ -201,6 +201,7 @@ export function createSurface(engine, { onPopupOpen, onPopupClose, tints = false
   let built = false;
   let openOn = null; // the mark whose card is up, so it can be closed by name
   let card = null; // the open card itself
+  let cardRoom = null; // the room it keeps from the map's edges, when it asked to be kept in view
   let tip = null; // the shared hover reading
   let tipAnchor; // the side it hangs on, which is the one thing it is rebuilt for
   let pointing = false; // this surface is the one holding the pointer cursor
@@ -459,7 +460,8 @@ export function createSurface(engine, { onPopupOpen, onPopupClose, tints = false
     card = popup;
     openOn = shape.id;
     onPopupOpen?.(shape.id);
-    if (shape.popup.inView) keepInView(popup, shape.popup.inView);
+    cardRoom = shape.popup.inView ?? null;
+    if (cardRoom) keepInView(popup, cardRoom);
   }
 
   /**
@@ -792,6 +794,11 @@ export function createSurface(engine, { onPopupOpen, onPopupClose, tints = false
     /** Close the open card, wherever it is. */
     closePopup() {
       if (openOn != null) closeCard();
+    },
+
+    /** The open card changed height: shown whole again, if it asked to be. */
+    fitCard() {
+      if (card && cardRoom) keepInView(card, cardRoom);
     },
 
     clear() {

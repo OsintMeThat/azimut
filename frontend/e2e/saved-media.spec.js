@@ -203,3 +203,33 @@ test('puts a file in a layer from the player, a step at a time, the menu whole i
   await expect(page.getByText('Added to Front')).toBeVisible();
 });
 
+
+test('stands a tall file up whole in its card, and keeps the card on the map', async ({ page }) => {
+  const tall = { ...mediaIndex[0], id: 'media-tall', key: 'media-tall@48.8584,2.2945', title: 'phone clip', path: 'media/tall.svg' };
+  await installAppFixture(page, { mediaIndex: [tall] });
+  // a phone's shape, nine by sixteen
+  await page.route('**/files/*/media/tall.svg', (route) => route.fulfill({
+    contentType: 'image/svg+xml',
+    body: '<svg xmlns="http://www.w3.org/2000/svg" width="90" height="160"><rect width="90" height="160" fill="#36c"/></svg>',
+  }));
+  await page.goto('/#satellite');
+  await awaitMapReady(page);
+
+  await page.locator('.saved-mark').click();
+  const stage = card(page).locator('.stage');
+  await expect(stage).toHaveCSS('height', '320px');
+  // the card grew once the shape was known, and the map slid to show it whole
+  const map = await page.locator('.map').first().boundingBox();
+  await expect.poll(async () => {
+    const whole = await card(page).boundingBox();
+    return whole.y >= map.y && whole.y + whole.height <= map.y + map.height - 70;
+  }).toBe(true);
+  // the picture is the stage's own box, letterboxed in it, never wider or taller
+  const [box, picture] = await stage.evaluate((element) =>
+    [element, element.querySelector('img')].map((one) => {
+      const { x, y, width, height } = one.getBoundingClientRect();
+      return { x, y, width, height };
+    })
+  );
+  expect(picture).toEqual(box);
+});

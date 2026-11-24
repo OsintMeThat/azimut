@@ -335,6 +335,16 @@ describe('SavedPopup, the files standing on a point', () => {
     expect(at([{ ...clip, status: 'suggested' }])).toContain('suggested');
     expect(at([clip])).not.toContain('suggested');
   });
+
+  it('lays the file over its stage, so a tall one is never cut to its middle', () => {
+    // sized by percentages in a grid row of no set height, a phone video took its
+    // own height and showed its middle, controls cut off
+    const popup = readFileSync(new URL('./SavedPopup.svelte', import.meta.url), 'utf8');
+    const css = popup.slice(popup.indexOf('.stage video,\n  .stage img {')).slice(0, 200);
+    expect(css).toContain('position: absolute;');
+    expect(css).toContain('object-fit: contain;');
+    expect(at([{ ...clip }])).toContain('style="height: 166px;"');
+  });
 });
 
 describe('SavedPopup, moving a place', () => {

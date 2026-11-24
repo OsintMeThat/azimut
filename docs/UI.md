@@ -3014,8 +3014,9 @@ either, and the row's own actions are gone: a file is renamed, filed and deleted
 in Media.
 
 Pressing a file's mark on the map opens its card, and the file plays at the top of
-it: a photo whole, a video with its controls, loaded only when it is played. A
-stack of files plays one at a time, the count and two arrows beside its name, with
+it: a photo whole, a video with its controls, loaded only when it is played, each
+in its own shape once the browser knows it, so a phone video stands tall (up to
+320 px) rather than being cut to its middle. A stack of files plays one at a time, the count and two arrows beside its name, with
 why it stands there and **Open in Media** under it, and the work filed on that
 point (a place, its proof's dot) listed below. A card too tall for the room around
 its mark slides the map just far enough to show it whole, clear of the bar along
