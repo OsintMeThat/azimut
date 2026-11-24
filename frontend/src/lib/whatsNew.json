@@ -33,7 +33,7 @@
           { "icon": "chart", "text": "A Detect routine opens a dashboard of its passes in a window: counts, spots that stay or come and go, judged a spot at a time, and put in a note as charts you can edit." },
           { "icon": "calendar", "text": "Catch up lists the passes a routine missed and reads the ones you tick, one run each, oldest first." },
           { "icon": "trash", "text": "Deleting a proof takes its geolocation with it, and restoring it from the Trash puts it back." },
-          { "icon": "polygon", "text": "Save place's arrow offers Save zone: click its corners, name it, and a click in the area opens its card. Edit footprint drags its corners." },
+          { "icon": "polygon", "text": "Save place's arrow offers Save zone: click its corners and name it. A zone is drawn as its area, with no pin, and a click in it opens its card. Edit footprint drags its corners." },
           { "icon": "pin", "text": "Click a lead to pick it, then press Delete to remove it." },
           { "icon": "ruler", "text": "In Compare and Detect, a measure, an arrow or a box takes two clicks as well as a drag." }
         ]

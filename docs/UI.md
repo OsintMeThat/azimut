@@ -3607,11 +3607,17 @@ one back). A click on the map adds a corner after the last.
 
 **A zone is saved in one go.** Save place's arrow (▾) offers **Save place** and **Save
 zone**: the zone's corners are clicked on the map and its name typed in the panel, and
-Save files a place with its area, its pin inside it (`POST /satellite/place` with a
-`footprint`, marked `zone`). Its card says **Zone**. A click inside a place's area opens
-its card, while no tool owns the map's clicks, so a measure or a pin dropped inside a zone
-still lands. A zone reshaped away from its pin takes the pin along rather than being
-refused, since its pin is only where its card hangs.
+Save files a place with its area and its point inside it (`POST /satellite/place` with a
+`footprint`, marked `zone`). **A zone is drawn as its area, with no pin**: the shape in
+the place's colour, red until it is given one, outlined and lightly filled, its name on
+its point under the Names switch. The point stays, read by everything that reads a
+place, and is where its card hangs. Zoomed out until the area spans less than 16 pixels,
+a small square of its colour stands in for it, so it never vanishes from the map. A pin
+whose precision was traced keeps its drop, as does a stack holding a zone. Its card says
+**Zone**. A click inside a place's area opens its card, while no tool owns the map's
+clicks, so a measure or a pin dropped inside a zone still lands. Move place carries a zone
+as its own outline, its point under the hand. A zone reshaped away from its point takes
+the point along rather than being refused.
 
 **A place's card moves it.** **Move place** picks it up: a page cannot put the
 pointer on the point, so the map slides until the point is under the press, a pale

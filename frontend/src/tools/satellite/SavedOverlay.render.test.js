@@ -21,7 +21,8 @@ vi.mock('../../lib/map/surface.js', () => ({ createSurface: () => surface }));
 const { default: SavedOverlay } = await import('./SavedOverlay.svelte');
 const { DROP, DROP_CARD_OFFSET, PLACE_RED, TEARDROP_CARD_OFFSET, placeMark } = await import('../../lib/mapMarkers.js');
 
-const engine = { getZoom: () => 16, on: () => () => {} };
+let zoomNow = 16;
+const engine = { getZoom: () => zoomNow, on: () => () => {} };
 let held = null;
 
 const media = (key, kind = 'image') => ({
@@ -135,5 +136,41 @@ describe('a place’s traced area', () => {
   it('wears the colour its place was given, and amber without one', () => {
     expect(drawnShapes([{ ...place, footprint: square, color: '#1f77b4' }])[0].style.stroke).toBe('#1f77b4');
     expect(drawnShapes([{ ...place, footprint: square }])[0].style.stroke).toBe('#f5a623');
+  });
+});
+
+describe('a zone', () => {
+  // about 220 m a side near Paris
+  const AREA = { type: 'Polygon', coordinates: [[[2.1, 48.1], [2.103, 48.1], [2.103, 48.102], [2.1, 48.102], [2.1, 48.1]]] };
+  const zone = { ...place, title: 'North quay', zone: true, footprint: AREA, lat: 48.101, lon: 2.1015 };
+  afterEach(() => (zoomNow = 16));
+
+  it('draws no pin on its point while its area shows, and its card opens on the point', () => {
+    const [mark] = draw([zone], { areas: true });
+    expect(mark.html).toContain('saved-zone-host');
+    expect(mark.html).not.toContain('saved-place-drop');
+    expect(mark.popup.offset).toBe(0);
+    const [area] = drawn.at(-1).filter((shape) => shape.kind === 'geojson');
+    expect(area.style).toMatchObject({ stroke: PLACE_RED, strokeWidth: 2, interactive: true });
+  });
+
+  it('puts its small square in once a zoom out leaves the area too small to see', () => {
+    zoomNow = 9;
+    const [mark] = draw([zone]);
+    expect(mark.className).toContain('tiny');
+    expect(mark.html).toContain('saved-zone-mark');
+    expect(mark.popup.offset).toBeGreaterThan(0);
+  });
+
+  it('writes its name on its point when Names is on', () => {
+    const [mark] = draw([zone], { names: true });
+    expect(mark.html).toContain('<span class="saved-mark-name">North quay</span>');
+  });
+
+  it('keeps the pin of a place whose precision was traced, and of a stack', () => {
+    const [traced] = draw([{ ...zone, zone: false }]);
+    expect(traced.html).toContain('saved-place-drop');
+    const [stack] = draw([zone, { ...place, id: 'p2', key: 'p2', lat: 48.101, lon: 2.1015 }]);
+    expect(stack.html).toContain('saved-place-drop');
   });
 });

@@ -10,6 +10,9 @@
  * A place a proof states is never picked up here: the proof holds its coordinates and
  * prints them, so the card sends it to the proof instead (`Satellite.pickUpPlace`).
  *
+ * A zone has no pin: what follows the pointer is its own outline, its point under the
+ * hand as the pin's tip would be.
+ *
  * @param {object} deps
  * @param {() => object|null} deps.engine the map façade, once built
  * @param {(row: object, at: {lat: number, lon: number}) => Promise<void>} deps.move
@@ -17,7 +20,9 @@
  * @param {(message: string, kind?: string, ms?: number) => void} deps.notify
  */
 import { createSurface } from '../../../lib/map/surface.js';
-import { placeMark } from '../../../lib/mapMarkers.js';
+import { placeColour, placeMark } from '../../../lib/mapMarkers.js';
+import { isZone } from '../../../lib/savedMarkers.js';
+import { cornersOf } from './footprint.svelte.js';
 
 export function createPlaceMove({ engine, move, notify }) {
   // the place picked up, as its saved-index row
@@ -25,11 +30,32 @@ export function createPlaceMove({ engine, move, notify }) {
   let saving = $state(false);
   let surface = null;
   let drawn = false;
+  // a zone's corners, carried with the pointer instead of a pin
+  let outline = null;
+
+  /** A zone's corners moved so that its point stands on `at`. */
+  function carried(at) {
+    const dlat = at.lat - Number(row.lat);
+    const dlon = at.lon - Number(row.lon);
+    return outline.map((corner) => ({ lat: corner.lat + dlat, lon: corner.lon + dlon }));
+  }
 
   function show(at) {
     const map = engine();
     if (!map || !row) return;
     surface ??= createSurface(map);
+    if (outline) {
+      if (drawn && surface.patch('ghost', { points: carried(at) })) return;
+      drawn = true;
+      const colour = placeColour(row.color);
+      surface.set([{
+        id: 'ghost',
+        kind: 'polygon',
+        points: carried(at),
+        style: { stroke: colour, strokeWidth: 2, strokeOpacity: 0.9, dash: '6 4', fill: colour, fillOpacity: 0.1, interactive: false },
+      }]);
+      return;
+    }
     if (drawn && surface.patch('ghost', { at })) return;
     drawn = true;
     surface.set([{
@@ -70,7 +96,10 @@ export function createPlaceMove({ engine, move, notify }) {
       if (!view || place?.lat == null || place?.lon == null || !Number.isFinite(lat) || !Number.isFinite(lon)) {
         return false;
       }
+      hide(); // a pin or an outline from a pick before is not this one's
       row = place;
+      const corners = isZone(place) ? cornersOf(place.footprint) : [];
+      outline = corners.length >= 3 ? corners : null;
       const at = { lat, lon };
       if (pointer && Number.isFinite(pointer.x) && Number.isFinite(pointer.y)) {
         const pin = view.latLngToContainerPoint(at);
@@ -107,6 +136,10 @@ export function createPlaceMove({ engine, move, notify }) {
       row = null;
       hide();
       return true;
+    },
+    /** Whether the place in the hand is a zone, carried as its outline. */
+    get zone() {
+      return Boolean(row && outline);
     },
     destroy() {
       surface?.destroy?.();

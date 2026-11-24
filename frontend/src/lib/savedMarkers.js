@@ -159,3 +159,33 @@ export function keptLabel(row) {
   const count = row?.kept?.length ?? 0;
   return count ? `${count} image${count > 1 ? 's' : ''} kept` : '';
 }
+
+/** A place saved as a zone, drawn as its area rather than as a pin. */
+export function isZone(row) {
+  return row?.kind === 'place' && Boolean(row.zone) && Boolean(row.footprint);
+}
+
+/**
+ * How many pixels a zone's area spans at a zoom, across its longer side: the box
+ * round its corners in metres, over the metres one pixel covers there (256-pixel
+ * tiles, the app's own zoom levels). Infinity when it cannot be read, so a shape
+ * nobody can measure is never swapped for its square.
+ */
+export function zonePixels(row, zoom) {
+  const ring = row?.footprint?.type === 'Polygon'
+    ? row.footprint.coordinates?.[0]
+    : row?.footprint?.type === 'MultiPolygon'
+      ? row.footprint.coordinates?.flatMap((polygon) => polygon?.[0] ?? [])
+      : null;
+  const z = Number(zoom);
+  if (!Array.isArray(ring) || !ring.length || !Number.isFinite(z)) return Infinity;
+  const lons = ring.map((point) => Number(point[0]));
+  const lats = ring.map((point) => Number(point[1]));
+  const lat = (Math.min(...lats) + Math.max(...lats)) / 2;
+  const cos = Math.cos((lat * Math.PI) / 180);
+  const wide = (Math.max(...lons) - Math.min(...lons)) * 111320 * cos;
+  const tall = (Math.max(...lats) - Math.min(...lats)) * 110540;
+  const perPixel = (156543.03392 * cos) / 2 ** z;
+  const span = Math.max(wide, tall) / perPixel;
+  return Number.isFinite(span) ? span : Infinity;
+}

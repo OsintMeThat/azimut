@@ -12,7 +12,7 @@ vi.mock('../../../lib/map/surface.js', () => ({
     set: (shapes) => (ghost.shapes = shapes),
     patch: (id, change) => {
       if (id !== 'ghost' || !ghost.shapes.length) return false;
-      ghost.moves.push(change.at);
+      ghost.moves.push(change.at ?? change.points);
       return true;
     },
     clear: () => {
@@ -133,5 +133,34 @@ describe('letting it go', () => {
     expect(deps.move).not.toHaveBeenCalled();
     // a second Escape is somebody else's
     expect(move.cancel()).toBe(false);
+  });
+});
+
+describe('a zone in the hand', () => {
+  const AREA = { type: 'Polygon', coordinates: [[[2, 48], [2.2, 48], [2.2, 48.2], [2, 48.2], [2, 48]]] };
+  const ZONE = { id: 'z1', key: 'z1', kind: 'place', lat: 48.1, lon: 2.1, zone: true, footprint: AREA };
+
+  it('is carried as its own outline, its point under the hand, never as a pin', () => {
+    const move = make();
+    move.start(ZONE, { x: 320, y: 60 });
+    expect(move.zone).toBe(true);
+    const [outline] = ghost.shapes;
+    expect(outline).toMatchObject({ id: 'ghost', kind: 'polygon' });
+    expect(outline.points).toHaveLength(4);
+    expect(outline.style.dash).toBe('6 4');
+
+    move.follow({ lat: 49.1, lon: 3.1 });
+    const [moved] = ghost.moves;
+    // shifted by one degree each way, corner for corner
+    expect(moved[0].lat).toBeCloseTo(49, 9);
+    expect(moved[0].lon).toBeCloseTo(3, 9);
+    expect(moved[2].lat).toBeCloseTo(49.2, 9);
+  });
+
+  it('takes a place that only traced its precision as a pin, as before', () => {
+    const move = make();
+    move.start({ ...ZONE, zone: false }, { x: 320, y: 60 });
+    expect(move.zone).toBe(false);
+    expect(ghost.shapes[0].kind).toBe('marker');
   });
 });
