@@ -174,3 +174,94 @@ def test_a_search_on_a_stitched_collage_reads_its_trace_frame_by_frame(monkeypat
     assert horizon_finds.on_frames(None, ask, plan, trace)[2] is None
     monkeypatch.setattr(inspectwork, "frames_of", lambda case, path: (model, {**said, "frames": 4, "stitched": 1}))
     assert horizon_finds.on_frames(None, ask, plan, trace)[2] is not None
+
+
+# A frame the analyst cropped to its horizon band before stitching: the stitch solved the crop as its picture,
+# so its warp's lengths are fractions of the crop (the camera's centre is the crop's middle).
+BAND = {"x": 0.02, "y": 0.3, "w": 0.96, "h": 0.4}
+
+
+def _band_remap(rotation: np.ndarray) -> dict:
+    cw = W * BAND["w"]
+    return {"warp": "cylindrical", "focal": FOCAL / cw, "aspect": 1.0, "ppx": 0.5, "ppy": 0.5,
+            "r": [float(v) for v in rotation.reshape(9)], "scale": FOCAL / cw, "gain": 1.0}
+
+
+def _band_node(rotation: np.ndarray, after: dict | None = None) -> tuple[dict, tuple]:
+    """A Collage node of a frame cropped before its stitch (and after it with `after`), laid where the stitch put it."""
+    from azimut.engine import stitch
+
+    params = _band_remap(rotation)
+    size = (int(round(W * BAND["w"])), int(round(H * BAND["h"])))
+    k, r, scale = stitch._camera_at(params, *size)
+    warper = stitch._cv2().PyRotationWarper("cylindrical", scale)
+    rx, ry, rw, rh = warper.warpRoi(size, k, r)
+    ops = [{"op": "crop", "params": BAND}, {"op": "remap", "params": params}]
+    x, y, w, h = float(rx), float(ry), float(rw), float(rh)
+    if after:
+        ops.append({"op": "crop", "params": after})
+        x, y, w, h = x + after["x"] * w, y + after["y"] * h, after["w"] * w, after["h"] * h
+    node = {"save": {"path": "media/pan.mp4", "time": 1.0, "ops": ops}, "w": w, "h": h, "crop": after,
+            "quad": [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]}
+    return node, (warper, k, r)
+
+
+@pytest.mark.parametrize("after", [None, {"x": 0.05, "y": 0.1, "w": 0.9, "h": 0.7}])
+def test_a_frame_cropped_before_its_stitch_reads_back_the_directions_it_was_filmed_in(after):
+    rotation = _rotation(10.0, 4.0)
+    node, (warper, k, r) = _band_node(rotation, after)
+    # the canvas's corner as the export's: the pieces' top left
+    spec = {"nodes": [node]}
+    origin = (min(x for x, _ in node["quad"]), min(y for _, y in node["quad"]))
+    [piece] = frames.pieces_of(spec, {"media/pan.mp4": (W, H)})
+    assert piece.cut == pytest.approx((0.02, 0.3, 0.96, 0.4))
+    assert piece.source == (W, H)
+    model = frames.Model([piece])
+    # the band's middle looks 4° down: these lie on it, the crop after the stitch included
+    for azimuth, elevation in ((6.0, -4.0), (12.0, -1.5), (15.0, -6.0)):
+        a, e = math.radians(azimuth), math.radians(elevation)
+        direction = np.array([math.sin(a) * math.cos(e), -math.sin(e), math.cos(a) * math.cos(e)])
+        cam = rotation.T @ direction
+        pixel = k @ (cam / cam[2])
+        u, v = warper.warpPoint((float(pixel[0]), float(pixel[1])), k, r)
+        ray = model.rays(np.array([u - origin[0]]), np.array([v - origin[1]]), model.per_radian)[0]
+        assert _angle(ray, direction) < 0.05
+    # the lens the stitch says is still the frame's whole width
+    assert frames.lens_of(model) == pytest.approx(2 * math.degrees(math.atan(W / 2 / FOCAL)), abs=0.05)
+
+
+def test_the_warp_read_has_the_size_the_stitch_drew():
+    from PIL import Image
+
+    from azimut.engine import stitch
+
+    node, _ = _band_node(_rotation(-8.0, 3.0))
+    [piece] = frames.pieces_of({"nodes": [node]}, {"media/pan.mp4": (W, H)})
+    band = Image.new("RGB", (int(round(W * BAND["w"])), int(round(H * BAND["h"]))))
+    drawn = stitch.apply_warp(band, node["save"]["ops"][1]["params"])
+    assert frames._warp_of(piece)["size"] == pytest.approx(drawn.size, abs=1)
+
+
+def test_each_piece_keeps_the_crops_of_its_recipe_on_their_side_of_the_stitch():
+    cut = {"x": 0.1, "y": 0.2, "w": 0.5, "h": 0.5}
+    again = {"x": 0.2, "y": 0.0, "w": 0.5, "h": 0.5}
+    quad = [[0, 0], [100, 0], [100, 60], [0, 60]]
+    nodes = [
+        # cut in Inspect, laid as it came: the node holds no crop of its own
+        {"save": {"path": "media/pan.mp4", "ops": [{"op": "crop", "params": cut}]}, "w": 360, "h": 240, "quad": quad},
+        # cut in Inspect, then cropped again on the collage: the node's crop is the second one
+        {"save": {"path": "media/pan.mp4", "ops": [{"op": "crop", "params": cut}, {"op": "crop", "params": again}]},
+         "crop": again, "w": 180, "h": 120, "quad": quad},
+        # a node's own crop with no step in its recipe is read as before
+        {"save": {"path": "media/pan.mp4", "ops": []}, "crop": cut, "w": 360, "h": 240, "quad": quad},
+        # cropped before a stitch, the node's crop left behind: the warp is read whole
+        {"save": {"path": "media/pan.mp4", "ops": [{"op": "crop", "params": cut}, {"op": "remap", "params": _band_remap(np.eye(3))}]},
+         "crop": cut, "w": 360, "h": 240, "quad": quad},
+    ]
+    first, second, third, stitched = frames.pieces_of({"nodes": nodes}, {"media/pan.mp4": (W, H)})
+    assert stitched.crop == (0.0, 0.0, 1.0, 1.0)
+    assert stitched.cut == pytest.approx((0.1, 0.2, 0.5, 0.5))
+    assert first.crop == pytest.approx((0.1, 0.2, 0.5, 0.5))
+    assert second.crop == pytest.approx((0.2, 0.2, 0.25, 0.25))
+    assert third.crop == pytest.approx((0.1, 0.2, 0.5, 0.5))
+    assert first.cut == second.cut == (0.0, 0.0, 1.0, 1.0)

@@ -15,7 +15,8 @@ to the frame drawn on top there, and to a pixel of that frame:
 - A frame **Azimut stitched** carries its camera in its recipe (the rotation
   model's `remap`: a rotation, a focal length and the cylinder it was warped
   onto). Its pixels are directions on that cylinder, exactly, whatever the analyst
-  did to the piece afterwards.
+  did to the piece afterwards. A crop made before the stitch is the picture the
+  stitch solved, so the camera is that crop's, not the whole frame's.
 - A frame **laid by hand** is a plain perspective picture. Its lens is the
   angle its drawn width spans on the collage, read at the stitched frames'
   scale (a frame zoomed in on is drawn smaller to match its neighbours, so it
@@ -76,10 +77,17 @@ class Piece:
     crop: tuple[float, float, float, float]  # the part of the frame (or of its warp) kept: x, y, w, h fractions
     source: tuple[float, float]  # the frame's pixels as filmed, width and height
     remap: dict[str, Any] | None = None  # the rotation model's warp, for a frame Azimut stitched
+    # the part of the frame the stitch warped, x, y, w, h fractions: less than the whole when the analyst
+    # cropped it before stitching, and the warp's lengths are fractions of that part
+    cut: tuple[float, float, float, float] = (0.0, 0.0, 1.0, 1.0)
 
     @property
     def stitched(self) -> bool:
         return self.remap is not None
+
+    def warped(self) -> tuple[float, float]:
+        """The pixels the stitch warped, width and height: the frame as filmed, or the part a crop kept."""
+        return self.source[0] * self.cut[2], self.source[1] * self.cut[3]
 
     def scale(self) -> float:
         """Export pixels per pixel of the piece: how much larger the analyst drew it."""
@@ -115,11 +123,12 @@ class _Placed:
 
 
 def _warp_of(piece: Piece) -> dict[str, Any]:
-    """A stitched frame's cylinder: its scale and where its warped picture starts on it, in source pixels."""
+    """A stitched frame's cylinder: its scale and where its warped picture starts on it, in the pixels
+    the stitch warped."""
     from . import stitch
 
     params = piece.remap or {}
-    width, height = piece.source
+    width, height = piece.warped()
     k, r, scale = stitch._camera_at(params, int(round(width)), int(round(height)))
     cv2 = stitch._cv2()
     warper = cv2.PyRotationWarper(str(params["warp"]), scale)
@@ -197,7 +206,7 @@ class Model:
         z = src[:, 2]
         with np.errstate(divide="ignore", invalid="ignore"):
             sx, sy = src[:, 0] / z, src[:, 1] / z
-        width, height = one.piece.source
+        width, height = one.piece.warped()
         return (z > 0) & (sx >= 0) & (sx <= width) & (sy >= 0) & (sy <= height)
 
     def _camera_rays(self, index: int, a: np.ndarray, b: np.ndarray, focal: float) -> np.ndarray:
@@ -462,6 +471,32 @@ def mesh(model: Model, camera: np.ndarray, export: tuple[float, float], lens: fl
     return {"across": MESH_ACROSS, "down": MESH_DOWN, "points": points}
 
 
+def _is_remap(op: dict[str, Any]) -> bool:
+    """Whether a recipe step is a stitch's warp with its camera."""
+    params = op.get("params") if op.get("op") == "remap" else None
+    return isinstance(params, dict) and len(params.get("r") or []) == 9
+
+
+def _crops(ops: list[dict[str, Any]]) -> tuple[float, float, float, float] | None:
+    """The crops in a run of a piece's recipe as one, x, y, w, h fractions of the picture the run
+    starts from (each crop is a fraction of what the one before it kept), or None with none."""
+    x, y, w, h = 0.0, 0.0, 1.0, 1.0
+    seen = False
+    for op in ops:
+        params = op.get("params") if op.get("op") == "crop" else None
+        if not isinstance(params, dict):
+            continue
+        try:
+            cx, cy = (min(1.0, max(0.0, float(params.get(k, 0)))) for k in ("x", "y"))
+            cw = min(1.0 - cx, max(0.0, float(params.get("w", 1))))
+            ch = min(1.0 - cy, max(0.0, float(params.get("h", 1))))
+        except (TypeError, ValueError):
+            continue
+        x, y, w, h = x + cx * w, y + cy * h, w * cw, h * ch
+        seen = True
+    return (x, y, w, h) if seen else None
+
+
 def pieces_of(
     spec: dict[str, Any], sources: dict[str, tuple[float, float]], origin: tuple[float, float] | None = None
 ) -> list[Piece]:
@@ -469,7 +504,12 @@ def pieces_of(
 
     `sources` gives each video's frame size by its path; a piece whose source size
     is unknown is left out. `origin` is where the export's corner sits on the canvas,
-    the pieces' top-left by default; a cut collage's export starts at its frame."""
+    the pieces' top-left by default; a cut collage's export starts at its frame.
+
+    A piece is read from its recipe (`save.ops`), the steps that made the pixels it shows. A crop
+    before a stitch's warp is the picture the stitch saw, so the warp's camera is that picture's;
+    a crop after it keeps part of the warp; a frame laid by hand keeps the part of the frame all
+    its crops leave, a frame cut in Inspect included."""
     nodes = [n for n in spec.get("nodes") or [] if isinstance(n, dict) and isinstance(n.get("quad"), list)]
     if not nodes:
         return []
@@ -482,18 +522,25 @@ def pieces_of(
         source = sources.get(str(save.get("path") or ""))
         if not source or len(node["quad"]) != 4:
             continue
-        crop = node.get("crop") or {}
-        remap = None
-        for op in [*(save.get("ops") or []), *(node.get("frameOps") or [])]:
-            params = op.get("params") if isinstance(op, dict) and op.get("op") == "remap" else None
-            if isinstance(params, dict) and len(params.get("r") or []) == 9:
-                remap = params
-                break
+        ops = [op for op in save.get("ops") or [] if isinstance(op, dict)]
+        warp_at = next((i for i, op in enumerate(ops) if _is_remap(op)), None)
+        remap = ops[warp_at]["params"] if warp_at is not None else next(
+            (op["params"] for op in node.get("frameOps") or [] if isinstance(op, dict) and _is_remap(op)), None
+        )
+        before, after = (ops[:warp_at], ops[warp_at + 1:]) if warp_at is not None else ([], ops)
+        # a crop is in the recipe; the node's own is read only for a recipe that holds none at all
+        kept = _crops(after)
+        if kept is None and not any(op.get("op") == "crop" for op in ops):
+            own = node.get("crop") or {}
+            kept = (float(own.get("x", 0)), float(own.get("y", 0)), float(own.get("w", 1)), float(own.get("h", 1)))
+        kept = kept or (0.0, 0.0, 1.0, 1.0)
         out.append(Piece(
             quad=np.array([[float(x) - x0, float(y) - y0] for x, y in node["quad"]], dtype=np.float64),
             size=(float(node.get("w") or 0), float(node.get("h") or 0)),
-            crop=(float(crop.get("x", 0)), float(crop.get("y", 0)), float(crop.get("w", 1)), float(crop.get("h", 1))),
+            crop=kept,
             source=source,
             remap=remap,
+            # the stitch warped what the crops before it kept
+            cut=(_crops(before) or (0.0, 0.0, 1.0, 1.0)) if remap is not None else (0.0, 0.0, 1.0, 1.0),
         ))
     return [p for p in out if p.size[0] > 0 and p.size[1] > 0]
