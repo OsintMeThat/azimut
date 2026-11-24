@@ -85,6 +85,7 @@
     align-items: center;
     justify-content: center;
     z-index: 900;
+    animation: motion-fade-in var(--motion-move) var(--ease) backwards;
   }
   .modal {
     background: var(--bg-1);
@@ -95,6 +96,7 @@
     max-height: calc(100vh - 80px);
     display: flex;
     flex-direction: column;
+    animation: motion-dialog-in var(--motion-move) var(--ease-out) backwards;
   }
   header {
     display: flex;
@@ -124,12 +126,7 @@
   .overlay.top .modal {
     max-height: calc(100dvh - min(14vh, 120px) - 24px);
     overflow: hidden;
-    animation: drop 140ms var(--ease);
-  }
-  @keyframes drop {
-    from { opacity: 0; transform: translateY(-6px) scale(0.985); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .overlay.top .modal { animation: none; }
+    /* a top-aligned modal (search, the palette) drops from above instead of rising */
+    animation-name: motion-pop-in;
   }
 </style>

@@ -51,3 +51,16 @@ describe('Toasts and a screen reader', () => {
     expect(body.match(/role="alert"/g)).toHaveLength(1);
   });
 });
+
+describe('Toasts running out', () => {
+  it('shows how long a toast stays as a thread as long as its timeout', () => {
+    uiState.toasts = [{ id: 1, message: 'Saved', kind: 'ok', timeout: 3800 }];
+    const { body } = render(Toasts);
+    expect(body).toMatch(/class="toast-time[^"]*" style="animation-duration: 3800ms;"/);
+  });
+
+  it('draws no thread for a toast that stays until dismissed', () => {
+    uiState.toasts = [{ id: 1, message: 'Waiting', kind: 'info', timeout: 0 }];
+    expect(render(Toasts).body).not.toContain('toast-time');
+  });
+});

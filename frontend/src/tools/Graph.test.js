@@ -728,9 +728,9 @@ describe('drawing on canvas', () => {
     expect(source).not.toMatch(/fill\(['"]var\(--/);
   });
 
-  it('re-reads the palette when the theme changes under an open tab', () => {
+  it('re-reads the palette when the theme or the accent changes under an open tab', () => {
     expect(source).toContain('MutationObserver');
-    expect(source).toContain("attributeFilter: ['data-theme', 'class']");
+    expect(source).toContain("attributeFilter: ['data-theme', 'data-accent', 'class']");
   });
 
   it('takes its family hues from the shared palette in both themes', () => {

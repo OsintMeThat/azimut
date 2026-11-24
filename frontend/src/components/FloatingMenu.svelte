@@ -75,11 +75,22 @@
 <style>
   /* Above the app's top bar (1200), so a tall menu reaching the window's top is whole, the map's controls and a modal (900). */
   .float-menu { position: fixed; z-index: 1250; overflow-y: auto; padding: 5px; background: var(--bg-1); border: 1px solid var(--border);
-    border-radius: var(--r-sm); box-shadow: var(--shadow-2); color: var(--text-1); font-size: var(--fs-xs); outline: none; }
+    border-radius: var(--r-sm); box-shadow: var(--shadow-2); color: var(--text-1); font-size: var(--fs-xs); outline: none;
+    animation: motion-pop-in var(--motion-pop) var(--ease-out) backwards; }
+  /* its rows follow in a short cascade, the first eight of them; it closes at once */
+  .float-menu > :global(*) { animation: motion-item-in var(--motion-pop) var(--ease-out) backwards; }
+  .float-menu > :global(:nth-child(2)) { animation-delay: var(--motion-stagger); }
+  .float-menu > :global(:nth-child(3)) { animation-delay: calc(var(--motion-stagger) * 2); }
+  .float-menu > :global(:nth-child(4)) { animation-delay: calc(var(--motion-stagger) * 3); }
+  .float-menu > :global(:nth-child(5)) { animation-delay: calc(var(--motion-stagger) * 4); }
+  .float-menu > :global(:nth-child(6)) { animation-delay: calc(var(--motion-stagger) * 5); }
+  .float-menu > :global(:nth-child(7)) { animation-delay: calc(var(--motion-stagger) * 6); }
+  .float-menu > :global(:nth-child(n + 8)) { animation-delay: calc(var(--motion-stagger) * 7); }
   /* a flex item keeps its content's height unless it scrolls: the scrolling part is the one that gives */
   .float-menu.column { display: flex; flex-direction: column; }
   .float-menu :global(.fm-item) { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 5px 8px;
-    border-radius: var(--r-sm); color: var(--text-1); font-size: var(--fs-sm); text-align: left; cursor: pointer; }
+    border-radius: var(--r-sm); color: var(--text-1); font-size: var(--fs-sm); text-align: left; cursor: pointer;
+    transition: background var(--motion-hover) var(--ease); }
   .float-menu :global(.fm-item:hover:not(:disabled)), .float-menu :global(.fm-item:focus-visible) { background: var(--bg-3); }
   .float-menu :global(.fm-item:disabled) { color: var(--text-3); cursor: default; }
   .float-menu :global(.fm-item > svg) { flex: none; color: var(--text-2); }

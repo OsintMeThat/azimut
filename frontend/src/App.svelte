@@ -39,6 +39,7 @@
   import { leaveFullscreen } from './lib/fullscreen.js';
   import { startSupportBeat } from './lib/supportBeat.js';
   import { createToolLoader } from './lib/toolLoader.js';
+  import { ink } from './lib/motion/ink.js';
   import { loadEntityTypes } from './lib/entityTypes.svelte.js';
   import Icon from './components/Icon.svelte';
   import Logo from './components/Logo.svelte';
@@ -537,7 +538,7 @@
 
   <div class="main">
     {#if !bare}
-    <nav class="rail">
+    <nav class="rail" use:ink={'y'}>
       {#each WORKSPACES as ws (ws.id)}
         <button
           class="rail-btn"
@@ -572,12 +573,13 @@
         <Icon name={uiState.theme === 'light' ? 'moon' : 'sun'} size={19} />
         <span>{uiState.theme === 'light' ? 'Dark' : 'Light'}</span>
       </button>
+      <span class="ink" aria-hidden="true"></span>
     </nav>
     {/if}
 
     <main class="canvas">
       {#if !bare && activeWs && activeWs.tools.length > 1}
-        <div class="tabstrip">
+        <div class="tabstrip" use:ink={'x'}>
           {#each activeWs.tools as toolId (toolId)}
             <button
               class="tab-btn"
@@ -590,6 +592,7 @@
               {toolLabel(toolId)}
             </button>
           {/each}
+          <span class="ink" aria-hidden="true"></span>
         </div>
       {/if}
       <div class="canvas-body">
@@ -701,7 +704,28 @@
     padding: 4px 8px 4px 4px;
     margin-left: -4px;
     border-radius: var(--r-sm);
-    transition: background 0.15s var(--ease);
+    transition: background var(--motion-hover) var(--ease);
+  }
+  /* the mark's needle swings and settles like a compass's when the pointer comes */
+  .brand :global(.needle) {
+    transform-box: view-box;
+    transform-origin: 12px 13px;
+  }
+  .brand:hover :global(.needle) {
+    animation: needle-settle 900ms var(--ease) both;
+  }
+  @keyframes -global-needle-settle {
+    14% { transform: rotate(-16deg); }
+    32% { transform: rotate(11deg); }
+    50% { transform: rotate(-6deg); }
+    68% { transform: rotate(3deg); }
+    84% { transform: rotate(-1deg); }
+    100% { transform: rotate(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .brand:hover :global(.needle) {
+      animation: none;
+    }
   }
   .brand:hover {
     background: var(--bg-2);
@@ -733,6 +757,7 @@
     min-height: 0;
   }
   .rail {
+    position: relative;
     width: var(--rail-w);
     flex-shrink: 0;
     display: flex;
@@ -762,7 +787,31 @@
   }
   .rail-btn.active {
     color: var(--text-1);
-    border-left-color: var(--accent);
+  }
+  /* The accent mark of the rail's stage and of the tab, one each, sliding to the
+     choice (lib/motion/ink.js). */
+  .ink {
+    position: absolute;
+    left: 0;
+    pointer-events: none;
+    background: var(--accent);
+    opacity: 0;
+    transition: transform var(--motion-slide) var(--ease-out), opacity var(--motion-hover) var(--ease);
+  }
+  .ink:global(.ink-instant) {
+    transition: none;
+  }
+  .rail > .ink {
+    top: 0;
+    width: 2px;
+    height: 1px;
+    transform-origin: top;
+  }
+  .tabstrip > .ink {
+    bottom: 0;
+    width: 1px;
+    height: 2px;
+    transform-origin: left;
   }
   /* The case under the four stages, a rule and some air between them. */
   .rail-rule {
@@ -836,6 +885,7 @@
     background: var(--bg-0);
   }
   .tabstrip {
+    position: relative;
     flex-shrink: 0;
     display: flex;
     align-items: stretch;
@@ -855,7 +905,6 @@
   }
   .tab-btn.active {
     color: var(--text-1);
-    box-shadow: inset 0 -2px 0 var(--accent);
   }
   .canvas-body {
     flex: 1;
@@ -864,6 +913,10 @@
   .tool-host {
     width: 100%;
     height: 100%;
+  }
+  /* a tool coming into view fades in; it does not travel, a map lives in it */
+  .tool-host:not(.hidden) {
+    animation: motion-fade-in var(--motion-pop) var(--ease) backwards;
   }
   .tool-host.hidden {
     display: none;
