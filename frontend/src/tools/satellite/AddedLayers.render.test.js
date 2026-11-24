@@ -90,6 +90,12 @@ describe('a row', () => {
     expect(byLabel('Remove Sightings')).toBeTruthy();
   });
 
+  it('crosses its eye out while the layer is not drawn', () => {
+    show({ rows: [LAYER, { ...LAYER, name: 'Quiet', title: 'Quiet', enabled: false }] });
+    const eyes = rows('.eye svg').map((svg) => svg.getAttribute('data-icon'));
+    expect(eyes).toEqual(['eye', 'eyeOff']);
+  });
+
   it('unfolds the layer just added, since it was added to be read', () => {
     show({ rows: [LAYER, followed()], opened: 'Roadblocks' });
 

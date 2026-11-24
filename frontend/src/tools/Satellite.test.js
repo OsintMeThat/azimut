@@ -111,8 +111,8 @@ describe('Satellite saved work', () => {
     expect(source).toContain('toggle: () => (mediaOn = !mediaOn)');
     expect(layers).toContain('<LayerRows {rows} />');
     expect(layerRows).toContain('aria-pressed={Boolean(row.on)}');
-    // one eye for both states: only its colour says whether the layer is on
-    expect(layerRows).toContain('<Icon name="eye" size={13} />');
+    // an open eye in the accent while the layer is drawn, crossed out while it is not
+    expect(layerRows).toContain("<Icon name={row.on && !row.disabled ? 'eye' : 'eyeOff'} size={13} />");
     expect(layerRows).not.toContain("'ghost'");
     expect(layerRows).toMatch(/\.eye\.on \{\s*color: var\(--accent\);/);
     expect(rail).not.toContain('savedOverlay');
