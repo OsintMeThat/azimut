@@ -13,7 +13,7 @@
   import { createMapLayerMemory } from '../lib/map/layerMemory.js';
   import { createSavedState } from './satellite/state/saved.svelte.js';
   import { createImageryState, FALLBACK_PROVIDER } from './satellite/state/imagery.svelte.js';
-  import { createMeasureState } from './satellite/state/measure.svelte.js';
+  import { createMeasureState, createUnitsChoice } from './satellite/state/measure.svelte.js';
   import { createSkyState } from './satellite/state/sky.svelte.js';
   import { createGridState } from './satellite/state/grid.svelte.js';
   import { createRefsState } from './satellite/state/refs.svelte.js';
@@ -473,7 +473,10 @@
   let fullscreen = $state(false);
 
   // The Measure tool (state/measure.svelte.js): lines and areas, what a line of
-  // two points is used as, and the ground under a line.
+  // two points is used as, and the ground under a line. Align is the same store
+  // in a seat of its own: lines through two things lined up in a picture, run on
+  // to where they meet. Both read in the units set in either panel.
+  const measureUnits = createUnitsChoice();
   const measure = createMeasureState({
     engine: () => engine,
     api,
@@ -481,12 +484,24 @@
     coords: (lat, lon) => fmtCoords(lat, lon),
     relief: () => reliefOn,
     snapTargets: () => measureTargets(),
-    pictureDate: () => surface?.provenance?.()?.imageryDate ?? null,
     copy: (text) => copyText(text, { said: 'Coordinates copied' }),
+    choice: measureUnits,
   });
+  const align = createMeasureState({
+    engine: () => engine,
+    api,
+    units: () => prefs.units,
+    coords: (lat, lon) => fmtCoords(lat, lon),
+    snapTargets: () => measureTargets(),
+    copy: (text) => copyText(text, { said: 'Coordinates copied' }),
+    align: true,
+    choice: measureUnits,
+  });
+  /** The seat whose lines the map's clicks, keys and pointer go to, while Measure or Align is open. */
+  const lines = $derived(measure.on ? measure : align.on ? align : null);
   // Alt held keeps a click off what is already there
   let altHeld = $state(false);
-  // the measure kept in a layer, while its menu is open: { id, feature, anchor }
+  // the measure or alignment kept in a layer, while its menu is open: { tool, id, feature, anchor }
   let keeping = $state(null);
 
   /**
@@ -537,8 +552,9 @@
 
   // the pointer over the map: the stretch being drawn follows it, the chart reads the line under it
   $effect(() => {
-    if (!engine || !measure.on) return;
-    return engine.on('pointer-move', (at) => measure.follow(at, { free: altHeld }));
+    const tool = lines;
+    if (!engine || !tool) return;
+    return engine.on('pointer-move', (at) => tool.follow(at, { free: altHeld }));
   });
 
   // a map come to rest: the words that fit are placed again, and what a click lands on read again
@@ -547,12 +563,13 @@
     return engine.on('view-settled', () => {
       viewStamp += 1;
       measure.viewChanged();
+      align.viewChanged();
     });
   });
 
   // the flat map zooms on a double click, which ends a measure here: kept from it while the tool is open
   $effect(() => {
-    if (!measure.on || !mapEl) return;
+    if (!lines || !mapEl) return;
     const swallow = (event) => {
       if (!mapEl?.contains(event.target)) return;
       event.stopPropagation();
@@ -582,9 +599,9 @@
     });
   }
 
-  function keepMeasure(id, anchor) {
-    const feature = measure.feature(id);
-    if (feature) keeping = { id, feature, anchor };
+  function keepMeasure(tool, id, anchor) {
+    const feature = tool.feature(id);
+    if (feature) keeping = { tool, id, feature, anchor };
   }
 
   /** The selected line's sight, stood in the air over the 3D view. */
@@ -766,6 +783,7 @@
       viewLink = null;
       offActivated();
       measure.destroy();
+      align.destroy();
       sky.destroy();
       grid.destroy();
       footprint.destroy();
@@ -838,14 +856,14 @@
     if (!typing && reliefReady && onMap && tiltFromKey(engine, e)) return;
     if (e.key === 'Alt') altHeld = true;
     // Enter finishes a measure: its points become handles, and a line reads its ground
-    if (!typing && e.key === 'Enter' && measure.finish()) {
+    if (!typing && e.key === 'Enter' && lines?.finish()) {
       e.preventDefault();
       return;
     }
     // Backspace takes the last point back while a measure is drawn; Delete, or
     // Backspace once it is finished, takes the selected one off the map
-    if (!typing && measure.on && (e.key === 'Backspace' || e.key === 'Delete')) {
-      if ((e.key === 'Backspace' && measure.undo()) || measure.removeSelected()) {
+    if (!typing && lines && (e.key === 'Backspace' || e.key === 'Delete')) {
+      if ((e.key === 'Backspace' && lines.undo()) || lines.removeSelected()) {
         e.preventDefault();
         return;
       }
@@ -874,8 +892,10 @@
     if (grid.reviewKey) return grid.stopReview();
     if (capture.menuOpen && !capture.armed) return void (capture.menuOpen = false);
     if (sky.placing) return sky.togglePlacing();
+    // a shadow half put down is let go of before Sun and moon closes
+    if (sky.stopTracing()) return;
     // a measure being drawn is finished, then let go of, before the tool closes
-    if (measure.on && measure.escape()) return;
+    if (lines?.escape()) return;
     // a pin waiting for its name is let go of before the mode ends
     if (drop.cancel()) return;
     if (armedMode) return disarm(modes);
@@ -1382,7 +1402,7 @@
     if (footprint.addPoint(at)) return;
     if (grid.addVertex(at)) return;
     if (sky.place(at)) return;
-    if (measure.on) measure.addPoint(measure.snap(at, { free: altHeld }).point);
+    if (lines) lines.addPoint(lines.snap(at, { free: altHeld }).point);
   }
 
   /**
@@ -1412,6 +1432,12 @@
       // every click is a point while the tool is open; a finished one moves by its handles
       pointing: () => measure.on,
     },
+    align: {
+      isOn: () => align.on,
+      open: () => align.open(),
+      close: () => align.close(),
+      pointing: () => align.on,
+    },
     grid: {
       isOn: () => grid.on,
       open: () => grid.open(),
@@ -1423,6 +1449,8 @@
       // the planted anchor, or where the analyst is looking
       open: () => sky.open(markerLatLng ?? { lat: center.lat, lon: center.lon }),
       close: () => sky.close(),
+      // a click plants the anchor or puts a shadow down
+      pointing: () => sky.placing || Boolean(sky.tracing),
     },
     capture: {
       isOn: () => Boolean(capture.armed),
@@ -1975,7 +2003,14 @@
   // One anchored point, one date, and an hour you drag, in its own store
   // (state/sky.svelte.js). The tool keeps only what the mode means *here*:
   // which other modes it turns off, and where it opens when nothing is planted.
-  const sky = createSkyState({ engine: () => engine, api, notify: toast });
+  const sky = createSkyState({
+    engine: () => engine,
+    api,
+    notify: toast,
+    pictureDate: () => surface?.provenance?.()?.imageryDate ?? null,
+    units: () => prefs.units,
+    coords: (lat, lon) => fmtCoords(lat, lon),
+  });
 
   function toggleSunMode() {
     arm(modes, 'sky');
@@ -2011,6 +2046,12 @@
   $effect(() => {
     if (!mapReady || !sky.on) return;
     return engine.on('view-settled', () => sky.draw());
+  });
+
+  // while a shadow's tip is aimed, the line from its foot follows the pointer
+  $effect(() => {
+    if (!mapReady || sky.tracing !== 'tip') return;
+    return engine.on('pointer-move', (at) => sky.follow(at));
   });
 
   let searching = $state(false);
@@ -2523,16 +2564,22 @@
     return row ? { id: row.id, label: detailsTitle || row.title, type: 'place', lat: row.lat, lon: row.lon } : null;
   }
 
-  /** The measure selected, as `mapNote.measureNoteText` reads it, or null. */
-  function measureForNote() {
-    const m = measure.drawing ? null : measure.selected;
+  /** The line selected in a seat, as `mapNote.measureNoteText` reads it, or null. */
+  function lineForNote(tool) {
+    const m = tool.drawing ? null : tool.selected;
     if (!m || m.points.length < 2) return null;
     return {
-      text: measure.text(m.id),
+      text: tool.text(m.id),
       use: m.closed ? '' : m.use,
-      ground: !m.closed && measure.groundOn,
-      shadowDate: m.use === 'shadow' ? measure.shadowDate(m.id) : '',
+      ground: !m.closed && tool.groundOn,
     };
+  }
+  const measureForNote = () => lineForNote(measure);
+  const alignmentForNote = () => lineForNote(align);
+  /** The shadow read in Sun and moon, once it says something. */
+  function shadowForNote() {
+    const text = sky.shadowText();
+    return text ? { text, use: 'shadow' } : null;
   }
 
   const noteView = viewOffer({ take: (options) => capture.takeForNote(options), label: () => seatedPlace()?.label ?? '' });
@@ -2540,10 +2587,20 @@
     point: () => ({ place: seatedPlace(), lat: displayCoords.lat, lon: displayCoords.lon }),
   });
   const noteMeasure = measureOffer({ measure: measureForNote });
+  const noteAlignment = measureOffer({
+    measure: alignmentForNote,
+    id: 'alignment',
+    label: 'This alignment',
+    icon: 'alignment',
+    missing: 'Draw an alignment first',
+  });
+  const noteShadow = measureOffer({ measure: shadowForNote, id: 'shadow', label: 'This shadow', icon: 'sun', missing: 'Read a shadow first' });
   offerPuts('satellite', () => [
     ...(capture.blocked ? [] : [noteView]),
     notePoint,
     ...(measureForNote() ? [noteMeasure] : []),
+    ...(alignmentForNote() ? [noteAlignment] : []),
+    ...(shadowForNote() ? [noteShadow] : []),
   ]);
 
   // The point right-clicked, held as it was: the menu closes before the put runs.
@@ -2798,6 +2855,7 @@
           bind:height={railHeight}
           state={{
             measure: { on: modes.measure.isOn() },
+            align: { on: modes.align.isOn() },
             grid: { on: grid.on, disabled: reliefOn, title: reliefOn ? GRID_FLAT_ONLY : undefined },
             sky: { on: sky.on },
             reference: {
@@ -2817,9 +2875,15 @@
             {#if armedMode === 'measure'}
               <MeasurePanel
                 tool={measure}
-                onkeep={keepMeasure}
+                onkeep={(id, anchor) => keepMeasure(measure, id, anchor)}
                 oncopy={(id) => copyText(measure.text(id))}
                 onlook={lookAlong}
+              />
+            {:else if armedMode === 'align'}
+              <MeasurePanel
+                tool={align}
+                onkeep={(id, anchor) => keepMeasure(align, id, anchor)}
+                oncopy={(id) => copyText(align.text(id))}
               />
             {:else if armedMode === 'sky'}
               <SunPanel
@@ -2829,10 +2893,15 @@
                 index={sky.index}
                 anchor={sky.anchor}
                 placing={sky.placing}
+                shadow={sky.shadow}
                 ondate={(value) => sky.setDay(value)}
                 onindex={(value) => sky.setIndex(value)}
                 onplace={() => sky.togglePlacing()}
                 onclose={toggleSunMode}
+                ontraceshadow={() => sky.traceShadow()}
+                onclearshadow={() => sky.clearShadow()}
+                onmoment={(i) => sky.showMoment(i)}
+                oncopyshadow={() => copyText(sky.shadowText())}
               />
             {:else if armedMode === 'footprint'}
               <FootprintPanel
@@ -2938,10 +3007,10 @@
         <TurnGuide x={rotatePivot.x} y={rotatePivot.y} />
       {/if}
 
-      <!-- What the Measure tool draws on the screen: the stretch to come while a
-           measure is drawn, and in 3D the line of sight standing in the air. -->
-      {#if measure.on}
-        <MeasureOverlay engine={mapReady ? engine : null} live={measure.live} air={measureAir} />
+      <!-- What Measure and Align draw on the screen: the stretch to come while a
+           line is drawn, and in 3D a measure's line of sight standing in the air. -->
+      {#if lines}
+        <MeasureOverlay engine={mapReady ? engine : null} live={lines.live} air={measure.on ? measureAir : null} />
       {/if}
 
       <!-- A measured line's ground, in a window the analyst moves and sizes, read
@@ -2982,7 +3051,7 @@
           anchor={keeping.anchor}
           onclose={() => (keeping = null)}
           ondone={() => {
-            measure.remove(keeping.id);
+            keeping.tool.remove(keeping.id);
             keeping = null;
           }}
         />

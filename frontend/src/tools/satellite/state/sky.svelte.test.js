@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createSkyState } from './sky.svelte.js';
+import { createSkyState, usableDate } from './sky.svelte.js';
 
 /**
  * Sun & moon, apart from the map it draws on.
@@ -19,6 +19,7 @@ function skyFor(date = '2026-06-21') {
   const arc = (peak) => hours.map((h) => peak * Math.sin(((h - 6) / 12) * Math.PI));
   return {
     date,
+    zone: { name: 'Europe/Paris', abbreviation: 'CEST' },
     moment: { local: `${date}T09:40` },
     moon: { waxing: true, phase: 'waxing gibbous' },
     curve: {
@@ -286,5 +287,224 @@ describe('teardown', () => {
 
   it('is safe on a store that never drew anything', () => {
     expect(() => store().destroy()).not.toThrow();
+  });
+});
+
+describe('a shadow, read only when asked for', () => {
+  const FOOT = { lat: 48.85, lon: 2.35 };
+  const TIP = { lat: 48.85, lon: 2.3502 }; // about 15 m east
+  const MOMENT = { local: '2026-06-21T14:12:05+02:00', abbreviation: 'CEST', height_m: 23.4, sun_azimuth: 270, sun_altitude: 41.2 };
+  let made;
+  let picture;
+  let answer;
+
+  /** A store whose layers are each their own, and whose backend answers the sky and the shadow. */
+  function shadowStore() {
+    made = [];
+    surface = vi.fn(() => {
+      const one = { set: vi.fn(), clear: vi.fn(), destroy: vi.fn(), patch: vi.fn() };
+      made.push(one);
+      return one;
+    });
+    api.get = vi.fn(async (path) => {
+      asked.push(path);
+      if (path.startsWith('/api/geo/shadow')) return answer;
+      return skyFor(new URLSearchParams(path.split('?')[1]).get('date') ?? undefined);
+    });
+    return createSkyState({
+      engine: () => engine,
+      api,
+      notify,
+      pictureDate: () => picture,
+      units: () => 'metric',
+      coords: (lat, lon) => `${lat.toFixed(4)}, ${lon.toFixed(4)}`,
+      colour: (_name, fallback) => fallback,
+      surface,
+    });
+  }
+
+  const shadowAsked = () => asked.filter((path) => path.startsWith('/api/geo/shadow'));
+  const query = (path) => new URLSearchParams(path.split('?')[1]);
+  const shadowLayer = () => made[1];
+
+  /** Open on the foot, the day read, then the shadow put down and answered. */
+  async function traced(s) {
+    s.open(FOOT);
+    await s.load();
+    s.draw();
+    s.traceShadow();
+    s.place(FOOT);
+    s.place(TIP);
+    await vi.waitFor(() => expect(s.shadow.answered).toBe(true));
+  }
+
+  beforeEach(() => {
+    picture = null;
+    answer = { date: '2026-06-21', moments: [MOMENT] };
+  });
+
+  it('asks nothing and draws no layer for it until it is asked for', async () => {
+    const s = shadowStore();
+    s.open(FOOT);
+    await s.load();
+    s.draw();
+    expect(s.shadow).toBe(null);
+    expect(s.place(TIP)).toBe(false);
+    expect(surface).toHaveBeenCalledTimes(1);
+    expect(shadowAsked()).toEqual([]);
+  });
+
+  it('takes the foot, then the tip, and reads the hour on the day and in the zone of the sky', async () => {
+    const s = shadowStore();
+    s.open(FOOT);
+    await s.load();
+    s.traceShadow();
+    expect(s.tracing).toBe('foot');
+    expect(s.place(FOOT)).toBe(true);
+    expect(s.tracing).toBe('tip');
+    expect(s.shadow).toMatchObject({ step: 'tip', traced: false });
+    expect(s.place(TIP)).toBe(true);
+    expect(s.tracing).toBe(null);
+    await vi.waitFor(() => expect(s.shadow.answered).toBe(true));
+    const [path] = shadowAsked();
+    expect(query(path).get('date')).toBe('2026-06-21');
+    expect(query(path).get('zone')).toBe('Europe/Paris');
+    expect(Number(query(path).get('bearing'))).toBeCloseTo(90, 0);
+    expect(Number(query(path).get('length'))).toBeCloseTo(14.7, 0);
+    expect(s.shadow.moments).toEqual([{ clock: '14:12', zone: 'CEST', height: '23 m', sun: 'sun at 270°, 41.2° up' }]);
+    // the slider goes to that hour, so the sun's ray lines up with the shadow
+    expect(s.index).toBe(14);
+  });
+
+  it('puts the slider back on an hour of the shadow when it is pressed', async () => {
+    answer = { date: '2026-06-21', moments: [MOMENT, { ...MOMENT, local: '2026-06-21T17:02:00+02:00', height_m: 9 }] };
+    const s = shadowStore();
+    await traced(s);
+    s.showMoment(1);
+    expect(s.index).toBe(17);
+    s.setIndex(3);
+    s.showMoment(0);
+    expect(s.index).toBe(14);
+  });
+
+  it('reads it on the imagery’s day, and says so when the imagery has none', async () => {
+    picture = '2024-03-02';
+    const s = shadowStore();
+    s.open(FOOT);
+    await s.load();
+    s.traceShadow();
+    expect(s.day).toBe('2024-03-02');
+    expect(s.sky).toBe(null);
+    expect(s.shadow.noDay).toBe(false);
+    s.place(FOOT);
+    s.place(TIP);
+    // the tip waits for that day's sky, then the shadow is read on it
+    expect(shadowAsked()).toEqual([]);
+    await s.load();
+    await vi.waitFor(() => expect(shadowAsked()).toHaveLength(1));
+    expect(query(shadowAsked()[0]).get('date')).toBe('2024-03-02');
+
+    picture = '2021';
+    const other = shadowStore();
+    other.open(FOOT);
+    await other.load();
+    other.traceShadow();
+    expect(other.day).toBe('2026-06-21');
+    expect(other.shadow.noDay).toBe(true);
+  });
+
+  it('reads it again for another day', async () => {
+    const s = shadowStore();
+    await traced(s);
+    s.setDay('2026-12-21');
+    await s.load();
+    await vi.waitFor(() => expect(shadowAsked()).toHaveLength(2));
+    expect(query(shadowAsked()[1]).get('date')).toBe('2026-12-21');
+  });
+
+  it('puts no shadow down at the second click of a double click on the foot', () => {
+    const s = shadowStore();
+    s.open(FOOT);
+    s.traceShadow();
+    s.place(FOOT);
+    expect(s.place({ ...FOOT })).toBe(true);
+    expect(s.tracing).toBe('tip');
+  });
+
+  it('lets go of a shadow half put down on Escape, a close or Move, and keeps a whole one', async () => {
+    const s = shadowStore();
+    s.open(FOOT);
+    s.traceShadow();
+    s.place(FOOT);
+    expect(s.stopTracing()).toBe(true);
+    expect(s.shadow).toBe(null);
+    expect(s.stopTracing()).toBe(false);
+    s.traceShadow();
+    s.togglePlacing();
+    expect(s.tracing).toBe(null);
+    s.togglePlacing();
+    s.traceShadow();
+    s.close();
+    expect(s.shadow).toBe(null);
+
+    const whole = shadowStore();
+    await traced(whole);
+    whole.close();
+    expect(whole.shadow.traced).toBe(true);
+    expect(shadowLayer().clear).toHaveBeenCalled();
+  });
+
+  it('draws it on a layer of its own, its ends to drag, and reads it again where an end is dropped', async () => {
+    const s = shadowStore();
+    await traced(s);
+    expect(surface).toHaveBeenCalledTimes(2);
+    const shapes = shadowLayer().set.mock.calls.at(-1)[0];
+    expect(shapes.find((shape) => shape.id === 'shadow').points).toEqual([FOOT, TIP]);
+    expect(shapes.find((shape) => shape.id === 'shadow-word').html).toContain('≈ 23 m tall');
+    const tip = shapes.find((shape) => shape.id === 'shadow-end-1');
+    expect(tip.title).toBe('Drag to move the tip of the shadow');
+    const moved = { lat: 48.8501, lon: 2.3502 };
+    tip.onDrag(moved);
+    expect(shadowLayer().patch).toHaveBeenCalledWith('shadow', { points: [FOOT, moved] });
+    tip.onDragEnd();
+    await vi.waitFor(() => expect(shadowAsked()).toHaveLength(2));
+    expect(Number(query(shadowAsked()[1]).get('bearing'))).toBeLessThan(90);
+  });
+
+  it('follows the pointer from the foot while the tip is aimed', () => {
+    const s = shadowStore();
+    s.open(FOOT);
+    s.draw();
+    s.traceShadow();
+    s.place(FOOT);
+    s.follow(TIP);
+    expect(shadowLayer().set.mock.calls.at(-1)[0].find((shape) => shape.id === 'shadow-live').points).toEqual([FOOT, TIP]);
+    s.follow(FOOT);
+    expect(shadowLayer().patch).toHaveBeenCalledWith('shadow-live', { points: [FOOT, FOOT] });
+  });
+
+  it('says so when no hour of the day casts it', async () => {
+    answer = { date: '2026-06-21', moments: [] };
+    const s = shadowStore();
+    await traced(s);
+    expect(s.shadow).toMatchObject({ answered: true, moments: [], date: '2026-06-21' });
+    expect(s.shadowText()).toBe('No hour of 2026-06-21 casts this shadow\nShadow from 48.8500, 2.3500 to 48.8500, 2.3502, read for 2026-06-21');
+  });
+
+  it('copies what it says, with where it was drawn, and goes with a press', async () => {
+    const s = shadowStore();
+    await traced(s);
+    expect(s.shadowText()).toBe(
+      'About 23 m tall (sun at 270°, 41.2° up at 14:12 CEST)\nShadow from 48.8500, 2.3500 to 48.8500, 2.3502, read for 2026-06-21'
+    );
+    s.clearShadow();
+    expect(s.shadow).toBe(null);
+    expect(s.shadowText()).toBe('');
+  });
+
+  it('takes the imagery’s date only when it is a whole day', () => {
+    expect(usableDate('2024-06-21')).toBe('2024-06-21');
+    expect(usableDate('2021')).toBe(null);
+    expect(usableDate(null)).toBe(null);
   });
 });

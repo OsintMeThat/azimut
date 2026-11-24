@@ -3070,7 +3070,7 @@ from the map.
 Map chrome sorts into four kinds, each with one place, and a tool declares
 which it is (`lib/map/tools.js`) rather than adding a button somewhere.
 
-- **Modes** — what the pointer does: measure, grid search, sun & moon, and the
+- **Modes** — what the pointer does: measure, align, grid search, sun & moon, and the
   capture marquee, which is armed from the Capture button (it starts on Capture an area, the
   centred frame one choice away in its arrow) rather than from a
   toolbox. Exactly one is ever armed: arming any of them closes the rest, and
@@ -3241,29 +3241,30 @@ nautical), and its measures wait, hidden, while it is closed.
 The panel shows the selected measure in large. A line of two points takes an
 exact length or bearing typed in place, in any unit or as a wind, and can be used
 as **Ring** (up to five circles round A, each as wide as the line), **Cone** (what
-a camera at A facing B takes in, its opening set), **Align**, **Shadow** or
-**Viewshed**. An alignment is the line through two things lined up in a picture,
-run on 20 km past both ends, or past one, as far as is typed: the camera stood
-somewhere on it, on the side of the nearer thing. It follows the great circle,
-not a straight line on the flat map. **Within** sets how far off true, up to 5°,
-the two things may line up in the picture, and lays the band the camera may stand
-in either side of the line: the ground from which the two things are seen that
-far apart, which opens at that angle by the nearer thing and widens faster the
-closer together they are. Where the band stops ruling anything out short of the
-run, the panel says how far out. Once a line is an alignment, each new line
-is another after two clicks, with the same run and tolerance, drawn while the second
-point is aimed, until Align is pressed off, **Stop** is pressed or Escape is
-pressed with nothing selected. Alignments cross along their whole run, though not
-at a thing two of them share, and from three on a dashed ring circles where they
-meet. The panel says how far apart the crossings lie and copies their middle. A
-shadow is drawn from an object's foot to the tip of its shadow: its direction
-names the hour the sun stood opposite on the picture's day, and its length the
-object's height at that sun, for level ground seen from overhead. A picture with
-no day asks for one. A viewshed fills the ground in sight from A out to B, 30 km
-at most, on bare earth without buildings or trees. **Keep** puts the measure in
+a camera at A facing B takes in, its opening set) or **Viewshed**. A viewshed
+fills the ground in sight from A out to B, 30 km at most, on bare earth without
+buildings or trees. **Keep** puts the measure in
 one of the case's layers, named by what it reads, its points in the notes, and
 **Copy** puts the same text on the clipboard. The panel folds to one line, what
 the measure in hand reads, and stays folded until it is unfolded.
+
+**Align** is the Measure tool's lines in a seat of their own, since finding where
+a camera stood is not measuring. Two clicks on two things lined up in a picture
+make an alignment: the line through them, run on 20 km past both ends, or past
+one, as far as is typed. The camera stood somewhere on it, on the side of the
+nearer thing. It follows the great circle, not a straight line on the flat map.
+**Within** sets how far off true, up to 5°, the two things may line up in the
+picture, and lays the band the camera may stand in either side of the line: the
+ground from which the two things are seen that far apart, which opens at that
+angle by the nearer thing and widens faster the closer together they are. Where
+the band stops ruling anything out short of the run, the panel says how far out.
+Each new alignment takes the run and tolerance last set, drawn while its second
+point is aimed. Alignments cross along their whole run, though not at a thing two
+of them share, and from three on a dashed ring circles where they meet. The panel
+says how far apart the crossings lie and copies their middle. Escape lets go of
+the alignment in hand, then puts the seat away. Alignments keep, copy and go into
+a note as measures do, share the Measure panel's units, and wait, hidden, while
+the seat is closed; Measure does not show them.
 
 **Ground** reads the heights under a line. The flat map asks the relief server
 only once the switch is on, and remembers it; in 3D the relief is read anyway, so
@@ -3498,6 +3499,18 @@ names its altitude on hover, carries the moon's phase, and is absent while the
 body is under the horizon. The anchor is a point and not the map centre, so panning
 leaves the path alone. Coords & Sky opens the same mode with its own point, date
 and time, and hands over no computed value.
+
+**Read a shadow**, under the anchor, is there for when it is wanted and changes
+nothing else. Its two clicks are the foot of something and the tip of its
+shadow; on imagery with a day of its own the panel's date moves to that day, the
+one the shadow was cast. The shadow's direction names the hour the sun stood
+opposite, its length the thing's height at that sun, for level ground seen from
+overhead, and the slider goes to that hour so the sun's ray lines up. A day the
+sun crosses that bearing twice gives both hours, each pressed to put the slider
+on it. Its ends drag, and it is read again where they are dropped, or on another
+date. Imagery with no day is read on the panel's date, and the panel says so.
+Escape lets go of a shadow half put down; a whole one waits, hidden, with the
+anchor. It copies and goes into a note.
 
 **Coords & Sky opens on the point the map is on.** The map publishes the point it
 records — its moved pin, else its centre — once it has been moved off the view it

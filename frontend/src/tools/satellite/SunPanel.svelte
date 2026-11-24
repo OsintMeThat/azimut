@@ -6,6 +6,10 @@
   // Dragging the hour costs nothing: the whole day arrived in one response at
   // ten-minute steps, so the slider reads an array. Only a new date asks the
   // backend again.
+  //
+  // A shadow is read only when Shadow is pressed: the foot of something, then
+  // the tip of its shadow, and the panel says the hour and how tall it stands.
+  // An hour pressed there puts the slider on it.
   import Icon from '../../components/Icon.svelte';
   import MoonGlyph from '../../components/MoonGlyph.svelte';
   import DateField from '../../components/DateField.svelte';
@@ -17,10 +21,18 @@
     index = 0,
     anchor = null,
     placing = false,
+    /** The shadow as the store says it (`sky.shadow`), or null while none is asked for. */
+    shadow = null,
     ondate,
     onindex,
     onplace,
     onclose,
+    /** Put a shadow down, or stop putting one down. */
+    ontraceshadow,
+    onclearshadow,
+    /** The slider on the hour of the shadow's moment `i`. */
+    onmoment,
+    oncopyshadow,
   } = $props();
 
   const curve = $derived(sky?.curve ?? null);
@@ -164,6 +176,56 @@
     </button>
   </div>
   <p class="note">The path is drawn from this point, so panning the map leaves it alone.</p>
+
+  <div class="shadow">
+    {#if !shadow}
+      <button class="btn btn-sm" onclick={ontraceshadow} title="The hour from a shadow on the imagery, and how tall its caster stands">
+        <Icon name="sun" size={13} /> Read a shadow
+      </button>
+    {:else if shadow.step}
+      <div class="tracing">
+        <span class="pulse" aria-hidden="true"></span>
+        <span>{shadow.step === 'foot' ? 'Click the foot of what casts it' : 'Click the tip of its shadow'}</span>
+        <button class="btn btn-ghost btn-xs" onclick={ontraceshadow} title="Put no shadow down (Esc)">Cancel</button>
+      </div>
+    {:else}
+      <div class="shadow-head">
+        <span class="name">Shadow</span>
+        {#if shadow.answered && shadow.moments.length}
+          <button class="btn btn-ghost btn-xs icon" onclick={oncopyshadow} title="Copy what the shadow says, with where it was drawn" aria-label="Copy the shadow">
+            <Icon name="copy" size={12} />
+          </button>
+        {/if}
+        <button class="btn btn-ghost btn-xs icon" onclick={ontraceshadow} title="Draw it again" aria-label="Draw the shadow again">
+          <Icon name="reset" size={12} />
+        </button>
+        <button class="btn btn-ghost btn-xs icon" onclick={onclearshadow} title="Take the shadow off the map" aria-label="Remove the shadow">
+          <Icon name="x" size={12} />
+        </button>
+      </div>
+      {#if shadow.busy}
+        <p class="note">Reading the sun…</p>
+      {:else if shadow.error}
+        <p class="failed">{shadow.error}</p>
+      {:else if shadow.answered && !shadow.moments.length}
+        <p class="answer">No hour of {shadow.date} casts this shadow</p>
+      {:else if shadow.answered}
+        {#each shadow.moments as moment, i (i)}
+          <button class="moment" onclick={() => onmoment(i)} title={`Set the hour to ${moment.clock}`}>
+            <span class="mono when">{moment.clock}{moment.zone ? ` ${moment.zone}` : ''}</span>
+            <span class="tall">about {moment.height} tall</span>
+            <span class="dim">{moment.sun}</span>
+          </button>
+        {/each}
+      {/if}
+    {/if}
+    {#if shadow?.noDay}
+      <p class="note">The imagery has no day: the shadow is read on the date above.</p>
+    {/if}
+    {#if shadow?.traced}
+      <p class="note">Assumes level ground seen from overhead.</p>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -268,5 +330,77 @@
     max-width: 220px;
     font-size: var(--fs-xs);
     color: var(--text-3);
+  }
+  /* the shadow is read on demand, under the anchor it does not move */
+  .shadow {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+    font-size: var(--fs-sm);
+  }
+  .shadow > .btn {
+    align-self: flex-start;
+  }
+  .tracing,
+  .shadow-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tracing span:not(.pulse),
+  .shadow-head .name {
+    margin-right: auto;
+  }
+  .tracing {
+    color: var(--sky-sun);
+  }
+  .pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: none;
+    background: var(--sky-sun);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    50% {
+      opacity: 0.3;
+    }
+  }
+  .shadow-head .name {
+    color: var(--text-2);
+  }
+  .moment {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 1px 8px;
+    padding: 5px 7px;
+    border-radius: var(--r-md);
+    background: rgba(255, 255, 255, 0.04);
+    text-align: left;
+    color: var(--text-1);
+  }
+  .moment:hover {
+    background: rgba(255, 255, 255, 0.09);
+  }
+  .moment .when {
+    font-weight: 700;
+    color: var(--sky-sun);
+  }
+  .moment .dim {
+    grid-column: 1 / -1;
+    font-size: var(--fs-xs);
+  }
+  .answer {
+    margin: 0;
+    color: var(--text-1);
+  }
+  .failed {
+    margin: 0;
+    max-width: 220px;
+    font-size: var(--fs-xs);
+    color: var(--warn);
   }
 </style>

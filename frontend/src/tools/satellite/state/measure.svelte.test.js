@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMeasureState, EYE_HEIGHT, PROFILE_SAMPLES, usableDate, VIEWSHED_REACH } from './measure.svelte.js';
+import { createMeasureState, createUnitsChoice, EYE_HEIGHT, PROFILE_SAMPLES, VIEWSHED_REACH } from './measure.svelte.js';
 import { destination, haversine } from '../../../lib/measure.js';
 
 /**
@@ -22,7 +22,6 @@ let layers;
 let engine;
 let api;
 let relief;
-let picture;
 let targets;
 const copy = vi.fn();
 
@@ -43,7 +42,7 @@ function fakeLayer() {
   return layer;
 }
 
-function store() {
+function store(more = {}) {
   return createMeasureState({
     engine: () => engine,
     api,
@@ -51,8 +50,8 @@ function store() {
     coords: (lat, lon) => `${lat.toFixed(4)}, ${lon.toFixed(4)}`,
     relief: () => relief,
     snapTargets: () => targets,
-    pictureDate: () => picture,
     copy,
+    ...more,
     surface: () => {
       const layer = fakeLayer();
       layers.push(layer);
@@ -80,7 +79,6 @@ beforeEach(() => {
   px = 1000;
   layers = [];
   relief = false;
-  picture = null;
   targets = [];
   engine = {
     latLngToContainerPoint: ({ lat, lon }) => ({ x: lon * px, y: -lat * px }),
@@ -88,7 +86,7 @@ beforeEach(() => {
   };
   api = {
     post: vi.fn(async (url) => (url.endsWith('/profile') ? PROFILE : { lat: 46, lon: 7, step_deg: 90, runs: [[0, 500], [], [], []], share: 0.31, radius_m: 1550 })),
-    get: vi.fn(async () => ({ date: '2024-06-21', moments: [{ local: '2024-06-21T14:12:00+02:00', abbreviation: 'CEST', height_m: 23.4, sun_azimuth: 270, sun_altitude: 41.2 }] })),
+    get: vi.fn(),
   };
 });
 
@@ -464,22 +462,15 @@ describe('what a line of two points is used as', () => {
     expect(tool.readout).toMatch(/31% in sight$/);
   });
 
-  it('reads a shadow on the picture’s own day, and asks for a day when the picture has none', async () => {
-    picture = '2021';
+  it('offers no alignment: Align is a seat of its own', () => {
     const tool = store();
     tool.open();
     const line = drawn(tool, A, B);
-    tool.setUse(line.id, 'shadow');
-    expect(api.get).not.toHaveBeenCalled();
-    expect(tool.shadowDate(line.id)).toBe(null);
-    tool.setShadowDate(line.id, '2024-06-21');
-    await vi.waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
-    const asked = new URLSearchParams(api.get.mock.calls[0][0].split('?')[1]);
-    expect(asked.get('date')).toBe('2024-06-21');
-    expect(Number(asked.get('bearing'))).toBeCloseTo(90, 1);
-    expect(Number(asked.get('length'))).toBeCloseTo(1545, -1);
-    await vi.waitFor(() => expect(tool.readout).toBe('About 23 m tall (sun at 270°, 41.2° up at 14:12 CEST)'));
-    expect(words().last.some((word) => word.html.includes('≈ 23 m tall'))).toBe(true);
+    tool.setUse(line.id, 'align');
+    expect(tool.measures[0].use).toBe(null);
+    tool.addPoint(C);
+    tool.addPoint(D);
+    expect(tool.drawing).toBe(true);
   });
 
   it('gives a line an exact length or bearing by moving B', () => {
@@ -502,86 +493,88 @@ describe('what a line of two points is used as', () => {
   });
 });
 
-describe('alignments in a row', () => {
+describe('the Align seat', () => {
   const camera = { lat: 46.05, lon: 7.05 };
   /** Two things lined up on a bearing from the camera: the far one, then the near one. */
   const things = (bearing) => [destination(camera, bearing, 5000), destination(camera, bearing, 2000)];
+  const seat = () => store({ align: true });
 
-  /** A first line made an alignment, so the next ones are alignments too. */
-  function aligned(tool) {
-    const first = drawn(tool, ...things(10));
-    tool.setUse(first.id, 'align');
-    return first;
+  /** An alignment through two things lined up on a bearing: two clicks. */
+  function aligned(tool, bearing = 10) {
+    for (const point of things(bearing)) tool.addPoint(point);
+    return tool.measures.at(-1);
   }
 
   it('runs an alignment on past both ends, in the colour of what a line is used as', () => {
-    const tool = store();
+    const tool = seat();
     tool.open();
     aligned(tool);
+    expect(tool.align).toBe(true);
     const runs = shapes().last.filter((shape) => /^m1-use-\d$/.test(shape.id));
     expect(runs.map((shape) => shape.kind)).toEqual(['line', 'line']);
     expect(runs[0].style.stroke).toBe('#2de0ff');
     expect(tool.readout).toBe('Alignment · 190°');
   });
 
-  it('makes each new line an alignment after two clicks, until Align is pressed off', () => {
-    const tool = store();
+  it('makes every line an alignment after two clicks, run on as the last one was set', () => {
+    const tool = seat();
     tool.open();
-    const first = aligned(tool);
-    expect(tool.aligning).toBe(true);
     const [far, near] = things(120);
     tool.addPoint(far);
     expect(tool.drawing).toBe(true);
     tool.addPoint(near);
     expect(tool.drawing).toBe(false);
-    const second = tool.measures.at(-1);
-    expect(second).toMatchObject({ use: 'align', past: 'both' });
-    expect(tool.selectedId).toBe(second.id);
+    const first = tool.measures.at(-1);
+    expect(first).toMatchObject({ use: 'align', past: 'both' });
+    expect(tool.selectedId).toBe(first.id);
     // the next one runs on as the last one was set
-    tool.setPast(second.id, 'b');
-    tool.setReach(second.id, 8000);
-    for (const point of things(250)) tool.addPoint(point);
+    tool.setPast(first.id, 'b');
+    tool.setReach(first.id, 8000);
+    aligned(tool, 250);
     expect(tool.measures.at(-1)).toMatchObject({ use: 'align', past: 'b', reach: 8000 });
-    tool.setUse(first.id, 'align');
-    expect(tool.aligning).toBe(false);
-    for (const point of things(300)) tool.addPoint(point);
-    expect(tool.drawing).toBe(true);
+    // an alignment stays one
+    tool.setUse(first.id, 'ring');
+    expect(tool.measures[0].use).toBe('align');
   });
 
-  it('says what to click while aligning', () => {
-    const tool = store();
+  it('says what to click', () => {
+    const tool = seat();
     tool.open();
-    aligned(tool);
     expect(tool.hint).toBe('Click two things lined up in the picture');
     tool.addPoint(things(120)[0]);
     expect(tool.hint).toBe('Click the second thing lined up');
   });
 
-  it('lets go of the selection on Escape, then of the alignments, then of nothing', () => {
-    const tool = store();
+  it('lets go of the selection on Escape, then has nothing left to let go of', () => {
+    const tool = seat();
     tool.open();
     aligned(tool);
     expect(tool.escape()).toBe(true);
-    expect(tool.aligning).toBe(true);
-    expect(tool.escape()).toBe(true);
-    expect(tool.aligning).toBe(false);
+    expect(tool.selectedId).toBe(null);
     expect(tool.escape()).toBe(false);
-    aligned(tool);
-    tool.stopAligning();
-    expect(tool.aligning).toBe(false);
-    tool.setUse(tool.measures.at(-1).id, 'align');
-    tool.close();
-    expect(tool.aligning).toBe(false);
   });
 
-  it('shows how the alignment to come runs on while it is aimed', () => {
-    const tool = store();
+  it('reads no ground for an alignment, whatever the switch or the 3D view says', async () => {
+    localStorage.setItem('azimut:measureGround', 'on');
+    relief = true;
+    const tool = seat();
     tool.open();
-    tool.addPoint(A);
-    tool.follow(B);
-    expect(tool.live.runs).toEqual([]);
-    tool.finish();
     aligned(tool);
+    tool.readAgain();
+    await Promise.resolve();
+    expect(tool.groundOn).toBe(false);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it('shows how the alignment to come runs on while it is aimed, and a measure does not', () => {
+    const plain = store();
+    plain.open();
+    plain.addPoint(A);
+    plain.follow(B);
+    expect(plain.live.runs).toEqual([]);
+    plain.close();
+    const tool = seat();
+    tool.open();
     const [far, near] = things(120);
     tool.addPoint(far);
     tool.follow(near);
@@ -590,10 +583,11 @@ describe('alignments in a row', () => {
   });
 
   it('rings where three alignments meet, and copies its middle', () => {
-    const tool = store();
+    const tool = seat();
     tool.open();
     aligned(tool);
-    for (const point of [...things(120), ...things(250)]) tool.addPoint(point);
+    aligned(tool, 120);
+    aligned(tool, 250);
     const meet = tool.meeting;
     expect(meet.lead).toMatch(/^3 alignments meet within [\d.]+ m$/);
     expect(haversine(meet.at, camera)).toBeLessThan(1);
@@ -610,17 +604,17 @@ describe('alignments in a row', () => {
   });
 
   it('draws no ring for two alignments, whose crossing is already marked', () => {
-    const tool = store();
+    const tool = seat();
     tool.open();
     aligned(tool);
-    for (const point of things(120)) tool.addPoint(point);
+    aligned(tool, 120);
     expect(tool.meeting.lead).toBe('The two alignments cross');
     expect(shapes().last.some((shape) => shape.id === 'meeting')).toBe(false);
     expect(shapes().last.filter((shape) => shape.className === 'measure-crossing')).toHaveLength(1);
   });
 
   it('turns an alignment round without moving where it runs on', () => {
-    const tool = store();
+    const tool = seat();
     tool.open();
     const line = aligned(tool);
     tool.setPast(line.id, 'b');
@@ -632,7 +626,7 @@ describe('alignments in a row', () => {
   });
 
   it('lays the band a tolerance leaves either side, and the next lines take it too', () => {
-    const tool = store();
+    const tool = seat();
     tool.open();
     const line = aligned(tool);
     tool.setTolerance(line.id, 1.5);
@@ -653,7 +647,7 @@ describe('alignments in a row', () => {
   });
 
   it('says where a loose band stops ruling anything out', () => {
-    const tool = store();
+    const tool = seat();
     tool.open();
     const line = aligned(tool);
     expect(tool.bandOpensAt(line.id)).toBe(null);
@@ -665,13 +659,22 @@ describe('alignments in a row', () => {
   });
 
   it('keeps an alignment in a layer with the whole of its run', () => {
-    const tool = store();
+    const tool = seat();
     tool.open();
     const line = aligned(tool);
     const kept = tool.feature(line.id);
     expect(kept.geometry.type).toBe('LineString');
     expect(kept.geometry.coordinates).toHaveLength(98);
     expect(kept.description).toContain('Alignment run on 20.0 km past both ends');
+  });
+
+  it('puts a click on another alignment’s end, named as one', () => {
+    const tool = seat();
+    tool.open();
+    const [far] = things(10);
+    aligned(tool);
+    const { target } = tool.snap({ lat: far.lat + 0.000003, lon: far.lon });
+    expect(target.label).toBe('Alignment 1');
   });
 });
 
@@ -685,6 +688,17 @@ describe('keeping and saying a measure', () => {
     expect(store().unitsChoice).toBe('nautical');
     tool.setUnits(null);
     expect(tool.readout).toMatch(/km/);
+  });
+
+  it('shares the units between Measure and Align, set in either', () => {
+    const choice = createUnitsChoice();
+    const tool = store({ choice });
+    const seat = store({ align: true, choice });
+    seat.setUnits('imperial');
+    expect(tool.unitsChoice).toBe('imperial');
+    tool.open();
+    drawn(tool, A, B);
+    expect(tool.readout).toMatch(/^5074 ft · 090°$/);
   });
 
   it('makes a layer feature named by what it reads: a line, an area, a ring', () => {
@@ -703,13 +717,5 @@ describe('keeping and saying a measure', () => {
     const area = tool.feature(tool.measures.at(-1).id);
     expect(area.geometry.type).toBe('Polygon');
     expect(area.geometry.coordinates[0][0]).toEqual(area.geometry.coordinates[0].at(-1));
-  });
-});
-
-describe('the picture’s date', () => {
-  it('is a day, or nothing a shadow can be read on', () => {
-    expect(usableDate('2024-06-21')).toBe('2024-06-21');
-    expect(usableDate('2021')).toBe(null);
-    expect(usableDate(null)).toBe(null);
   });
 });

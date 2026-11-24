@@ -368,7 +368,7 @@ export const PAGES = {
       {
         anchor: 'sat.tools',
         title: 'Tools',
-        text: 'Measure, a search grid, sun and moon, and windows of case pictures over the map.',
+        text: 'Measure, Align, a search grid, sun and moon, and windows of case pictures over the map.',
         opens: {
           shot: 'satellite-refs',
           lead: 'Add reference holds a photo or video of the case over the map, to compare while you move the map under it.',
@@ -383,7 +383,7 @@ export const PAGES = {
           shot: 'satellite-measure',
           lead: 'A click per point, a double click to end, a click on the first point to close an area.',
           marks: [
-            { anchor: 'map.measure', title: 'A line of two points', text: 'Becomes rings round A, the cone a camera at A saw, a shadow read for its hour, or the ground in sight.' },
+            { anchor: 'map.measure', title: 'A line of two points', text: 'Becomes rings round A, the cone a camera at A saw, or the ground in sight.' },
           ],
         },
       },
@@ -686,7 +686,7 @@ export const PAGES = {
     ],
     tips: [
       { title: 'Two clocks', text: 'Each time is given in the place’s own zone and in UTC.' },
-      { title: 'Read a shadow', text: 'In Satellite, a measure used as a shadow gives the hour from the shadow’s direction.' },
+      { title: 'Read a shadow', text: 'In Satellite, Sun and moon reads the hour from a shadow’s direction.' },
     ],
   },
 

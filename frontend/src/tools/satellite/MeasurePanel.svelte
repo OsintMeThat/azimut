@@ -10,9 +10,13 @@
    *
    * It folds down to its header and one line, what the measure in hand reads,
    * so the map has its room back; the fold is remembered.
+   *
+   * The Align seat opens the same panel on its own store (`tool.align`): its
+   * lines are alignments, so it lists them and opens the selected one on how
+   * far it runs on and how loosely, then says where they meet. It has no uses
+   * to offer and no ground to read.
    */
   import Icon from '../../components/Icon.svelte';
-  import DateField from '../../components/DateField.svelte';
   import { formatArea, formatBearing, formatDistance, pathLength, perimeter, polygonArea } from '../../lib/measure.js';
   import {
     coneWidth,
@@ -46,7 +50,7 @@
     ['imperial', 'mi', 'Feet and miles'],
     ['nautical', 'NM', 'Nautical miles, heights in metres'],
   ];
-  const ICONS = { ring: 'rings', cone: 'viewCone', align: 'alignment', shadow: 'sun', viewshed: 'eye' };
+  const ICONS = { ring: 'rings', cone: 'viewCone', viewshed: 'eye' };
   const FOLD_KEY = 'azimut:measurePanelFolded';
 
   let folded = $state(foldRemembered());
@@ -70,6 +74,8 @@
   }
 
   const m = $derived(tool.drawing ? null : tool.selected);
+  // what the seat's lines are called, in its titles and labels
+  const thing = $derived(tool.align ? 'alignment' : 'measure');
   const units = $derived(tool.units);
   const pair = $derived(isPair(m));
   const reading = $derived(pair ? pairReading(m) : null);
@@ -111,16 +117,16 @@
   }
 </script>
 
-<div class="measure-panel card" class:folded data-guide="map.measure">
+<div class="measure-panel card" class:folded data-guide={tool.align ? undefined : 'map.measure'}>
   <header>
-    <span class="title"><Icon name="ruler" size={13} /> Measure</span>
+    <span class="title"><Icon name={tool.align ? 'alignment' : 'ruler'} size={13} /> {tool.align ? 'Align' : 'Measure'}</span>
     <div class="segments units" role="group" aria-label="Units">
       {#each UNITS as [value, label, said] (label)}
         <button type="button" aria-pressed={tool.unitsChoice === value} title={said} onclick={() => tool.setUnits(value)}>{label}</button>
       {/each}
     </div>
     {#if tool.measures.length}
-      <button class="btn btn-ghost btn-sm icon" onclick={() => tool.clearAll()} title="Take every measure off the map" aria-label="Clear every measure">
+      <button class="btn btn-ghost btn-sm icon" onclick={() => tool.clearAll()} title={`Take every ${thing} off the map`} aria-label={`Clear every ${thing}`}>
         <Icon name="reset" size={13} />
       </button>
     {/if}
@@ -128,60 +134,69 @@
       class="btn btn-ghost btn-sm icon"
       onclick={fold}
       title={folded ? 'Unfold the panel' : 'Fold the panel to one line'}
-      aria-label={folded ? 'Unfold the measure panel' : 'Fold the measure panel'}
+      aria-label={folded ? `Unfold the ${thing} panel` : `Fold the ${thing} panel`}
       aria-expanded={!folded}
     >
       <Icon name={folded ? 'chevronDown' : 'chevronUp'} size={13} />
     </button>
   </header>
 
-  {#if tool.aligning}
-    <div class="aligning">
-      <Icon name="alignment" size={13} />
-      <span>{tool.hint}</span>
-      <button class="btn btn-ghost btn-xs" onclick={() => tool.stopAligning()} title="New lines are plain measures again (Escape)">Stop</button>
-    </div>
-  {/if}
-
   {#if folded}
-    <!-- while aligning, the strip above says what to click -->
-    {#if tool.drawing && !tool.aligning}
+    {#if tool.drawing}
       <p class="drawing"><span class="pulse"></span>{tool.hint}</p>
-    {:else if tool.selected && !tool.drawing}
+    {:else if tool.selected}
       <p class="compact mono"><span class="n">{tool.selectedId}</span>{tool.readingOf(tool.selectedId) || '…'}</p>
-    {:else if !tool.aligning}
+    {:else}
       <p class="how">{tool.hint}</p>
     {/if}
   {:else}
 
-  {#if !tool.measures.length && !tool.aligning}
-    <div class="welcome">
-      <svg viewBox="0 0 120 34" aria-hidden="true">
-        <path d="M12 24 L58 10 L104 22" class="drawn" />
-        <circle cx="12" cy="24" r="4" /><circle cx="58" cy="10" r="4" /><circle cx="104" cy="22" r="4" />
-        <rect x="22" y="2" width="30" height="9" rx="2" /><rect x="70" y="2" width="30" height="9" rx="2" />
-      </svg>
-      <p class="lead">Click on the map to start a measure.</p>
-      <p class="how">A double click ends a line, a click on its first point closes an area.</p>
-      <ul class="keys">
-        <li><kbd>Backspace</kbd> takes a point back</li>
-        <li><kbd>Alt</kbd> keeps a click off what is there</li>
-      </ul>
-    </div>
-  {:else if tool.drawing && !tool.aligning}
+  {#if !tool.measures.length}
+    {#if tool.align}
+      <div class="welcome">
+        <svg viewBox="0 0 120 34" aria-hidden="true">
+          <path d="M8 30 L50 19" class="run" /><path d="M50 19 L88 9" class="drawn" /><path d="M88 9 L114 2" class="run" />
+          <circle cx="50" cy="19" r="4" /><circle cx="88" cy="9" r="4" />
+        </svg>
+        <p class="lead">Click two things lined up in the picture.</p>
+        <p class="how">The camera stood on the line through them. Draw a few and they meet near it.</p>
+        <ul class="keys">
+          <li><kbd>Backspace</kbd> takes a point back</li>
+          <li><kbd>Alt</kbd> keeps a click off what is there</li>
+        </ul>
+      </div>
+    {:else}
+      <div class="welcome">
+        <svg viewBox="0 0 120 34" aria-hidden="true">
+          <path d="M12 24 L58 10 L104 22" class="drawn" />
+          <circle cx="12" cy="24" r="4" /><circle cx="58" cy="10" r="4" /><circle cx="104" cy="22" r="4" />
+          <rect x="22" y="2" width="30" height="9" rx="2" /><rect x="70" y="2" width="30" height="9" rx="2" />
+        </svg>
+        <p class="lead">Click on the map to start a measure.</p>
+        <p class="how">A double click ends a line, a click on its first point closes an area.</p>
+        <ul class="keys">
+          <li><kbd>Backspace</kbd> takes a point back</li>
+          <li><kbd>Alt</kbd> keeps a click off what is there</li>
+        </ul>
+      </div>
+    {/if}
+  {:else if tool.drawing}
     <p class="drawing"><span class="pulse"></span>{tool.hint}</p>
+  {:else if tool.align}
+    <!-- the next two clicks are another alignment -->
+    <p class="how">{tool.hint}</p>
   {/if}
 
   {#if tool.measures.length}
-    <ul class="list" aria-label="Measures">
+    <ul class="list" aria-label={tool.align ? 'Alignments' : 'Measures'}>
       {#each tool.measures as one (one.id)}
         <li class:on={one.id === tool.selectedId}>
-          <button class="row" onclick={() => tool.select(one.id)} title="Select this measure">
+          <button class="row" onclick={() => tool.select(one.id)} title={`Select this ${thing}`}>
             <span class="n mono">{one.id}</span>
-            <Icon name={one.closed ? 'polygon' : 'ruler'} size={12} />
+            <Icon name={tool.align ? 'alignment' : one.closed ? 'polygon' : 'ruler'} size={12} />
             <span class="what mono">{tool.readingOf(one.id) || '…'}</span>
           </button>
-          <button class="btn btn-ghost btn-xs gone" onclick={() => tool.remove(one.id)} title="Take this measure off the map" aria-label="Remove measure {one.id}">
+          <button class="btn btn-ghost btn-xs gone" onclick={() => tool.remove(one.id)} title={`Take this ${thing} off the map`} aria-label="Remove {thing} {one.id}">
             <Icon name="x" size={12} />
           </button>
         </li>
@@ -221,14 +236,16 @@
         </div>
         <p class="sub mono">back {formatBearing(reading.back, 1)}</p>
 
-        <div class="tiles" role="group" aria-label="Use this line as">
-          {#each USES as use (use.id)}
-            <button type="button" aria-pressed={m.use === use.id} title={use.title} onclick={() => tool.setUse(m.id, use.id)}>
-              <Icon name={ICONS[use.id]} size={16} />
-              <span>{use.label}</span>
-            </button>
-          {/each}
-        </div>
+        {#if !tool.align}
+          <div class="tiles" role="group" aria-label="Use this line as">
+            {#each USES as use (use.id)}
+              <button type="button" aria-pressed={m.use === use.id} title={use.title} onclick={() => tool.setUse(m.id, use.id)}>
+                <Icon name={ICONS[use.id]} size={16} />
+                <span>{use.label}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
 
         {#if m.use === 'ring'}
           <div class="use">
@@ -298,26 +315,6 @@
             {/if}
             <p class="note">The camera stands on the line, on the side of the nearer thing.</p>
           </div>
-        {:else if m.use === 'shadow'}
-          <div class="use column">
-            <DateField
-              day
-              reading={false}
-              label="The day the picture was taken"
-              value={tool.shadowDate(m.id) ?? ''}
-              onchange={(value) => tool.setShadowDate(m.id, value)}
-            />
-            {#if !tool.shadowDate(m.id)}
-              <p class="note">The picture has no day: type the one it was taken.</p>
-            {:else if answer.shadow?.busy}
-              <p class="note">Reading the sun…</p>
-            {:else if answer.shadow?.error}
-              <p class="failed">{answer.shadow.error}</p>
-            {:else if answer.shadow?.answer}
-              <p class="answer">{tool.readout}</p>
-            {/if}
-            <p class="note">From the foot of what casts it to the tip of its shadow. Assumes level ground seen from overhead.</p>
-          </div>
         {:else if m.use === 'viewshed'}
           <div class="use column">
             <div class="row-fields">
@@ -361,7 +358,7 @@
         <button class="btn btn-ghost btn-sm" onclick={() => tool.setClosed(m.id, true)} title="Close it back to its first point">Close into an area</button>
       {/if}
 
-      {#if !m.closed}
+      {#if !m.closed && !tool.align}
         <div class="ground-row">
           <label class="switch" title={tool.groundForced ? 'The 3D view reads the ground' : 'Read the heights along the line, and what A sees of it'}>
             <input type="checkbox" role="switch" checked={tool.groundOn} disabled={tool.groundForced} onchange={(e) => tool.setGround(e.currentTarget.checked)} />
@@ -386,13 +383,13 @@
       {/if}
 
       <div class="acts">
-        <button class="btn btn-primary btn-sm" onclick={(event) => onkeep(m.id, event.currentTarget)} title="Put this measure in one of the case's layers">
+        <button class="btn btn-primary btn-sm" onclick={(event) => onkeep(m.id, event.currentTarget)} title={`Put this ${thing} in one of the case's layers`}>
           <Icon name="layers" size={13} /> Keep
         </button>
         <button class="btn btn-sm" onclick={() => oncopy(m.id)} title="Copy what it reads, with its points">
           <Icon name="copy" size={13} /> Copy
         </button>
-        {#if pair}
+        {#if pair && !tool.align}
           <button class="btn btn-sm" onclick={() => onlook(m.id)} title="Open Horizon standing at A, facing B">
             <Icon name="horizon" size={13} /> Look from A
           </button>
@@ -484,6 +481,14 @@
     fill: none;
     stroke: #f5a623;
     stroke-width: 2;
+    stroke-linecap: round;
+  }
+  /* an alignment runs on past the two things, in the colour of what a line is used as */
+  .welcome .run {
+    fill: none;
+    stroke: #2de0ff;
+    stroke-width: 2;
+    stroke-dasharray: 4 3;
     stroke-linecap: round;
   }
   .welcome circle {
@@ -664,9 +669,11 @@
   .sub {
     margin-top: -4px;
   }
+  /* one column per use (lib/measures.js USES), so the row is always full */
   .tiles {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
     gap: 5px;
   }
   .tiles button {
@@ -710,19 +717,6 @@
     display: flex;
     align-items: center;
     gap: 12px;
-  }
-  .aligning {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 5px 6px 5px 9px;
-    border-radius: var(--r-md);
-    background: rgba(45, 224, 255, 0.08);
-    box-shadow: inset 0 0 0 1px rgba(45, 224, 255, 0.35);
-    color: #8eefff;
-  }
-  .aligning span {
-    margin-right: auto;
   }
   .field.tolerance {
     display: flex;

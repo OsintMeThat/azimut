@@ -19,18 +19,17 @@
  *   place, a pin or another measure's corner, the point is put on it, unless
  *   Alt is held.
  * - **A line of two points can be used as something**: rings round A, a cone
- *   from A toward B, an alignment run on past two things lined up in a
- *   picture, a shadow from a foot at A to its tip at B, the ground in sight
- *   from A out to B (`lib/measures.js`).
- * - **Alignments come in a row.** Once a line is made one, each new line is
- *   another after two clicks, with the same run and tolerance, so three are
- *   drawn in six clicks and read where they meet. A tolerance lays the band
- *   the camera may stand in either side of the line. Pressing Align off, another use or
- *   Escape with nothing selected puts new lines back to plain measures.
+ *   from A toward B, the ground in sight from A out to B (`lib/measures.js`).
  * - **The ground is read on a press.** A line's heights and what its eye sees
  *   come from the terrain server, so they are read when the analyst turns the
  *   Ground switch on, or when the 3D view, which reads the relief anyway, is
- *   up. A viewshed or a shadow is asked for by choosing it.
+ *   up. A viewshed is asked for by choosing it.
+ *
+ * The Align seat is a second store made here with `align`: every line is an
+ * alignment after two clicks, run on past two things lined up in a picture,
+ * with the run and tolerance of the last one set, so three are drawn in six
+ * clicks and read where they meet. A tolerance lays the band the camera may
+ * stand in either side of the line. It reads no ground and offers no other use.
  *
  * The arithmetic is `lib/measure.js` and `lib/measures.js`; this holds what
  * has been clicked, what is selected, what the servers answered, and the
@@ -43,13 +42,14 @@
  * @param {(lat: number, lon: number) => string} deps.coords a point as the analyst's coordinates read
  * @param {() => boolean} [deps.relief] whether the 3D view, which reads the ground anyway, is up
  * @param {() => {lat: number, lon: number, label?: string}[]} [deps.snapTargets] what a click lands on
- * @param {() => string|null} [deps.pictureDate] the day the imagery on screen was taken, `YYYY-MM-DD`
  * @param {(text: string) => void} [deps.copy] a crossing's coordinates, to the clipboard
+ * @param {boolean} [deps.align] the Align seat: every line an alignment, after two clicks
+ * @param {ReturnType<typeof createUnitsChoice>} [deps.choice] the units set in the panel, shared by both seats
  * @param {(engine: object) => object} [deps.surface] the drawing layer factory
  */
 import { cornerHandles, ghostHandles } from '../../../lib/map/handles.js';
 import { createSurface } from '../../../lib/map/surface.js';
-import { destination, formatBearing, formatDistance, formatHeight, haversine } from '../../../lib/measure.js';
+import { destination, formatBearing, formatDistance, haversine } from '../../../lib/measure.js';
 import {
   bands,
   clampReach,
@@ -66,7 +66,6 @@ import {
   pathOf,
   REACH,
   runsOn,
-  shadowSentence,
   sightRuns,
   summary,
   useShapes,
@@ -137,9 +136,22 @@ function remember(key, value) {
   }
 }
 
-/** A full day from the picture's date, or null for a bare year or nothing. */
-export function usableDate(text) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(text ?? '')) ? text : null;
+/**
+ * The units a measure reads in, when the analyst set them in the panel, or null
+ * to follow Settings. Measure and Align share one, so a distance reads the
+ * same in either seat, and it is remembered.
+ */
+export function createUnitsChoice() {
+  let value = $state(remembered(UNITS_KEY));
+  return {
+    get value() {
+      return value;
+    },
+    set(next) {
+      value = next || null;
+      remember(UNITS_KEY, value);
+    },
+  };
 }
 
 const plain = (point) => ({ lat: point.lat, lon: point.lon });
@@ -154,19 +166,19 @@ export function createMeasureState({
   coords,
   relief = () => false,
   snapTargets = () => [],
-  pictureDate = () => null,
   copy = () => {},
+  align = false,
+  choice = createUnitsChoice(),
   surface = createSurface,
 }) {
   let on = $state(false);
   let measures = $state([]);
   let drawingId = $state(null);
   let selectedId = $state(null);
-  let unitsChoice = $state(remembered(UNITS_KEY));
   let groundChoice = $state(remembered(GROUND_KEY) === 'on');
   let eyeHeight = $state(EYE_HEIGHT);
   let targetHeight = $state(TARGET_HEIGHT);
-  // what the servers answered, by measure: { ground, shadow, viewshed }, each
+  // what the servers answered, by measure: { ground, viewshed }, each
   // { question, answer, busy, error }
   let answers = $state({});
   // the pointer while a measure is drawn, and what it would land on
@@ -184,15 +196,15 @@ export function createMeasureState({
   let droppedAt = -Infinity; // when a corner was last let go
   // the heights chart, put away from its window or the panel until shown again
   let chartShown = $state(true);
-  // new lines are alignments, run on as the last one was
-  let aligning = $state(false);
+  // the Align seat's next line runs on as the last one was set
   let run = { past: 'both', reach: REACH, tolerance: 0 };
 
-  const units = () => unitsChoice ?? appUnits() ?? 'metric';
+  const units = () => choice.value ?? appUnits() ?? 'metric';
   const byId = (id) => measures.find((m) => m.id === id) ?? null;
   const drawing = () => byId(drawingId);
   const selected = () => byId(selectedId);
-  const groundOn = () => groundChoice || relief();
+  // an alignment is read for where the camera stood, never for its ground
+  const groundOn = () => !align && (groundChoice || relief());
 
   function layers() {
     const map = engine();
@@ -222,7 +234,6 @@ export function createMeasureState({
   function readoutOf(m) {
     const words = headline(m, units());
     const answer = answers[m.id];
-    if (isPair(m) && m.use === 'shadow' && answer?.shadow?.answer) return shadowSentence(answer.shadow.answer, units());
     if (isPair(m) && m.use === 'viewshed' && answer?.viewshed?.answer) {
       return `${words} · ${Math.round(answer.viewshed.answer.share * 100)}% in sight`;
     }
@@ -433,19 +444,12 @@ export function createMeasureState({
     };
   }
 
-  /** What a line's use answered, written at A: a height from a shadow, a viewshed's share. */
+  /** What a line's use answered, written at A: a viewshed's share. */
   function useWord(m) {
-    if (!isPair(m)) return null;
-    let text = '';
-    if (m.use === 'shadow') {
-      const first = answers[m.id]?.shadow?.answer?.moments?.[0];
-      if (first) text = `≈ ${formatHeight(first.height_m, units())} tall`;
-    }
-    if (m.use === 'viewshed') {
-      const share = answers[m.id]?.viewshed?.answer?.share;
-      if (share != null) text = `${Math.round(share * 100)}% in sight`;
-    }
-    return text ? wordMark(m, { id: 'use', kind: m.use === 'viewshed' ? 'use reach' : 'use', at: m.points[0], text }) : null;
+    if (!isPair(m) || m.use !== 'viewshed') return null;
+    const share = answers[m.id]?.viewshed?.answer?.share;
+    if (share == null) return null;
+    return wordMark(m, { id: 'use', kind: 'use reach', at: m.points[0], text: `${Math.round(share * 100)}% in sight` });
   }
 
   function drawFills() {
@@ -532,7 +536,6 @@ export function createMeasureState({
     if (!kept) return;
     tickets.delete(`${id}:ground`);
     tickets.delete(`${id}:viewshed`);
-    tickets.delete(`${id}:shadow`);
     answers[id] = {};
   }
 
@@ -546,7 +549,6 @@ export function createMeasureState({
     if (!m || m.id === drawingId || m.points.length < 2) return;
     if (groundOn() && !m.closed && m.id === selectedId) readGround(m);
     if (isPair(m) && m.use === 'viewshed') readViewshed(m);
-    if (isPair(m) && m.use === 'shadow') readShadow(m);
   }
 
   async function fetchInto(m, which, question, call) {
@@ -598,24 +600,6 @@ export function createMeasureState({
     );
   }
 
-  function readShadow(m) {
-    const date = m.shadowDate ?? usableDate(pictureDate());
-    if (!date) {
-      slot(m.id, 'shadow', { question: null, answer: null, busy: false, error: '' });
-      return;
-    }
-    const [a] = m.points;
-    const { length, bearing } = pairReading(m);
-    const query = new URLSearchParams({
-      lat: a.lat.toFixed(6),
-      lon: a.lon.toFixed(6),
-      date,
-      bearing: bearing.toFixed(2),
-      length: Math.max(0.01, length).toFixed(2),
-    });
-    return fetchInto(m, 'shadow', { date }, () => api.get(`/api/geo/shadow?${query}`));
-  }
-
   // --- the store --------------------------------------------------------------
 
   function select(id) {
@@ -665,7 +649,7 @@ export function createMeasureState({
       ...snapTargets(),
       ...measures
         .filter((m) => m.id !== drawingId)
-        .flatMap((m) => m.points.map((p) => ({ ...plain(p), label: `Measure ${m.id}` }))),
+        .flatMap((m) => m.points.map((p) => ({ ...plain(p), label: `${align ? 'Alignment' : 'Measure'} ${m.id}` }))),
     ];
     let best = null;
     let bestPx = SNAP_PX;
@@ -711,7 +695,12 @@ export function createMeasureState({
     },
     /** The units the tool was set to itself, or null when it follows Settings. */
     get unitsChoice() {
-      return unitsChoice;
+      return choice.value;
+    },
+
+    /** The Align seat: every line an alignment after two clicks. */
+    get align() {
+      return align;
     },
     get groundOn() {
       return groundOn();
@@ -769,7 +758,7 @@ export function createMeasureState({
     get hint() {
       if (!on) return '';
       const m = drawing();
-      if (aligning) return m ? 'Click the second thing lined up' : 'Click two things lined up in the picture';
+      if (align) return m ? 'Click the second thing lined up' : 'Click two things lined up in the picture';
       if (!m) return measures.length ? 'Click to start another measure' : 'Click to start a measure';
       if (m.points.length === 1) return 'Click the next point';
       return m.points.length >= 3
@@ -799,8 +788,8 @@ export function createMeasureState({
           : leg;
       // an alignment to come shows how it will run on, and its band, so it can be aimed
       const coming = { points: [from, to], closed: false, use: 'align', ...run };
-      const runs = aligning ? runsOn(coming).map((one) => one.points) : [];
-      const edges = aligning ? bands(coming).flatMap((band) => [band.left, band.right]) : [];
+      const runs = align ? runsOn(coming).map((one) => one.points) : [];
+      const edges = align ? bands(coming).flatMap((band) => [band.left, band.right]) : [];
       return { from, to, first: plain(m.points[0]), closing, text, label: snapped?.label ?? '', runs, edges };
     },
 
@@ -814,7 +803,6 @@ export function createMeasureState({
     close() {
       if (drawingId != null) finish();
       on = false;
-      aligning = false;
       pointer = null;
       snapped = null;
       readIndex = null;
@@ -853,7 +841,7 @@ export function createMeasureState({
         return true; // the second click of a double click on a lone point
       }
       m.points.push(point);
-      if (aligning && m.points.length === 2) {
+      if (align && m.points.length === 2) {
         Object.assign(m, { use: 'align', past: run.past, reach: run.reach, tolerance: run.tolerance });
         return finish();
       }
@@ -867,11 +855,7 @@ export function createMeasureState({
     /** Escape: finish what is drawn, else let go of the selection. False when there was neither. */
     escape() {
       if (drawingId != null) return finish();
-      if (selectedId == null) {
-        if (!aligning) return false;
-        aligning = false;
-        return true;
-      }
+      if (selectedId == null) return false;
       selectedId = null;
       readIndex = null;
       draw();
@@ -958,9 +942,8 @@ export function createMeasureState({
 
     // --- what a measure is and reads ------------------------------------------
 
-    setUnits(choice) {
-      unitsChoice = choice || null;
-      remember(UNITS_KEY, unitsChoice);
+    setUnits(next) {
+      choice.set(next);
       draw();
     },
 
@@ -1010,25 +993,13 @@ export function createMeasureState({
       });
     },
 
-    /** What a line of two points is used as, or back to a plain line with the same press. */
+    /** What a line of two points is used as, or back to a plain line with the same press. An alignment stays one. */
     setUse(id, use) {
-      if (!isPair(byId(id))) return;
-      change(id, (m) => {
-        m.use = m.use === use ? null : use;
-      });
       const m = byId(id);
-      aligning = m.use === 'align';
-      if (aligning) run = { past: m.past ?? 'both', reach: clampReach(m.reach), tolerance: clampTolerance(m.tolerance) };
-    },
-
-    /** New lines are alignments, from the last one made. */
-    get aligning() {
-      return aligning;
-    },
-
-    /** New lines are plain measures again. */
-    stopAligning() {
-      aligning = false;
+      if (!isPair(m) || m.use === 'align' || use === 'align') return;
+      change(id, (one) => {
+        one.use = one.use === use ? null : use;
+      });
     },
 
     /** Which way an alignment runs on (`lib/measures.js` PAST); the next ones follow. */
@@ -1096,19 +1067,6 @@ export function createMeasureState({
       });
     },
 
-    /** The day a shadow was cast, when the picture's own date is not the one. */
-    setShadowDate(id, date) {
-      change(id, (m) => {
-        m.shadowDate = date || null;
-      });
-    },
-
-    /** The day a shadow is read on: the analyst's, else the picture's. */
-    shadowDate(id) {
-      const m = byId(id);
-      return m?.shadowDate ?? usableDate(pictureDate());
-    },
-
     /** An open line of three points or more closed into an area, or an area opened. */
     setClosed(id, closed) {
       const m = byId(id);
@@ -1127,7 +1085,6 @@ export function createMeasureState({
       return summary(m, units(), {
         coords,
         ground: ground ? { corners: ground.corners, sight: isPair(m) ? ground.sight : null } : null,
-        shadow: answer.shadow?.answer,
         viewshed: answer.viewshed?.answer,
       });
     },
@@ -1135,8 +1092,8 @@ export function createMeasureState({
     /**
      * The measure as a feature of a personal layer: its shape, named by what it
      * reads, with its text in the notes. Rings keep their outer circle, a cone
-     * its wedge and an alignment its whole run; a shadow or a viewshed keeps
-     * its line and its answer.
+     * its wedge and an alignment its whole run; a viewshed keeps its line and
+     * its answer.
      */
     feature(id) {
       const m = byId(id);

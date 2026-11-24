@@ -1018,26 +1018,36 @@ describe('Satellite offers what is open to the Add event bar', () => {
 });
 
 describe('the Measure tool on the map', () => {
+  it('sends the map to whichever of Measure and Align is open', () => {
+    expect(source).toContain('const lines = $derived(measure.on ? measure : align.on ? align : null);');
+    expect(source).toContain('align: true,');
+    // one units choice for both seats
+    expect(source.match(/choice: measureUnits,/g)).toHaveLength(2);
+  });
+
   it('puts a click on what is there, unless Alt is held', () => {
-    expect(source).toContain('if (measure.on) measure.addPoint(measure.snap(at, { free: altHeld }).point);');
+    expect(source).toContain('if (lines) lines.addPoint(lines.snap(at, { free: altHeld }).point);');
     expect(source).toContain("if (e.key === 'Alt') altHeld = true;");
     expect(source).toContain("if (e.type === 'blur' || e.key === 'Alt') altHeld = false;");
   });
 
   it('takes a point back on Backspace and the measure off on Delete, never while typing', () => {
-    expect(source).toContain("if (!typing && measure.on && (e.key === 'Backspace' || e.key === 'Delete')) {");
-    expect(source).toContain("(e.key === 'Backspace' && measure.undo()) || measure.removeSelected()");
+    expect(source).toContain("if (!typing && lines && (e.key === 'Backspace' || e.key === 'Delete')) {");
+    expect(source).toContain("(e.key === 'Backspace' && lines.undo()) || lines.removeSelected()");
   });
 
   it('finishes and lets go of a measure on Escape before the tool itself closes', () => {
     const escape = source.slice(source.indexOf("if (e.key !== 'Escape') return;"));
-    expect(escape.indexOf('measure.escape()')).toBeGreaterThan(0);
-    expect(escape.indexOf('measure.escape()')).toBeLessThan(escape.indexOf('return disarm(modes)'));
+    expect(escape.indexOf('lines?.escape()')).toBeGreaterThan(0);
+    expect(escape.indexOf('lines?.escape()')).toBeLessThan(escape.indexOf('return disarm(modes)'));
+    // a shadow half put down in Sun and moon goes first too
+    expect(escape.indexOf('sky.stopTracing()')).toBeGreaterThan(0);
+    expect(escape.indexOf('sky.stopTracing()')).toBeLessThan(escape.indexOf('return disarm(modes)'));
   });
 
   it('keeps the flat map from zooming on the double click that ends a measure', () => {
     expect(source).toContain("window.addEventListener('dblclick', swallow, true);");
-    expect(source).toContain('if (!measure.on || !mapEl) return;');
+    expect(source).toContain('if (!lines || !mapEl) return;');
   });
 
   it('reads its ground in 3D, where the relief is read anyway, and on its own switch on the flat map', () => {

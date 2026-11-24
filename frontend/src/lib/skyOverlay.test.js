@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   bodyReading,
   bodySvg,
+  clockOf,
   hourTicks,
   isBelow,
   markScale,
   nearestSample,
   phaseAngleOf,
+  shadowSentence,
   upRuns,
 } from './skyOverlay.js';
 
@@ -143,5 +145,37 @@ describe('bodySvg', () => {
 describe('bodyReading', () => {
   it('states the body, the time, the bearing and the height, rounded', () => {
     expect(bodyReading('Sun', '14:30', 213.4, 27.6)).toBe('Sun 14:30 · az 213° · alt 28°');
+  });
+});
+
+describe('a shadow read', () => {
+  it('reads a moment on the same clock as the day’s samples', () => {
+    expect(clockOf({ local: '2024-06-21T14:12:05+02:00' })).toBe('14:12');
+    expect(clockOf(null)).toBe('');
+  });
+
+  const moment = (local, height, azimuth = 213, altitude = 41.2) => ({
+    local,
+    abbreviation: 'CEST',
+    height_m: height,
+    sun_azimuth: azimuth,
+    sun_altitude: altitude,
+  });
+
+  it('gives the height first, then the sun and the hour it says', () => {
+    const text = shadowSentence({ date: '2024-06-21', moments: [moment('2024-06-21T14:12:05+02:00', 23.4)] }, 'metric');
+    expect(text).toBe('About 23 m tall (sun at 213°, 41.2° up at 14:12 CEST)');
+  });
+
+  it('gives both hours when the sun crossed that bearing twice', () => {
+    const text = shadowSentence(
+      { date: '2024-06-21', moments: [moment('2024-06-21T11:02:00+03:00', 4), moment('2024-06-21T12:40:00+03:00', 6)] },
+      'metric'
+    );
+    expect(text).toContain(', or 6 m at 12:40');
+  });
+
+  it('says so when no hour of the day casts it', () => {
+    expect(shadowSentence({ date: '2024-06-21', moments: [] }, 'metric')).toBe('No hour of 2024-06-21 casts this shadow');
   });
 });

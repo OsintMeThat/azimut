@@ -190,6 +190,57 @@ test('draws the sun and moon arcs for an anchored point, and scrubs the hour', a
   expect(fixture.skyQueries).toHaveLength(2);
 });
 
+test('reads a shadow only when asked: the hour it was cast, how tall, and the slider on it', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  const asked = [];
+  await page.route('**/api/geo/shadow?**', async (route) => {
+    const query = Object.fromEntries(new URL(route.request().url()).searchParams);
+    asked.push(query);
+    await route.fulfill({
+      json: {
+        date: query.date, zone: 'Europe/Zurich', sun_azimuth: 270,
+        moments: [{ local: `${query.date}T17:40:00+02:00`, utc: `${query.date}T15:40:00Z`, abbreviation: 'CEST', sun_azimuth: 270, sun_altitude: 30, height_m: 23.4 }],
+      },
+    });
+  });
+  await page.goto('/#satellite');
+  await awaitMapReady(page);
+  await page.getByRole('button', { name: 'Sun and moon' }).click();
+  await expect.poll(() => fixture.skyQueries.length).toBe(2);
+  const slider = page.getByRole('slider', { name: 'Time of day' });
+  const before = await slider.inputValue();
+  // a click on the map does nothing new until the shadow is asked for
+  const box = await page.locator('.map').boundingBox();
+  await page.mouse.click(box.x + 760, box.y + 300);
+  expect(asked).toHaveLength(0);
+  await expect(page.locator('.sun-panel .shadow')).toHaveText('Read a shadow');
+
+  await page.getByRole('button', { name: 'Read a shadow' }).click();
+  await expect(page.locator('.sun-panel .tracing')).toContainText('Click the foot of what casts it');
+  await page.mouse.click(box.x + 760, box.y + 300);
+  await expect(page.locator('.sun-panel .tracing')).toContainText('Click the tip of its shadow');
+  await page.mouse.move(box.x + 700, box.y + 300, { steps: 4 });
+  await page.mouse.click(box.x + 680, box.y + 300);
+
+  const hour = page.locator('.sun-panel .moment');
+  await expect(hour).toContainText('17:40 CEST');
+  await expect(hour).toContainText('about 23 m tall');
+  expect(Number(asked.at(-1).bearing)).toBeGreaterThan(260);
+  expect(asked.at(-1).date).toBe(fixture.skyQueries.at(-1).date || '2026-06-21');
+  await expect(page.locator('.measure-word.use')).toHaveText('≈ 23 m tall');
+  // the slider went to the sample nearest that hour (the fixture's day is read on the hour); moved away, the hour pressed puts it back
+  await expect(slider).toHaveValue('18');
+  expect(before).not.toBe('18');
+  await slider.fill('3');
+  await hour.click();
+  await expect(slider).toHaveValue('18');
+
+  // taken off, the panel offers it again and the map forgets it
+  await page.getByRole('button', { name: 'Remove the shadow' }).click();
+  await expect(page.locator('.measure-word.use')).toHaveCount(0);
+  await expect(page.locator('.sun-panel .shadow')).toHaveText('Read a shadow');
+});
+
 test('drops the sky layer when the mode closes', async ({ page }) => {
   await installAppFixture(page);
   await page.goto('/#satellite');

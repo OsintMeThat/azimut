@@ -48,14 +48,11 @@ describe('a point put in a note', () => {
 describe('the measure in hand put in a note', () => {
   it('writes what its Copy gives, line by line, then what it assumes', () => {
     expect(measureNoteText({
-      text: 'Distance 1.2 km, bearing 45.0° (back 225.0°)\nFrom 15.36941, 44.19104 to 15.37700, 44.19900\nAbout 12 m tall (sun at 225°, 45.0° up at 14:05 AST)',
+      text: 'About 12 m tall (sun at 225°, 45.0° up at 14:05 AST)\nShadow from 15.36941, 44.19104 to 15.37700, 44.19900, read for 2026-03-12',
       use: 'shadow',
-      shadowDate: '2026-03-12',
     })).toBe([
-      '- Distance 1.2 km, bearing 45.0° (back 225.0°)',
-      '- From 15.36941, 44.19104 to 15.37700, 44.19900',
       '- About 12 m tall (sun at 225°, 45.0° up at 14:05 AST)',
-      '- Sun read for 2026-03-12.',
+      '- Shadow from 15.36941, 44.19104 to 15.37700, 44.19900, read for 2026-03-12',
       '- Assumes level ground seen from overhead.',
     ].join('\n'));
   });
@@ -64,6 +61,12 @@ describe('the measure in hand put in a note', () => {
     expect(measureNoteText({ text: 'Distance 3 km', use: 'line', ground: true }))
       .toBe('- Distance 3 km\n- Bare ground: buildings and trees are not in the heights.');
     expect(measureNoteText({ text: 'Area 2 ha, perimeter 600 m' })).toBe('- Area 2 ha, perimeter 600 m');
+  });
+
+  it('offers an alignment or a shadow under its own name', async () => {
+    const offer = measureOffer({ measure: () => null, id: 'alignment', label: 'This alignment', icon: 'alignment', missing: 'Draw an alignment first' });
+    expect(offer).toMatchObject({ id: 'alignment', label: 'This alignment', icon: 'alignment' });
+    await expect(offer.put({})).rejects.toThrow('Draw an alignment first');
   });
 
   it('refuses when no measure is drawn', async () => {

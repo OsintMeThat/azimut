@@ -130,7 +130,7 @@ proof for publication.
 
 | Tool | What it does |
 |------|--------------|
-| ✅ **Coordinates & sky** | Converts coordinates and reads sun, moon, twilight and local time for a saved point on charts or the map. |
+| ✅ **Coordinates & sky** | Converts coordinates and reads sun, moon, twilight and local time for a saved point on charts or the map, and on the map the hour and height a shadow gives. |
 | ✅ **Research helpers** | Prepares media for keyless reverse search and saves keyboard-reviewed AOI grids. |
 | ✅ **Reports & templates** | Stores reusable proof and post structures, then prepares sourced Markdown for X or Bluesky. |
 | ✅ **Case Notebook** | Edits linked Markdown notes with local media, Mermaid diagrams, PDF output and remembered export folders. |
@@ -182,7 +182,8 @@ proof for publication.
 | ✅ **Horizon** | Draws the terrain seen from a viewpoint in 3D with named summits and buildings from open sources, lays a photo over it matched by hand, shows the photo above the terrain live, locked together or each on its own, and saves views that reopen as they were. |
 | ✅ **Find** (beta) | Ranks the places of an area whose relief fits a photo's traced skyline, helped by marks on the trace, the camera, the sun and alignments, says how far to trust the best one, and keeps searches in the case. |
 | ✅ **Globe 3D** | Draws Satellite's and a plate's 3D maps on the app's own globe over public relief, with the flat map's layers, places and measures, and files a tilted view as a credited capture. |
-| ✅ **Measure** | Measures lines and areas with legs, bearings and angles, uses a line as range rings, a view cone, an alignment run on to where several meet, a shadow's height or a viewshed, and reads the ground and line of sight under it, flat and on the globe. |
+| ✅ **Measure** | Measures lines and areas with legs, bearings and angles, uses a line as range rings, a view cone or a viewshed, and reads the ground and line of sight under it, flat and on the globe. |
+| ✅ **Align** | Runs the line through two things lined up in a picture on past them, with the band a tolerance leaves, and says where several meet. |
 | ✅ **Historical imagery & radar** | Browses Esri Wayback releases and dated Sentinel-1 passes, keeping acquisition dates separate from imagery releases. |
 | ✅ **Satellite Compare** | Aligns and annotates dated imagery, echoes the pointer on the other side, highlights comparable changes, saves sessions and exports attributed PNGs, GIFs and evolution sheets. |
 | ✅ **Detect** | Reviews Sentinel-2 and Sentinel-1 detections over shared areas, with pass coverage, cloud masks, custom analyzers and dated evidence; analyzers and areas travel as files. |
