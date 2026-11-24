@@ -3,7 +3,8 @@
  * shows, each a text from its template and the case files it carries.
  *
  * **The layout** is a template's (`lib/post.js` VIDEO_THREAD_STARTERS): its order, its
- * recap text (`body`), and the texts of the video's post and of each place's (`posts`).
+ * posts top to bottom (`lib/threadOrder.js`), its recap text (`body`), and the texts of
+ * the video's post and of each place's (`posts`).
  * A text per kind of post rather than per order: a place says the same in every order,
  * and keeps the words the analyst gave it when the thread changes order.
  *
@@ -19,20 +20,22 @@
  * changed stay on their post when the thread changes order.
  */
 import {
-  buildTweet1, MAX_THREAD_POSTS, postDate, POINT_SEPARATOR, THREAD_ROLES, VIDEO_ORDERS, VIDEO_THREAD_STARTERS,
+  buildTweet1, MAX_THREAD_POSTS, postDate, POINT_SEPARATOR, THREAD_ROLES, VIDEO_THREAD_STARTERS,
 } from './post.js';
 import { isDefaultName } from './naming.js';
-import { DEFAULT_ORDER, videoThread } from './videoThread.js';
+import { DEFAULT_ORDER, threadOrder } from './threadOrder.js';
+import { videoThread } from './videoThread.js';
 
 /** The most posts a thread holds, as X's composer takes them (`lib/post.js`). */
 export { MAX_THREAD_POSTS };
 
 /** The start a thread opens on without a template: Recap first. */
-const FIRST_START = VIDEO_THREAD_STARTERS.find((one) => one.order === DEFAULT_ORDER);
+const FIRST_START = VIDEO_THREAD_STARTERS.find((one) => one.id === DEFAULT_ORDER);
 
 /**
  * A thread's layout from a template's data (or a start's), the default start filling
- * what it leaves out: `{ order, recap, video, place }`.
+ * what it leaves out: `{ order, recap, video, place }`, `order` its posts top to
+ * bottom (`lib/threadOrder.js`), a ready order's name read as its list.
  */
 export function videoLayout(data = {}) {
   const posts = Array.isArray(data?.posts) ? data.posts : [];
@@ -41,7 +44,7 @@ export function videoLayout(data = {}) {
     return typeof found?.body === 'string' ? found.body : FIRST_START.posts.find((one) => one.role === role).body;
   };
   return {
-    order: VIDEO_ORDERS.includes(data?.order) ? data.order : DEFAULT_ORDER,
+    order: threadOrder(data?.order),
     recap: typeof data?.body === 'string' && data.body.trim() ? data.body : FIRST_START.body,
     video: text('video'),
     place: text('place'),
@@ -101,7 +104,7 @@ const typeOf = (media) => (media.some((one) => one.kind === 'video') ? 'video' :
  * - `layout`: `videoLayout`'s; `common`: `{ mention, source }`, the source being the
  *   video's link (`videoLink`), and `#video` the thread's title, the analyst's.
  * - `sheet`: the contact sheet's case path once filed, else its post waits for it.
- * - `recap`: what Recap first's recap carries, `map` or `sheet`; `map`: the recap map's
+ * - `recap`: what the recap carries, `map` or `sheet`; `map`: the recap map's
  *   case path once made, else the recap waits for it.
  * - `clip`: a clip to post in place of the whole video; `link`: the video goes as its link.
  * - `facts`: each place's address by proof name, once read (`placeFields`).

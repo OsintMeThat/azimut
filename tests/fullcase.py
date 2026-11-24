@@ -541,7 +541,7 @@ def build_full_case(
         json={
             "title": "Video thread draft",
             "state": {
-                "kind": "video", "video": full.piece, "order": "recap", "sheet": full.thread_sheet, "clip": full.post_clip,
+                "kind": "video", "video": full.piece, "order": ["recap", "video", "places"], "sheet": full.thread_sheet, "clip": full.post_clip,
                 "title": "Convoy at dawn", "recap": "map", "map": full.thread_map,
                 "mapOptions": {"background": "satellite", "line": True, "signature": False, "mark": False},
                 "posts": [{"role": "video", "body": "Source: #source"}, {"role": "place", "body": "#description"}],

@@ -10,6 +10,7 @@
  */
 
 import { entityReference, mediaReference } from './markdown.js';
+import { ORDER_NAMES, ORDER_PRESETS, orderBlocks } from './threadOrder.js';
 
 /** The most posts a thread holds, as X's composer takes them: the first, post 2 and the
  * rest (`api/drafts.py`, `MAX_THREAD_POSTS`). */
@@ -864,8 +865,7 @@ export const POST_TEMPLATE_STARTERS = Object.freeze([
   },
 ].map((starter) => Object.freeze(starter)));
 
-/** A video thread's orders (lib/videoThread.js ORDERS), and the posts beside its recap. */
-export const VIDEO_ORDERS = Object.freeze(['recap', 'video', 'proof', 'all']);
+/** The posts of a video thread that have a text of their own beside its recap. */
 export const THREAD_ROLES = Object.freeze(['video', 'place']);
 
 // What each place of a video thread says by default: its sentence, the time it shows,
@@ -878,16 +878,19 @@ const threadTexts = (video, place = PLACE_TEXT) => Object.freeze([
 ]);
 
 /**
- * A video thread's starts, one per order (lib/videoThread.js). Each is a recap text
- * (`body`: Recap first's first post, All in one's one post), the video's post and each
- * place's (`posts`). The mention goes where the thread opens.
+ * A video thread's starts, one per ready order (lib/threadOrder.js), named after it.
+ * Each is its order, its posts top to bottom, a recap text (`body`: the recap's post,
+ * All in one's one post), the video's post and each place's (`posts`). The mention goes
+ * where the thread opens.
  */
 export const VIDEO_THREAD_STARTERS = Object.freeze([
-  { id: 'recap', label: 'Recap first', order: 'recap', body: RECAP_TEXT, posts: threadTexts('Source: #source') },
-  { id: 'video', label: 'Video first', order: 'video', body: RECAP_TEXT, posts: threadTexts('#video\n\n#mention\n\nSource: #source') },
-  { id: 'proof', label: 'Proof first', order: 'proof', body: RECAP_TEXT, posts: threadTexts('#video\n\n#scenes\n\n#mention\n\nSource: #source') },
-  { id: 'all', label: 'All in one', order: 'all', body: '#video\n\n#scenes\n\n#mention\n\nSource: #source', posts: threadTexts('Source: #source') },
-].map((starter) => Object.freeze({ ...starter, mediaEnabled: false })));
+  { id: 'recap', body: RECAP_TEXT, posts: threadTexts('Source: #source') },
+  { id: 'video', body: RECAP_TEXT, posts: threadTexts('#video\n\n#mention\n\nSource: #source') },
+  { id: 'proof', body: RECAP_TEXT, posts: threadTexts('#video\n\n#scenes\n\n#mention\n\nSource: #source') },
+  { id: 'all', body: '#video\n\n#scenes\n\n#mention\n\nSource: #source', posts: threadTexts('Source: #source') },
+].map((starter) => Object.freeze({
+  ...starter, label: ORDER_NAMES[starter.id], order: ORDER_PRESETS[starter.id], mediaEnabled: false,
+})));
 
 /**
  * The starts New template offers, per kind. Geolocation keeps the four above, and a
@@ -1252,9 +1255,10 @@ export function templateFromPost({
 }
 
 /**
- * A video thread's order and the texts of its other posts, each only when it says
- * something, and for a video thread only (`api/templates.py`): the first text of a role
- * is the one a thread reads.
+ * A video thread's order, its posts top to bottom, and the texts of its other posts,
+ * each only when it says something, and for a video thread only (`api/templates.py`):
+ * a ready order's name reads as its list, and the first text of a role is the one a
+ * thread reads.
  */
 function threadParts(kind, order, posts) {
   if (normalizePostKind(kind) !== 'video') return {};
@@ -1263,8 +1267,9 @@ function threadParts(kind, order, posts) {
     if (!THREAD_ROLES.includes(one?.role) || texts.some((t) => t.role === one.role)) continue;
     texts.push({ role: one.role, body: typeof one.body === 'string' ? one.body.slice(0, 4_000) : '' });
   }
+  const blocks = orderBlocks(order);
   return {
-    ...(VIDEO_ORDERS.includes(order) ? { order } : {}),
+    ...(blocks ? { order: blocks } : {}),
     ...(texts.length ? { posts: texts } : {}),
   };
 }

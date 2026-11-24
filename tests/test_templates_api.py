@@ -386,7 +386,8 @@ def test_a_video_thread_template_keeps_its_order_and_its_text_per_post(client):
     saved = client.post("/api/templates/post", json={"name": "Thread", "data": data})
     assert saved.status_code == 200, saved.text
     out = saved.json()["data"]
-    assert out["order"] == "proof"
+    # a ready order said by its name, as the first 0.3.4 builds wrote it, reads as its posts
+    assert out["order"] == ["first", "video", "places"]
     assert out["posts"] == data["posts"][:2]
 
     # saved back as it reads, byte for byte
@@ -403,8 +404,23 @@ def test_a_video_thread_template_keeps_its_order_and_its_text_per_post(client):
     geo = client.post("/api/templates/post", json={"name": "Geo", "data": {"order": "all", "posts": data["posts"]}}).json()
     assert "order" not in geo["data"] and "posts" not in geo["data"]
 
+    # an order of the analyst's own: the source in the recap, the video at the very end
+    own = client.post("/api/templates/post", json={"name": "Own", "data": {
+        "kind": "video", "body": "#scenes\n\nSource: #source", "order": ["recap", "places", "video"],
+    }}).json()
+    assert own["data"]["order"] == ["recap", "places", "video"]
+    solo = client.post("/api/templates/post", json={"name": "Solo", "data": {"kind": "video", "body": "#scenes", "order": ["all"]}})
+    assert solo.json()["data"]["order"] == ["all"]
+
     for bad in (
         {"kind": "video", "order": "random"},
+        {"kind": "video", "order": []},
+        {"kind": "video", "order": ["recap", "places"]},
+        {"kind": "video", "order": ["video", "recap"]},
+        {"kind": "video", "order": ["video", "places", "video"]},
+        {"kind": "video", "order": ["all", "video", "places"]},
+        {"kind": "video", "order": ["video", "places", "sheet"]},
+        {"kind": "video", "order": ["recap", "first", "video", "places", "recap"]},
         {"kind": "video", "posts": [{"role": "recap", "body": "#scenes"}]},
         {"kind": "video", "posts": [{"role": "place", "body": "x" * 4_001}]},
         {"kind": "video", "posts": "Source: #source"},

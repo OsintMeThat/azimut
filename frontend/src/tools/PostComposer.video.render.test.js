@@ -324,7 +324,7 @@ describe('Recap first, as it opens', () => {
     await saved();
     const state = draftWrites().at(-1)[1].state;
     expect(state).toMatchObject({
-      kind: 'video', video: VIDEO, order: 'recap', first: 'recap', recap: 'map', map: MAP, mediaEnabled: false,
+      kind: 'video', video: VIDEO, order: ['recap', 'video', 'places'], first: 'recap', recap: 'map', map: MAP, mediaEnabled: false,
       mapOptions: { background: 'satellite', line: false, signature: false, mark: false },
       firstMedia: [MAP], firstMediaType: 'images', tweet1: RECAP,
       posts: VIDEO_THREAD_STARTERS[0].posts.map((one) => ({ ...one })),
@@ -451,6 +451,32 @@ describe('the order', () => {
     button(panel(), 'Recap first The places on a map or the proofs sheet, then the video, then a post per place').click();
     await settle();
     expect(posts().map((p) => p.text)).toEqual([RECAP, `Source: ${SOURCE}`, PLACES[0], 'The gate, as I say it', PLACES[2]]);
+  });
+
+  it('offers a template\'s own order beside the four, and comes back to it with its words', async () => {
+    templatesState.post = [{ id: 'po_own', name: 'Desk thread', data: {
+      kind: 'video', order: ['recap', 'places', 'video'], body: '#scenes\n\nSource: #source', mediaEnabled: false,
+      posts: [{ role: 'video', body: 'The full video' }, { role: 'place', body: '#timecode' }],
+    } }];
+    prefs.postKindTemplates = { video: 'po_own' };
+    await startFromGallery();
+    // the source on top, the video at the very end
+    expect(posts().map((p) => p.label)).toEqual(['Recap', 'Road bridge', 'Port gate', 'Hilltop village', 'Video']);
+    expect(posts()[0].text).toContain(`Source: ${SOURCE}`);
+    expect(posts().at(-1).text).toBe('The full video');
+    const own = panel().querySelector('.vt-order.on');
+    expect(own.querySelector('.vt-order-name').textContent).toBe('Your order');
+    expect(own.querySelector('.vt-order-words').textContent).toBe('The recap, then a post per place, then the video');
+    button(panel(), 'Video first The video, then a post per place').click();
+    await settle();
+    expect(posts().map((p) => p.label)).toEqual(['Video', 'Road bridge', 'Port gate', 'Hilltop village']);
+    button(panel(), 'Your order The recap, then a post per place, then the video').click();
+    await settle();
+    expect(posts().map((p) => p.label)).toEqual(['Recap', 'Road bridge', 'Port gate', 'Hilltop village', 'Video']);
+    expect(posts()[0].text).toContain(`Source: ${SOURCE}`);
+    expect(posts().at(-1).text).toBe('The full video');
+    await saved();
+    expect(draftWrites().at(-1)[1].state.order).toEqual(['recap', 'places', 'video']);
   });
 
   it('starts on the kind\'s default template, its order and its words', async () => {

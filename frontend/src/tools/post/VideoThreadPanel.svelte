@@ -3,14 +3,18 @@
    * A video thread's own column in the composer, above the mention and the source: the
    * video it posts and its places (with the proofs it leaves out, and why), the thread's
    * title (`#video`, the analyst's own words, empty unless they give some), the order
-   * the posts go out in, the contact sheet while it is made, and, when the video is over
+   * the posts go out in (the four ready ones, and the template's own beside them when it
+   * lays the posts out another way, `lib/threadOrder.js`), the contact sheet while it is made, and, when the video is over
    * the platform's limit, what can go in its place: the clip a proof cut for its post
    * (Cut for the post, Geo Proof's Scene tab), else the video's link. Nothing is cut or
    * re-encoded here; a choice only changes what the video's post carries.
    */
   import Icon from '../../components/Icon.svelte';
   import { clipWords } from '../../lib/postClip.js';
-  import { LEFT_WHY, ORDER_NAMES, ORDER_WORDS, ORDERS } from '../../lib/videoThread.js';
+  import { LEFT_WHY } from '../../lib/videoThread.js';
+  import {
+    hasRecap, ORDER_NAMES, ORDER_PRESETS, ORDER_WORDS, orderKey, orderWords, ORDERS, OWN_ORDER_NAME,
+  } from '../../lib/threadOrder.js';
 
   let {
     /** The video's title as Media gives it, or its file name: which video this is. */
@@ -19,7 +23,7 @@
     threadTitle = '',
     /** `(text)`: the thread's title typed. */
     ontitle,
-    /** Recap first's picture, its choice and its map (`RecapMap.svelte`), shown under the orders. */
+    /** The recap's picture, its choice and its map (`RecapMap.svelte`), shown under the orders while the thread has a recap. */
     recap = null,
     /** The places the thread posts, `{ name, label, clip }`, null while read. */
     places = null,
@@ -27,8 +31,11 @@
     left = [],
     /** How many places a thread could not hold. */
     cut = 0,
-    order = 'recap',
-    /** `(order)`: post in this order. */
+    /** The posts top to bottom, as blocks (`lib/threadOrder.js`). */
+    order = ORDER_PRESETS.recap,
+    /** An order of the analyst's own, from a template, offered beside the four; null for none. */
+    own = null,
+    /** `(order)`: post in this order, a list of blocks. */
     onorder,
     /** The contact sheet: '' when filed or not needed, 'making', or 'failed'. */
     sheet = '',
@@ -48,6 +55,12 @@
     onlink,
   } = $props();
 
+  // the four ready orders, and the analyst's own after them
+  const choices = $derived([
+    ...ORDERS.map((one) => ({ key: one, name: ORDER_NAMES[one], words: ORDER_WORDS[one], order: ORDER_PRESETS[one] })),
+    ...(own ? [{ key: 'own', name: OWN_ORDER_NAME, words: orderWords(own), order: own }] : []),
+  ]);
+  const current = $derived(orderKey(order));
   const clips = $derived((places ?? []).filter((one) => one.clip?.path));
   const chosen = $derived(clips.find((one) => one.clip.path === clip) ?? null);
 </script>
@@ -79,16 +92,17 @@
 
   <div class="vt-orders" role="radiogroup" aria-label="Order">
     <span class="label">Order</span>
-    {#each ORDERS as one (one)}
-      <button type="button" class="vt-order" class:on={order === one} role="radio" aria-checked={order === one}
-        title={ORDER_WORDS[one]} onclick={() => order !== one && onorder?.(one)}>
-        <span class="vt-order-name">{ORDER_NAMES[one]}</span>
-        <span class="vt-order-words">{ORDER_WORDS[one]}</span>
+    {#each choices as one (one.key)}
+      {@const on = orderKey(one.order) === current}
+      <button type="button" class="vt-order" class:on role="radio" aria-checked={on}
+        title={one.words} onclick={() => !on && onorder?.([...one.order])}>
+        <span class="vt-order-name">{one.name}</span>
+        <span class="vt-order-words">{one.words}</span>
       </button>
     {/each}
   </div>
 
-  {#if order === 'recap' && recap}{@render recap()}{/if}
+  {#if hasRecap(order) && recap}{@render recap()}{/if}
 
   {#if sheet === 'making'}
     <p class="vt-note" role="status">Drawing the contact sheet…</p>

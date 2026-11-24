@@ -1,6 +1,6 @@
 /**
  * The recap map of a video thread: the places of the video on one 16:9 picture, for
- * Recap first's first post, in place of the proofs sheet when the places spread far
+ * the recap's post, in place of the proofs sheet when the places spread far
  * enough apart to be told apart on a map.
  *
  * **What it shows.** Each place a numbered pin, the number and the colour `#scenes` and

@@ -201,7 +201,7 @@ test('New post → Video thread lays out Recap first with its sheet, saves it, a
 
   await expect.poll(() => fixture.draftWrites.at(-1)?.state?.sheet).toBe(SHEET);
   const state = fixture.draftWrites.at(-1).state;
-  expect(state).toMatchObject({ kind: 'video', video: VIDEO, order: 'recap', firstMedia: [SHEET], tweet1: RECAP });
+  expect(state).toMatchObject({ kind: 'video', video: VIDEO, order: ['recap', 'video', 'places'], firstMedia: [SHEET], tweet1: RECAP });
   expect(state.extraTweets.map((one) => one.key)).toEqual(['video', 'place:bridge', 'place:gate']);
 
   // back home, the series has its thread, and its card opens it as it was

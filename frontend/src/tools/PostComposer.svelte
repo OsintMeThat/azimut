@@ -18,6 +18,7 @@
   import { filingName, planProofHandoff, proofPosts } from './post/handoff.js';
   import { spanNote, startFields, startPost } from './post/start.js';
   import { timecode, usesSheet, videoSlides } from '../lib/videoThread.js';
+  import { hasRecap, isAllInOne, orderKey, presetOf } from '../lib/threadOrder.js';
   import { MAX_THREAD_POSTS, placeCoords, threadPostLabel, videoLayout, videoLink, videoPosts } from '../lib/videoPost.js';
   import { fitsOn, leftWords, piecePosts, resolvePieces } from './post/pieces.js';
   import { overWords, videoFits } from '../lib/videoLimits.js';
@@ -135,7 +136,8 @@
   let firstMediaType = $state('none'); // 'none' | 'video' | 'images'
 
   // A video thread: the placed proofs of one video as one thread (lib/videoThread.js,
-  // lib/videoPost.js), null for any other kind. A draft keeps its video, its order, the
+  // lib/videoPost.js), null for any other kind. A draft keeps its video, its order (its
+  // posts top to bottom, lib/threadOrder.js), the
   // texts of its video post and of each place's post beside `body` (the recap), the post
   // that opens it (`first`), the template's closing posts (`extra`) and what it filed or
   // picked: the contact sheet, a clip in place of the whole video, or its link. Its
@@ -604,16 +606,19 @@
       title: '',
       video, order: layout.order, texts: { video: layout.video, place: layout.place }, first: null, extra: [],
       sheet: null, clip: null, link: false, slides: null, left: [], seconds: null, facts: {}, cut: 0, sheetState: '',
-      // Recap first's picture: the proofs sheet, as every thread had before, or the places
+      // the recap's picture: the proofs sheet, as every thread had before, or the places
       // on a map (`lib/recapMap.js`), its choices, and the file made when the thread last
       // needed its picture with the choices it was made for (`mapFor`). `mapLive` is
       // whether its tiles may be asked for, never saved: the analyst pressed for the map.
       // `mapState` is 'making' while the map is drawn and filed.
       recap: 'sheet', map: null, mapFor: null, mapOptions: mapOptions(), mapLive: false, mapState: '',
-      // the recap and the video's text each order was left with in this post, and the
-      // words of each post the analyst rewrote, kept through an order that has no such post
+      // the recap and the video's text each order was left with in this post, by its
+      // key, and the words of each post the analyst rewrote, kept through an order that
+      // has no such post
       byOrder: {},
       written: {},
+      // the order a template or the draft brought when it is none of the four, offered beside them
+      own: null,
     };
   }
 
@@ -630,6 +635,7 @@
       mapFor: path(s.map) ? mapOptions(s.mapOptions) : null,
       mapOptions: mapOptions(s.mapOptions),
       order: layout.order,
+      own: presetOf(layout.order) ? null : [...layout.order],
       texts: { video: layout.video, place: layout.place },
       first: typeof s.first === 'string' ? s.first : null,
       extra: Array.isArray(s.extra) ? s.extra.map((one) => ({ text: String(one?.text ?? '') })) : [],
@@ -644,7 +650,7 @@
     return {
       video: thread.video,
       ...(thread.title !== null ? { title: thread.title } : {}),
-      order: thread.order,
+      order: [...thread.order],
       posts: [{ role: 'video', body: thread.texts.video }, { role: 'place', body: thread.texts.place }],
       ...(thread.first ? { first: thread.first } : {}),
       ...(thread.extra.length ? { extra: thread.extra.map((one) => ({ text: one.text })) } : {}),
@@ -714,7 +720,7 @@
 
   // The recap carries the map and none made matches its choices: it is made when the
   // thread needs its picture (Publish, the hand-off, Copy, Download), never on a choice.
-  const mapPending = $derived(!!thread?.slides && thread.order === 'recap' && thread.recap === 'map'
+  const mapPending = $derived(!!thread?.slides && hasRecap(thread.order) && thread.recap === 'map'
     && recapFit(recapPlaces(thread.slides)).ok && !madeMap());
 
   /** A choice of the map changed: the recap carries the map made for it, or waits for one. Nothing is filed. */
@@ -881,10 +887,14 @@
     rewriteThread();
   }
 
-  /** A thread's order and texts, from a template or a start: the posts follow. */
+  /**
+   * A thread's order and texts, from a template or a start: the posts follow. An order
+   * that is none of the four stays offered beside them as the analyst's own.
+   */
   function applyThreadLayout(layout, extra = thread.extra) {
     body = layout.recap;
-    thread.order = layout.order;
+    thread.order = [...layout.order];
+    thread.own = presetOf(layout.order) ? null : [...layout.order];
     thread.texts = { video: layout.video, place: layout.place };
     thread.extra = (extra ?? []).map((one) => ({ text: String(one?.text ?? '') }));
     layoutThread();
@@ -895,16 +905,18 @@
   /**
    * Another order: the same places in another sequence, each with its words. Where the
    * thread opens and where its mention goes are the order's own, so the recap and the
-   * video's post take that order's start, or the words they had in it earlier on.
+   * video's post take a ready order's start, or the words they had in it earlier on.
    */
   function setThreadOrder(order) {
     if (!thread) return;
-    thread.byOrder[thread.order] = { recap: body, video: thread.texts.video };
-    const start = videoLayout(VIDEO_THREAD_STARTERS.find((one) => one.order === order));
-    const known = thread.byOrder[order] ?? { recap: start.recap, video: start.video };
+    thread.byOrder[orderKey(thread.order)] = { recap: body, video: thread.texts.video };
+    const preset = presetOf(order);
+    const start = preset ? videoLayout(VIDEO_THREAD_STARTERS.find((one) => one.id === preset)) : null;
+    const known = thread.byOrder[orderKey(order)]
+      ?? (start ? { recap: start.recap, video: start.video } : { recap: body, video: thread.texts.video });
     body = known.recap;
     thread.texts.video = known.video;
-    thread.order = order;
+    thread.order = [...order];
     layoutThread();
     fileSheetIfShown();
   }
@@ -973,7 +985,7 @@
   // What the thread's video is over on the platform picked, in words, while its post
   // carries the whole video: the panel offers a clip or the link then.
   const threadOver = $derived.by(() => {
-    if (!thread?.video || thread.clip || thread.link || thread.order === 'all') return '';
+    if (!thread?.video || thread.clip || thread.link || isAllInOne(thread.order)) return '';
     const facts = { seconds: thread.seconds, bytes: mediaByPath.get(thread.video)?.size ?? null };
     return overWords(target, videoFits(target, facts), facts);
   });
@@ -1146,7 +1158,7 @@
       body,
       mediaEnabled,
       replyChosen,
-      layout: thread ? { order: thread.order, recap: body, ...thread.texts, extra: thread.extra.map((one) => ({ ...one })) } : null,
+      layout: thread ? { order: [...thread.order], recap: body, ...thread.texts, extra: thread.extra.map((one) => ({ ...one })) } : null,
       extraTweets: extraTweets.map((e) => ({
         text: e.text,
         mediaPaths: [...e.mediaPaths],
@@ -3129,7 +3141,7 @@
             {/snippet}
             <VideoThreadPanel title={thread.video ? videoName(thread.video, titleByPath.get(thread.video)) : ''}
               threadTitle={threadTitle()} ontitle={setThreadTitle} recap={recapPicture}
-              places={thread.slides} left={thread.left} cut={thread.cut} order={thread.order} onorder={setThreadOrder}
+              places={thread.slides} left={thread.left} cut={thread.cut} order={thread.order} own={thread.own} onorder={setThreadOrder}
               sheet={thread.sheetState} onsheet={fileSheetIfShown} over={threadOver} clip={thread.clip} link={thread.link}
               href={source.trim()} onclip={setThreadClip} onlink={setThreadLink} />
           </div>

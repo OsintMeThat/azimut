@@ -5900,7 +5900,9 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   choices: **Recap first** (the default: the places numbered with their times on a map
   or the proofs sheet, then the video, then a post per place), **Video first**, **Proof
   first** (the first place, then the video naming every place) and **All in one** (one
-  post: up to four pictures, the contact sheet past four places). Each post is labelled
+  post: up to four pictures, the contact sheet past four places). A template that lays
+  its posts out another way adds a fifth, **Your order**, spelled out under its name
+  (*The recap, then a post per place, then the video*). Each post is labelled
   (*Recap*, *Video*, the place's name, else where it stands with its plus code, *Al Jawf,
   Yemen (7H872G9H+FC)*, never a technical *Proof 3*) and carries its files: a place's
   proof picture, the video, the recap's picture; the column's lists call a place the
@@ -5910,7 +5912,8 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   says its point there too, its name staying in its own post, and a place with no point
   says its label. A place's post says its sentence, its time and its points, the
   same in every order; changing the order keeps the words written on a post, while the
-  recap and the video's post take the order's own start. The mention and the Source
+  recap and the video's post take the order's own start, or for Your order the words
+  they had in it. The mention and the Source
   field (the video's link) are the only fields; the places bring theirs. **No picture
   prints a title**: the sheet and the map show numbers (the sheet its times too), and
   `#scenes` is their legend. The contact sheet is drawn in the browser from the places'
@@ -5918,7 +5921,7 @@ never posts, and pressing Post on X or Bluesky stays the analyst's.
   Media as made from the video (`POST /cases/{id}/scenes/sheet`; the same picture is
   one file). A thread holds 21 posts and says how many places it leaves out, and the
   kind's default template gives its order and words.
-- **The recap picture.** Under Recap first, **Recap picture** picks **Map** or **Proofs
+- **The recap picture.** While the thread has a recap, **Recap picture** picks **Map** or **Proofs
   sheet**. Map is the default when the places stand apart: two places or more, more than
   30 m apart; else the sheet stays, and the column says *These places are too close
   together for a map, so the recap shows the proofs sheet.* The map (`lib/recapMap.js`)
@@ -6095,13 +6098,21 @@ stays text.
   under **Built-in** below the analyst's own templates of the open kind (alone when there
   are none, with the link to Settings → Templates kept): applying one changes the body
   only, and its **Remove** goes back to the layout the post had.
-- **A video thread's template** is several posts: its **Order**, its **Recap post**
-  (`body`: Recap first's first post, All in one's only one), its **Video post** and
-  **Each place** (`posts`, a text per role), each taking the token the analyst presses
-  into the one last written in. Its preview is the whole thread on three sample places
-  (a passage, an instant, the whole video), each post counted per platform. It has no
-  media post: each post carries its own files. A template that says no order or no
-  texts starts on Recap first's.
+- **A video thread's template** is its posts listed top to bottom under **Posts in
+  order**, each a row with its number, its name, what it carries and its text: the
+  **Recap** (`body`, also All in one's only post), the **Video** and **Each place**
+  (`posts`, a text per role). A row moves by dragging its head or with its arrows. The
+  Recap can be left out and put back on top, and so can the **First place on its own**,
+  which turns Each place into **Other places** (the two share one text, written on the
+  higher row). **All in one post** makes it one post, and unchecked goes back to the
+  order it had. So Recap first can put the source in its first post and the video at
+  the very end. The order is stored as the list of its posts (`order: ["recap",
+  "places", "video"]`, `lib/threadOrder.js`); a ready order stored by its name in the
+  first 0.3.4 builds reads as its list. A token goes into the text last written in.
+  Its preview is the whole thread on three sample places (a passage, an instant, the
+  whole video), each post counted per platform. It has no media post: each post
+  carries its own files. A template that says no order or no texts starts on Recap
+  first's.
 - **Reply under the source by default**, on a geolocation template, starts its posts
   with *Post as a reply under the source* checked whenever their source is an X or
   Bluesky post (`reply: true`, written only when checked). A template from the first
