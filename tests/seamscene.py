@@ -15,6 +15,7 @@ here one point at a time, straight from the rule (engine/seams.py), and written 
 
 import json
 import math
+import re
 from pathlib import Path
 
 import numpy as np
@@ -167,4 +168,7 @@ def build() -> dict:
 
 
 def write() -> None:
-    FIXTURE.write_text(json.dumps(build(), indent=1) + "\n", encoding="utf-8")
+    text = json.dumps(build(), indent=1)
+    # a list of numbers on one line
+    text = re.sub(r"\[\s+([-\d.eE,\s]+?)\s+\]", lambda m: "[" + ", ".join(v.strip() for v in m.group(1).split(",")) + "]", text)
+    FIXTURE.write_text(text + "\n", encoding="utf-8")
