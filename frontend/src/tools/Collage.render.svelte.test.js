@@ -13,7 +13,10 @@ const MEDIA = [
   { path: 'media/clip.mp4', kind: 'video', title: 'Convoy clip', filename: 'clip.mp4' },
 ];
 let media = MEDIA;
-let works = [];
+// what the server reads of the rail's video, its Inspect work, and the frames a panorama takes
+let probe = { duration: 10, fps: 25, width: 1920, height: 1080 };
+let work = null;
+let panorama = { times: [], note: null };
 const piece = (path) => ({
   id: 'nd_1', frameId: null, save: { path, time: null, ops: [] }, w: 80, h: 60,
   quad: [[0, 0], [80, 0], [80, 60], [0, 60]], frameOps: [], crop: null,
@@ -25,10 +28,9 @@ let saved = {};
 const get = vi.fn(async (path) => {
   if (path === '/api/inspect/ops') return { filters: [], analyses: [] };
   if (path === '/api/cases/case-a/media') return structuredClone(media);
-  if (path === '/api/cases/case-a/inspect/works') return structuredClone(works);
-  if (path.startsWith('/api/cases/case-a/inspect/works/')) {
-    throw Object.assign(new Error('nothing was inspected under that name'), { status: 404 });
-  }
+  if (path.startsWith('/api/cases/case-a/inspect/probe')) return structuredClone(probe);
+  if (path.startsWith('/api/cases/case-a/inspect/work?')) return { work: structuredClone(work) };
+  if (path.startsWith('/api/cases/case-a/scenes')) return { scenes: [], taken: [], collages: [] };
   if (path === '/api/cases/case-a/collages') return structuredClone(collages);
   if (path.startsWith('/api/cases/case-a/collages/')) {
     return structuredClone(saved[decodeURIComponent(path.split('/collages/')[1])]);
@@ -37,6 +39,16 @@ const get = vi.fn(async (path) => {
 });
 const post = vi.fn(async (path, body) => {
   if (path === '/api/cases/case-a/collages') return { name: body.title, title: body.title };
+  if (path === '/api/cases/case-a/inspect/panorama-frames') return structuredClone(panorama);
+  if (path === '/api/cases/case-a/inspect/auto-stitch') {
+    // each piece put in a row, as a stitch answers, and the angle they cover
+    return {
+      canvas: null,
+      nodes: body.nodes.map((_n, index) => ({ index, quad: [[index * 70, 0], [index * 70 + 80, 0], [index * 70 + 80, 60], [index * 70, 60]] })),
+      dropped: [],
+      span_deg: 40 * body.nodes.length,
+    };
+  }
   return {};
 });
 const put = vi.fn(async () => ({}));
@@ -53,7 +65,6 @@ vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast, reloadCase
 vi.mock('../lib/trash.js', () => ({ deletedToast: vi.fn() }));
 
 const { default: Collage } = await import('./Collage.svelte');
-const { workState } = await import('../lib/inspectWork.svelte.js');
 
 let live;
 let target;
@@ -80,7 +91,9 @@ beforeEach(() => {
   collages = [];
   saved = {};
   media = MEDIA;
-  works = [];
+  probe = { duration: 10, fps: 25, width: 1920, height: 1080 };
+  work = null;
+  panorama = { times: [], note: null };
   post.mockClear();
   put.mockClear();
   renderCollageThumb.mockClear();
@@ -258,44 +271,184 @@ describe('an existing collage', () => {
   });
 });
 
-describe('frames from Inspect', () => {
-  const clipWork = { name: 'Convoy clip', title: 'Convoy clip', source: 'media/clip.mp4', frames: 2, kind: 'video' };
+describe('the video rail', () => {
+  const at = (id, path, time, ops = []) => ({ ...piece(path), id, save: { path, time, ops }, frameOps: ops });
+  const rail = () => target.querySelector('[data-testid="collage-rail"]');
+  const railButton = (text) => [...rail().querySelectorAll('button')].find((b) => b.textContent.trim().startsWith(text));
+  const key = (k, opts = {}) => {
+    rail().dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, ...opts }));
+    flushSync();
+  };
+  let renders;
 
-  it('stops offering a work cleared in Inspect', async () => {
-    works = [clipWork];
-    await start();
-    button('New collage').click();
-    await settle();
-    expect(target.querySelector('.group-head').textContent).toContain('Convoy clip');
-
-    works = [];
-    workState.rev += 1;
-    await settle(20);
-
-    expect(target.querySelector('.group-head')).toBeNull();
+  beforeEach(() => {
+    renders = [];
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      const body = JSON.parse(init?.body ?? '{}');
+      renders.push(body);
+      // the server names the frame the player shows at the time asked
+      const headers = body.snap ? { 'X-Frame-Time': String(Math.floor(body.time * 25 + 1e-6) / 25) } : {};
+      return new Response(new Blob(['png'], { type: 'image/png' }), { headers });
+    }));
+    URL.createObjectURL = vi.fn(() => 'blob:piece');
+    URL.revokeObjectURL = vi.fn();
   });
 
-  it('lists a work under the name its file has now', async () => {
-    // a work that kept the name the file had before a rename
-    works = [{ ...clipWork, name: 'Old clip name', title: 'Old clip name' }];
+  async function openNew() {
     await start();
     button('New collage').click();
     await settle();
+  }
 
-    expect(target.querySelector('.group-head .name').textContent).toBe('Convoy clip');
+  it('plays a video picked in Videos under the canvas, beside it once it stands upright', async () => {
+    await openNew();
+    expect(rail()).toBeNull();
+
+    target.querySelector('.picker .group-head').click();
+    await settle(20);
+    expect(rail().querySelector('.rail-title').textContent).toBe('Convoy clip');
+    expect(rail().classList.contains('bottom')).toBe(true);
+    expect(target.querySelector('.workspace').classList.contains('upright')).toBe(false);
+    expect(target.querySelector('.picker .group-head').classList.contains('open')).toBe(true);
   });
 
-  it('says so, rather than spinning, when a work is no longer there', async () => {
-    works = [clipWork];
-    await start();
-    button('New collage').click();
-    await settle();
-
-    target.querySelector('.group-head').click();
+  it('stands beside the canvas for a clip filmed upright, and folds to its title', async () => {
+    probe = { duration: 10, fps: 25, width: 1080, height: 1920 };
+    await openNew();
+    target.querySelector('.picker .group-head').click();
     await settle(20);
 
-    expect(target.querySelector('.group .spinner')).toBeNull();
-    expect(target.querySelector('.group').textContent).toContain('No frames left here.');
+    expect(rail().classList.contains('left')).toBe(true);
+    expect(target.querySelector('.workspace').classList.contains('upright')).toBe(true);
+    rail().querySelector('button[aria-label="Fold the video"]').click();
+    flushSync();
+    expect(rail().classList.contains('folded')).toBe(true);
+    expect(rail().querySelector('video')).toBeNull();
+    // folded, it lies under the canvas whatever the clip's shape
+    expect(target.querySelector('.workspace').classList.contains('upright')).toBe(false);
+  });
+
+  it('opens a collage on the video its pieces come from', async () => {
+    collages = [{ name: 'Pan', title: 'Pan', pieces: 1 }];
+    saved.Pan = { name: 'Pan', title: 'Pan', spec: { width: 800, height: 600, nodes: [at('nd_1', 'media/clip.mp4', 2)] } };
+    uiState.openCollage = 'Pan';
+    await start();
+    await settle(20);
+
+    expect(rail().querySelector('.rail-title').textContent).toBe('Convoy clip');
+  });
+
+  it('lays the frame on screen beside the last piece, as the server named it, and never twice', async () => {
+    await openNew();
+    target.querySelector('.picker .group-head').click();
+    await settle(20);
+
+    key('ArrowRight');
+    key('ArrowRight');
+    railButton('Add frame').click();
+    await settle(20);
+    const asked = renders.find((r) => r.snap);
+    expect(asked.path).toBe('media/clip.mp4');
+    const autosaved = () => collagePosts().at(-1)?.[1].spec.nodes ?? [];
+    await afterQuiet();
+    expect(autosaved()).toHaveLength(1);
+    expect(autosaved()[0].save.time).toBeCloseTo(Math.floor(asked.time * 25 + 1e-6) / 25, 6);
+
+    key('ArrowRight');
+    railButton('Add frame').click();
+    await afterQuiet();
+    const [first, second] = autosaved();
+    // in a row: the second starts right of the first, at its height
+    expect(second.quad[0][0]).toBeGreaterThan(Math.max(...first.quad.map(([x]) => x)));
+    expect(second.quad[0][1]).toBe(first.quad[0][1]);
+
+    railButton('Add frame').click();
+    await settle(20);
+    expect(toast).toHaveBeenCalledWith('This frame is already on the collage', 'info', 2500);
+    await afterQuiet();
+    expect(autosaved()).toHaveLength(2);
+  });
+
+  it('takes a frame Inspect cut there as it was cut, its crop and light kept', async () => {
+    const crop = { x: 0.1, y: 0.1, w: 0.5, h: 0.5 };
+    work = { spec: { frames: [{ id: 'fr_1', path: 'media/clip.mp4', time: 0, crop, adjust: {} }] } };
+    await openNew();
+    target.querySelector('.picker .group-head').click();
+    await settle(20);
+
+    railButton('Add frame').click();
+    await afterQuiet();
+    const [node] = collagePosts().at(-1)[1].spec.nodes;
+    expect(node.frameId).toBe('fr_1');
+    expect(node.save.ops).toEqual([{ op: 'crop', params: crop }]);
+  });
+
+  it('asks for A and B before a panorama, then lays the frames picked and stitches them, one undo', async () => {
+    panorama = { times: [0.2, 0.6, 1.0], note: null };
+    await openNew();
+    target.querySelector('.picker .group-head').click();
+    await settle(20);
+
+    expect(railButton('Panorama').disabled).toBe(true);
+    expect(railButton('Panorama').title).toBe('Set A and B around the pan first');
+    railButton('A').click();
+    for (let i = 0; i < 10; i += 1) key('ArrowRight');
+    railButton('B').click();
+    flushSync();
+    expect(railButton('Panorama').disabled).toBe(false);
+
+    railButton('Panorama').click();
+    await settle(40);
+    const call = post.mock.calls.find(([path]) => path === '/api/cases/case-a/inspect/panorama-frames');
+    expect(call[1]).toMatchObject({ path: 'media/clip.mp4', start: 0 });
+    expect(call[1].end).toBeGreaterThan(0.3);
+    const stitch = post.mock.calls.find(([path]) => path === '/api/cases/case-a/inspect/auto-stitch');
+    expect(stitch[1].mode).toBe('cylindrical');
+    expect(stitch[1].nodes.map((n) => n.time)).toEqual([0.2, 0.6, 1.0]);
+    expect(toast).toHaveBeenCalledWith('Stitched 3 pieces, about 120° across', 'ok', null, expect.any(Object));
+
+    expect(target.querySelectorAll('img.node')).toHaveLength(3);
+    target.querySelector('.tool-header button[title^="Undo"]').click();
+    await settle(500);
+    // one undo takes the frames and their stitch back together
+    expect(target.querySelectorAll('img.node')).toHaveLength(0);
+    expect(target.querySelector('.tool-header button[title^="Undo"]').disabled).toBe(true);
+  });
+
+  it('says why a stretch makes no panorama, and lays nothing', async () => {
+    panorama = { times: [1.2], note: 'The camera barely moves here, so one frame is enough.' };
+    await openNew();
+    target.querySelector('.picker .group-head').click();
+    await settle(20);
+    railButton('A').click();
+    for (let i = 0; i < 10; i += 1) key('ArrowRight');
+    railButton('B').click();
+    flushSync();
+
+    railButton('Panorama').click();
+    await settle(40);
+    expect(toast).toHaveBeenCalledWith('The camera barely moves here, so one frame is enough.', 'warn');
+    expect(post.mock.calls.some(([path]) => path === '/api/cases/case-a/inspect/auto-stitch')).toBe(false);
+    expect(target.querySelector('.empty-canvas')).not.toBeNull();
+  });
+
+  it('puts the video of a piece taken in hand in the rail', async () => {
+    media = [...MEDIA, { path: 'media/other.mp4', kind: 'video', title: 'Other clip', filename: 'other.mp4' }];
+    collages = [{ name: 'Two', title: 'Two', pieces: 2 }];
+    saved.Two = {
+      name: 'Two', title: 'Two',
+      spec: { width: 800, height: 600, nodes: [at('nd_1', 'media/other.mp4', 1), at('nd_2', 'media/clip.mp4', 2)] },
+    };
+    uiState.openCollage = 'Two';
+    await start();
+    await settle(20);
+    expect(rail().querySelector('.rail-title').textContent).toBe('Convoy clip');
+
+    // the first piece drawn on the canvas is the other clip's
+    target.querySelector('img.node').dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+    window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0 }));
+    await settle(20);
+    expect(rail().querySelector('.rail-title').textContent).toBe('Other clip');
   });
 });
 
@@ -514,8 +667,6 @@ describe('finding and leaving a collage', () => {
 });
 
 describe('the piece picker', () => {
-  const clip = { name: 'Convoy clip', title: 'Convoy clip', source: 'media/clip.mp4', frames: 2, kind: 'video' };
-  const roof = { name: 'Roof', title: 'Roof', source: 'media/roof.png', frames: 1, kind: 'image' };
   const heads = () => [...target.querySelectorAll('.group-head .name')].map((el) => el.textContent);
   const typeInto = (input, value) => {
     input.value = value;
@@ -529,44 +680,32 @@ describe('the piece picker', () => {
     await settle();
   }
 
-  it('shows each file by its own thumbnail, in the order last worked on', async () => {
-    works = [roof, clip];
+  it('lists the case’s videos by their own thumbnail, and only videos', async () => {
+    media = [
+      ...MEDIA,
+      { path: 'media/quay.mp4', kind: 'video', title: 'Quay', filename: 'quay.mp4', thumbnail: 'media/.thumbs/q.jpg' },
+    ];
     await openNew();
 
-    expect(heads()).toEqual(['Roof', 'Convoy clip']);
+    expect(heads()).toEqual(['Convoy clip', 'Quay']);
     const [first, second] = target.querySelectorAll('.group-head .file');
-    expect(first.querySelector('img').getAttribute('src')).toBe('/files/case-a/media/.thumbs/r.jpg');
-    expect(second.querySelector('img')).toBeNull(); // no thumbnail cached: its kind stands in
+    expect(first.querySelector('img')).toBeNull(); // no thumbnail cached: its kind stands in
+    expect(second.querySelector('img').getAttribute('src')).toBe('/files/case-a/media/.thumbs/q.jpg');
   });
 
-  it('narrows the files, then the images, to the words typed', async () => {
-    works = [roof, clip];
+  it('narrows the videos, then the images, to the words typed', async () => {
     await openNew();
     const search = target.querySelector('.picker input[aria-label="Search…"]');
 
     typeInto(search, 'convoy');
     expect(heads()).toEqual(['Convoy clip']);
     typeInto(search, 'quay');
-    expect(target.querySelector('.picker').textContent).toContain('No file named “quay”.');
+    expect(target.querySelector('.picker').textContent).toContain('No video named “quay”.');
 
     button('Images').click();
     flushSync();
     typeInto(search, 'ROOF');
     expect(target.querySelectorAll('.picker .thumbs .thumb')).toHaveLength(1);
-  });
-
-  it('keeps one file unfolded at a time', async () => {
-    works = [roof, clip];
-    await openNew();
-    const [roofHead, clipHead] = target.querySelectorAll('.group-head');
-
-    roofHead.click();
-    flushSync();
-    clipHead.click();
-    flushSync();
-
-    expect(roofHead.getAttribute('aria-expanded')).toBe('false');
-    expect(clipHead.getAttribute('aria-expanded')).toBe('true');
   });
 });
 
@@ -634,11 +773,9 @@ describe('the layout', () => {
 });
 
 describe('an empty canvas', () => {
-  const clipWork = { name: 'Convoy clip', title: 'Convoy clip', source: 'media/clip.mp4', frames: 2, kind: 'video' };
   const tabOn = () => target.querySelector('.picker [role="tab"].on').textContent.trim();
 
   it('says how pieces come in, and opens the list each way leads to', async () => {
-    works = [clipWork];
     await start();
     button('New collage').click();
     await settle();
@@ -648,22 +785,20 @@ describe('an empty canvas', () => {
     [...card.querySelectorAll('button')].find((b) => b.textContent.includes('Images')).click();
     flushSync();
     expect(tabOn()).toBe('Images');
-    [...card.querySelectorAll('button')].find((b) => b.textContent.includes('Frames')).click();
+    [...card.querySelectorAll('button')].find((b) => b.textContent.includes('Videos')).click();
     flushSync();
-    expect(tabOn()).toBe('Frames');
+    expect(tabOn()).toBe('Videos');
     expect(target.querySelector('[data-guide="collage.add"]').classList.contains('pointed')).toBe(true);
   });
 
-  it('leads to Inspect while no frame is cut, and steps aside once a piece is in', async () => {
+  it('offers Videos only in a case that holds one, and steps aside once a piece is in', async () => {
+    media = MEDIA.filter((m) => m.kind === 'image');
     await start();
     button('New collage').click();
     await settle();
 
     const card = target.querySelector('.empty-canvas');
-    [...card.querySelectorAll('button')].find((b) => b.textContent.includes('Cut frames in Inspect')).click();
-    expect(uiState.tool).toBe('inspect');
-    uiState.tool = 'collage';
-
+    expect([...card.querySelectorAll('button')].some((b) => b.textContent.includes('Videos'))).toBe(false);
     [...card.querySelectorAll('button')].find((b) => b.textContent.includes('Images')).click();
     flushSync();
     target.querySelector('.picker .thumb').click();

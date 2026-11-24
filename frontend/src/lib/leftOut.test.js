@@ -19,6 +19,16 @@ describe('the message of a stitch', () => {
     expect(stitchedWords(3, [])).toBe('Stitched 3 pieces');
   });
 
+  it('says the angle a panorama covers, as an estimate, when the server measured one', () => {
+    expect(stitchedWords(9, [], 'cylindrical', 143.4)).toBe('Stitched 9 pieces, about 143° across');
+    expect(stitchedWords(2, ['no-overlap'], 'cylindrical', 40)).toBe(
+      'Stitched 2, about 40° across. No overlap found for the outlined piece, left where it was',
+    );
+    // none placed, or no angle (planar), says nothing of it
+    expect(stitchedWords(0, ['no-overlap'], 'cylindrical', 40)).toBe('No overlap found between the pieces, so none moved');
+    expect(stitchedWords(3, [], 'planar', null)).toBe('Stitched 3 pieces');
+  });
+
   it('keeps the words it had for pieces with no overlap', () => {
     expect(stitchedWords(1, ['no-overlap'])).toBe('Stitched 1. No overlap found for the outlined piece, left where it was');
     expect(stitchedWords(1, ['no-overlap', 'no-overlap'])).toBe('Stitched 1. No overlap found for the 2 outlined pieces, left where they were');

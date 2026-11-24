@@ -191,6 +191,7 @@ proof for publication.
 | ✅ **Home, guide & onboarding** | Opens recent work and task lists from Home, pictures every tool in the `?` guide with three walked journeys, tours a newcomer and opens each version on its What's new. |
 | ✅ **Support & feedback** | Offers a tip, a form and a problem report from one top-bar button, Tip, each hidden until its link exists and opened only on a press. |
 | ✅ **Inspect & Collage** | Autosaves work per file, captures the frame on screen with frames, marks and sound along the bar, arranges frames into collages straightened by a level line, and sends pictures to reverse search. |
+| ✅ **Panorama from a pan** | Plays the video in a rail under the Collage canvas, picks a pan's frames between A and B, stitches them with seams halfway between frames, and trims the empty edges. |
 | ✅ **Proof annotations & publishing** | Adds markers, blurs, tags, callouts, zoom insets and view cones, free or tied across panels at one line width, verifies proof points and carries proof dates into post templates. |
 | ✅ **Dates & Timeline** | Shares date entry and clock selection, draws temporal precision explicitly and adds cited events from any tool. |
 | ✅ **Subjects & case analysis** | Corrects and merges subjects, indexes their events, searches across scripts and reviews proposed account and site connections. |
@@ -275,7 +276,6 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 | **OCR** | Reads signs and plates on import (tesseract, a native binary rather than a wheel), and detects script and language. |
 | **Audio Transcript** | Transcribe and translate speech offline; flag acoustic context such as bells, adhan, aircraft or language. |
 | **Ground Imagery** | Ground-level photos: Panoramax/Mapillary/KartaView key-less first; Street View easy link, optional keyed in-app view. |
-| **Panorama** | Stitch a video window / frame set. Auto-stitch already in Collage; still to do: sample a video window directly, seam blending. |
 | **Detached tool windows** | The rule the map already follows, applied to the rest: a read-and-work surface (Board, Graph, Timeline) opens as many tabs as wanted and the tab it left stays live; a document editor opens one window per document and is greyed out where it was. Cross-tool handoffs route to wherever the tool now lives. |
 
 Toward v3: GIF maker; curated tool links; full-text case search; clipboard

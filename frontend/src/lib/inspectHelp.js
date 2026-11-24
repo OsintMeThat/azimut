@@ -155,3 +155,17 @@ export const COLLAGE_TIME_TIPS = {
   instant: 'Here takes the frame on the player',
   passage: 'Here takes the frame on the player, for the start or the end',
 };
+
+/**
+ * Collage's video rail (`tools/inspect/CollageVideoRail.svelte`): what its buttons and
+ * its edge do, and the keys it answers while the hand is in it.
+ */
+export const COLLAGE_RAIL_HELP = {
+  add: 'Put the frame on screen on the collage (C)',
+  panorama: 'Pick the frames of the A–B stretch and stitch them',
+  panoramaFirst: 'Set A and B around the pan first',
+  resize: 'Drag to make the video larger or smaller',
+  fold: 'Fold the video away',
+  unfold: 'Show the video',
+  keys: 'Space play · ←/→ frame · Shift+←/→ second · J/L speed · C add frame · +/- bar zoom',
+};

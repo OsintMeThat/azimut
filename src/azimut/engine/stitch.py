@@ -879,6 +879,22 @@ def _match_component(
     return pairwise, sorted(best)
 
 
+# The widest view one frame of a turning camera is believed to have, degrees across. The
+# adjuster can settle on a camera that explains its matches with no lens at all: on the
+# owner's pans (V3, V9), frames came back with focals of 1 to 3 pixels, or negative, so
+# each "saw" 180° and the strip claimed a full turn of a twelve-second pan. An action
+# camera's widest mode is about 150°; past it, or with no focal, the solve is broken.
+MAX_FRAME_FOV = 150.0
+NO_LENS = "auto-stitch could not find one lens for these frames, so they do not read as one camera turning"
+
+
+def _lens_plausible(focal: float, width: float) -> bool:
+    """Whether a solved focal, pixels, gives a frame ``width`` pixels wide a believable view."""
+    if not (math.isfinite(focal) and focal > 0 and width > 0):
+        return False
+    return math.degrees(2 * math.atan(width / (2 * focal))) <= MAX_FRAME_FOV
+
+
 def _solve_cameras(cv2, feats: list[Any], pairwise: list[Any]) -> list[Any]:
     """A rotation + focal per image, refined against every match at once.
 
@@ -912,6 +928,8 @@ def _solve_cameras(cv2, feats: list[Any], pairwise: list[Any]) -> list[Any]:
         ok = False
     if not ok:
         raise RuntimeError("auto-stitch could not refine the camera rotations")
+    if not all(_lens_plausible(cam.focal, feat.img_size[0]) for cam, feat in zip(cameras, feats)):
+        raise RuntimeError(NO_LENS)
 
     # Wave correction pulls the panorama's horizon back level: chained rotations
     # are free to roll as a group, and a whole-strip tilt reads as a "banana".
@@ -1110,10 +1128,48 @@ def apply_warp(img: Image.Image, params: dict[str, Any]) -> Image.Image:
     return out
 
 
+def span_degrees(cameras: list[Any], widths: list[int]) -> float | None:
+    """How far across the pictures of ``cameras`` reach, degrees of turn, a full turn at most.
+
+    Each picture covers the headings, round the vertical, between the rays through its
+    left and right edges at the height of its middle (the principal point). The span
+    is the full turn less the widest stretch of headings no picture covers. Read along
+    the middle rather than off the warped footprint, which a camera tilted at the sky
+    fans out wider at the top than it saw. ``widths`` are the pictures' widths in the
+    pixels the cameras were solved in. None without cameras.
+    """
+    import numpy as np
+
+    turn = 2 * math.pi
+    arcs: list[tuple[float, float]] = []
+    for cam, width in zip(cameras, widths):
+        to_ray = np.asarray(cam.R, dtype=np.float64) @ np.linalg.inv(np.asarray(cam.K(), dtype=np.float64))
+        left, right = (
+            math.atan2(float(ray[0]), float(ray[2]))
+            for ray in (to_ray @ np.array([x, float(cam.ppy), 1.0]) for x in (0.0, float(width)))
+        )
+        arcs.append((left % turn, left % turn + (right - left) % turn))
+    if not arcs:
+        return None
+    arcs.sort()
+    first = arcs[0][0]
+    reach, gap = first, 0.0
+    # round the circle once from the first picture's left edge, a picture past the
+    # end wrapping back over the start
+    for begin, end in [*arcs, *((b + turn, e + turn) for b, e in arcs)]:
+        if begin >= first + turn:
+            break
+        gap = max(gap, begin - reach)
+        reach = max(reach, end)
+    gap = max(gap, first + turn - reach)
+    return math.degrees(turn - gap)
+
+
 def _rotation_place(cv2, arrays: list[Any], feats: list[Any], pairwise: list[Any], keep: list[int], warp: str):
     """Solve the cameras of the group ``keep`` and warp it: ``(quads, remaps, dropped,
-    off)``, quads in warp pixels, ``off`` the dropped pieces whose projection failed.
-    Raises RuntimeError when the group does not solve."""
+    off, span)``, quads in warp pixels, ``off`` the dropped pieces whose projection
+    failed, ``span`` the angle across the pieces placed (:func:`span_degrees`). Raises
+    RuntimeError when the group does not solve."""
     import numpy as np
 
     count = len(arrays)
@@ -1157,7 +1213,9 @@ def _rotation_place(cv2, arrays: list[Any], feats: list[Any], pairwise: list[Any
             continue
         quads[idx] = quad
         remaps[idx] = _remap_params(warp, cameras[pos], scale, (src_w, src_h), gains[pos])
-    return quads, remaps, dropped, off
+    placed = [pos for pos, idx in enumerate(keep) if idx in quads]
+    span = span_degrees([cameras[pos] for pos in placed], [arrays[keep[pos]].shape[1] for pos in placed])
+    return quads, remaps, dropped, off, span
 
 
 def solve_rotation_layout(
@@ -1172,12 +1230,14 @@ def solve_rotation_layout(
     """Solve a panorama layout under the rotation model — geometry *and* a remap.
 
     Returns ``{"quads": {index: quad}, "remaps": {index: params}, "dropped": [...],
-    "why": [...], "canvas": {"width", "height"}}``. Each quad is the upright
-    rectangle the piece's remapped pixels fill, in canvas pixels; each remap is the
-    op that produces those pixels from the piece's recipe. ``dropped`` holds the
-    pieces no trusted match reached — the caller leaves them untouched, ``why``
+    "why": [...], "canvas": {"width", "height"}, "span_deg"}``. Each quad is the
+    upright rectangle the piece's remapped pixels fill, in canvas pixels; each remap
+    is the op that produces those pixels from the piece's recipe. ``dropped`` holds
+    the pieces no trusted match reached — the caller leaves them untouched, ``why``
     says why each was, and ``canvas`` sizes the answer, all exactly as in
     :func:`solve_layout`. ``sources`` and ``exclude`` are read as there too.
+    ``span_deg`` is how far across the placed pieces reach, degrees of the camera's
+    turn (:func:`span_degrees`).
     """
     if len(images) < 2:
         raise ValueError("auto-stitch needs at least two pieces")
@@ -1205,7 +1265,7 @@ def solve_rotation_layout(
         # every pair, the ones matched above kept rather than matched twice
         pairwise, keep = _match_component(cv2, feats, before=pairwise)
         placed = _rotation_place(cv2, arrays, feats, pairwise, keep, warp)
-    quads, remaps, dropped, off = placed
+    quads, remaps, dropped, off, span = placed
 
     if not quads:
         raise RuntimeError("auto-stitch could not place any piece")
@@ -1225,6 +1285,7 @@ def solve_rotation_layout(
         "dropped": sorted(dropped),
         "why": _why_left_out(dropped, [len(ft.keypoints) for ft in feats], off),
         "canvas": {"width": canvas[0], "height": canvas[1]},
+        "span_deg": None if span is None else round(span, 1),
     }
 
 

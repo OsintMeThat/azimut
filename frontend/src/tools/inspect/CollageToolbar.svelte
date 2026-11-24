@@ -3,7 +3,8 @@
   import { pinholeOps, stitchCanvas } from '../../lib/inspect.js';
   import { BRUSH_MAX, BRUSH_MIN, excludeRequest } from '../../lib/excludeBrush.js';
   import { LEVEL_MIN_POINTS } from '../../lib/straighten.js';
-  import { cutOf, cutStart } from '../../lib/collageCut.js';
+  import { cutOf, cutStart, sameCut, trimFrame } from '../../lib/collageCut.js';
+  import { loadImage } from '../../lib/collageThumb.js';
   import { stitchedWords } from '../../lib/leftOut.js';
   import { api } from '../../lib/api.js';
   import { caseState, toast } from '../../lib/state.svelte.js';
@@ -13,7 +14,7 @@
   // The bar over the canvas, for what acts on the whole collage: Auto-stitch places
   // the pieces by the imagery they share, Ignore areas paints what it must not match
   // on, Straighten bends the collage along a level line, Cut frames the picture it
-  // saves, and Fit shows the pieces whole. The piece in hand has its own block in the panel.
+  // saves (Trim edges cuts off a panorama's empty corners), and Fit shows the pieces whole. The piece in hand has its own block in the panel.
   // `level` is the line the canvas draws to straighten the collage by, `straighten` what
   // bends the collage along it; `view` is the canvas's zoom and pan, `fit` what fits it
   // to the pieces and `fitted` whether it does. `brush` is the canvas's brush, `{ on,
@@ -103,21 +104,32 @@
     await Promise.all(Array.from({ length: Math.min(at, queue.length) }, next));
   }
 
-  async function autoStitch() {
-    if (few) return;
+  const autoStitch = () => runStitch(mode);
+
+  /**
+   * Collage's Panorama stitches its frames as the button would, in the projection picked
+   * last unless that is Planar, which a pan breaks, so then Cylindrical. `note` rides on
+   * the message after what the stitch says, and `undoAll` is its Undo, which takes the
+   * frames back with their stitch. Answers how many pieces moved, or null.
+   */
+  export function stitchPan(note = null, undoAll = null) {
+    return runStitch(mode === 'planar' ? 'cylindrical' : mode, note, undoAll);
+  }
+
+  async function runStitch(asked, note = null, undoAll = null) {
+    if (few || stitching) return null;
     stitching = true;
     if (cut) cut.editing = false;
     // the whole stitch is one undo, however many steps its pieces come back in
     const release = hold?.();
     try {
       const nodes = active.nodes;
-      const asked = mode;
       const before = { nodes: nodes.map(snapshot), width: active.width, height: active.height, clip: active.clip ?? null };
       const exclude = excludeRequest(nodes);
       const res = await api.post(`/api/cases/${caseState.current.id}/inspect/auto-stitch`, {
         width: active.width,
         height: active.height,
-        mode,
+        mode: asked,
         // frozen snapshot recipes (path/time/ops), stripped back to pinhole pixels
         nodes: nodes.map((n) => ({ ...n.save, ops: pinholeOps(n.save) })),
         // the areas painted out of a piece's matching, sent only when a piece has some
@@ -152,10 +164,13 @@
       selectedIds = left.map((piece) => piece.id);
       fit?.();
       // The undo rides on the message, and stays in the arrow's menu after it goes.
-      const undo = { label: 'Undo', onClick: undoStitch };
-      toast(stitchedWords(res.nodes.length, left.map((piece) => piece.why), asked), left.length ? 'warn' : 'ok', null, undo);
+      const undo = { label: 'Undo', onClick: undoAll ?? undoStitch };
+      const words = stitchedWords(res.nodes.length, left.map((piece) => piece.why), asked, res.span_deg ?? null);
+      toast(note ? `${words}. ${note.replace(/\.$/, '')}` : words, left.length ? 'warn' : 'ok', null, undo);
+      return res.nodes.length;
     } catch (e) {
       toast(e.message, 'danger');
+      return null;
     } finally {
       stitching = false;
       release?.();
@@ -213,6 +228,67 @@
   function clearCut() {
     active.clip = null;
     cut.editing = false;
+  }
+
+  // Trim edges cuts to the largest frame the pieces fill (lib/collageCut.js). It is read
+  // again a moment after the layout settles, from the pictures already on screen, so the
+  // press can say beforehand when there is nothing to trim.
+  const TRIM_SETTLE = 250;
+  const pictures = new Map();
+  function picture(url) {
+    if (!pictures.has(url)) pictures.set(url, loadImage(url));
+    return pictures.get(url);
+  }
+  const layoutKey = $derived(
+    active ? JSON.stringify(active.nodes.map((n) => [n.id, n.url ?? null, !!n.missing, n.quad])) : '',
+  );
+  const piecesIn = $derived(!!active?.nodes.length && active.nodes.every((n) => n.url || n.missing));
+  const piecesNow = () =>
+    active.nodes.map((n) => ({
+      id: n.id, url: n.url, w: n.w, h: n.h, missing: !!n.missing, quad: n.quad.map(([x, y]) => [x, y]),
+    }));
+  let filled = $state({ key: null, frame: null });
+  $effect(() => {
+    const key = layoutKey;
+    if (!piecesIn) return;
+    const nodes = untrack(piecesNow);
+    // only the pictures of the pieces still on the canvas are kept
+    const urls = new Set(nodes.map((n) => n.url));
+    for (const url of [...pictures.keys()]) if (!urls.has(url)) pictures.delete(url);
+    const timer = setTimeout(() => {
+      trimFrame(nodes, { load: picture })
+        .catch(() => null)
+        .then((frame) => {
+          if (key === layoutKey) filled = { key, frame };
+        });
+    }, TRIM_SETTLE);
+    return () => clearTimeout(timer);
+  });
+  // what the press would keep, or why it rests
+  const trim = $derived.by(() => {
+    if (!active?.nodes.length) return { why: 'Add a piece first' };
+    if (!piecesIn || filled.key === null) return { why: 'Reading the pieces' };
+    if (!filled.frame) return { why: 'No part of the collage is filled' };
+    const clip = cutOf(filled.frame, active.nodes);
+    return sameCut(clip, active.clip) ? { why: 'No empty edge left to trim' } : { clip };
+  });
+  let trimming = $state(false);
+  async function trimEdges() {
+    if (trim.why || trimming) return;
+    trimming = true;
+    // one undo, the layout read again first if it moved since
+    const release = hold?.();
+    try {
+      const frame = filled.key === layoutKey ? filled.frame : await trimFrame(piecesNow(), { load: picture });
+      const clip = frame ? cutOf(frame, active.nodes) : null;
+      if (frame && !sameCut(clip, active.clip)) active.clip = clip;
+      if (cut) cut.editing = false;
+    } catch (e) {
+      toast(e.message, 'danger');
+    } finally {
+      trimming = false;
+      release?.();
+    }
   }
 
   // ---- the areas a stitch must not match on ----------------------------------
@@ -392,6 +468,15 @@
           aria-label="Cut"
         >
           <Icon name="scissors" size={13} /> <span class="words">Cut</span>
+        </button>
+        <button
+          class="btn btn-sm"
+          disabled={!!trim.why || trimming}
+          onclick={trimEdges}
+          title={trim.why ?? 'Cut to the largest frame the pieces fill'}
+          aria-label="Trim edges"
+        >
+          <Icon name="crop" size={13} /> <span class="words">Trim edges</span>
         </button>
       {/if}
       {#if active?.clip}

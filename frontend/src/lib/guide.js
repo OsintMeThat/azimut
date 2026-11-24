@@ -337,7 +337,7 @@ export const PAGES = {
     shot: 'collage',
     marks: [
       { anchor: 'collage.canvas', title: 'The canvas', text: 'Scroll to zoom, pull a corner to warp a piece, Shift-click to select several.' },
-      { anchor: 'collage.add', title: 'Add pieces', text: 'Frames cut in Inspect and the case’s images.' },
+      { anchor: 'collage.add', title: 'Add pieces', text: 'A video plays in a rail under the canvas, and the case’s images go on in one press.' },
       { anchor: 'collage.arrange', title: 'Auto-stitch', text: 'Stitches overlapping pieces into one picture, and its arrow picks planar, cylindrical or spherical.' },
       {
         anchor: 'collage.straighten',
@@ -352,6 +352,7 @@ export const PAGES = {
       { anchor: 'collage.save', title: 'Save to case', text: 'One press files the collage as media at full resolution, and its arrow sets the name, folder and note.' },
     ],
     tips: [
+      { title: 'A panorama from a pan', text: 'Set A and B around the pan in the video rail, and Panorama picks the frames and stitches them.' },
       { title: 'A document of its own', text: 'Each collage keeps its layout, so it reopens from the Collage tab and edits.' },
       { title: 'The seams hold', text: 'Straighten bends the whole collage without opening its seams.' },
       { title: 'Never over the last one', text: 'A new export is filed beside the previous one rather than replacing it.' },

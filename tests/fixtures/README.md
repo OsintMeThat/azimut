@@ -103,3 +103,14 @@ ends on its own section while the document prints the generated list.
 Read by `tests/test_notes_footnotes.py` against the parser and `notetext.footnote_spans`, and
 by `frontend/src/lib/notes/footnotes.test.js` against `findFootnotes`, so the Notebook draws a
 letter exactly where every document prints one.
+
+## Collage seams
+
+| File | What it is there to break |
+|---|---|
+| `collage-seams.json` | Where stitched pieces meet: a pan of three frames at three heights with a picture laid by hand among them, and a frame drawn three times larger over one whose corners its warp left empty. Each stitched piece's cell, and points naming the piece the saved picture shows there, the one plain stacking showed and the cell's owner. |
+
+Written by `tests/seamscene.py`, which works each point out from the rule one at a time, and
+compared by `tests/test_collage_seams.py`, which also composes the pictures and reads the
+colours back. `frontend/src/lib/seams.test.js` checks the canvas hides the same parts of each
+piece. `AZIMUT_WRITE_GOLDEN=1` rewrites it, and only a change meant to move a seam should.

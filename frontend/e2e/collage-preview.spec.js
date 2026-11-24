@@ -128,11 +128,11 @@ test('closes an open collage back to the list', async ({ page }) => {
 });
 
 test('keeps the controls in reach over a case of many files', async ({ page }) => {
-  const works = Array.from({ length: 40 }, (_, i) => ({
-    name: `clip-${i}`, title: `clip_${String(i).padStart(2, '0')}_8f3a.mp4`, source: `media/clip-${i}.mp4`, frames: 3, kind: 'video',
+  const videos = Array.from({ length: 40 }, (_, i) => ({
+    path: `media/clip-${i}.mp4`, filename: `clip_${String(i).padStart(2, '0')}_8f3a.mp4`, kind: 'video', source: { type: 'upload' }, thumbnail: null,
   }));
   await installAppFixture(page, {
-    inspectWorks: works,
+    media: [{ path: PANEL_PATH, filename: 'panel.svg', kind: 'image', source: { type: 'upload' }, thumbnail: null }, ...videos],
     collages: [{ name: 'Strip', title: 'Strip', pieces: 1, updated_at: '2026-09-20T10:00:00Z', outline: null }],
   });
   await page.route(`**/api/cases/${CASE_ID}/collages/Strip`, (route) => route.fulfill({ json: strip }));

@@ -5,6 +5,7 @@
  * kept on the collage as `clip` (engine/inspectwork.py checks it).
  */
 import { quadsBounds } from './inspect.js';
+import { loadImage, paintCollage } from './collageThumb.js';
 
 /** The smallest side a frame keeps, in screen pixels, so its handles never meet. */
 export const CUT_MIN_SCREEN = 24;
@@ -111,4 +112,108 @@ export function cutOf(frame, nodes) {
 /** The four corners of a frame, as a quad (TL, TR, BR, BL). */
 export function frameQuad({ x, y, w, h }) {
   return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+}
+
+/** Whether two cuts keep the same frame, to a hundredth of a pixel; no cut is one too. */
+export function sameCut(a, b) {
+  if (!a || !b) return !a && !b;
+  return ['x', 'y', 'w', 'h'].every((k) => Math.abs(a[k] - b[k]) < 0.01);
+}
+
+// -- trimming the empty edges -------------------------------------------------------
+// A panorama leaves its corners empty. Trim cuts the collage to the largest frame its
+// pieces fill: they are painted as drawn, at most `TRIM_EDGE` cells a side, and read back.
+
+/** The longest side, in cells, the pieces are read at. */
+export const TRIM_EDGE = 512;
+/** The cover, of 255, a cell counts as filled from: a seam between two triangles of a warped piece reaches it. */
+const FILLED = 250;
+
+/**
+ * Which cells of a `cols` × `rows` picture (its RGBA bytes, row by row) the pieces fill:
+ * filled themselves, and every neighbour within the grid too, as a cell beside an empty
+ * one may be read fuller than it is. The grid's own sides are the pieces' bounds, exact.
+ */
+export function filledCells(rgba, cols, rows) {
+  const full = new Uint8Array(cols * rows);
+  for (let i = 0; i < cols * rows; i += 1) full[i] = rgba[i * 4 + 3] >= FILLED ? 1 : 0;
+  const out = new Uint8Array(cols * rows);
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = 0; x < cols; x += 1) {
+      let ok = full[y * cols + x] === 1;
+      for (let dy = -1; ok && dy <= 1; dy += 1) {
+        for (let dx = -1; ok && dx <= 1; dx += 1) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx >= 0 && ny >= 0 && nx < cols && ny < rows && !full[ny * cols + nx]) ok = false;
+        }
+      }
+      out[y * cols + x] = ok ? 1 : 0;
+    }
+  }
+  return out;
+}
+
+/**
+ * The largest rectangle of filled cells in a `cols` × `rows` grid, `{ x, y, w, h }` in
+ * cells, or null with none. Each row's runs of filled cells down to it make a
+ * histogram, whose largest rectangle one stack reads.
+ */
+export function largestFilled(filled, cols, rows) {
+  const heights = new Int32Array(cols);
+  const stack = new Int32Array(cols + 1);
+  let best = null;
+  let most = 0;
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = 0; x < cols; x += 1) heights[x] = filled[y * cols + x] ? heights[x] + 1 : 0;
+    let top = 0;
+    for (let x = 0; x <= cols; x += 1) {
+      const h = x < cols ? heights[x] : 0;
+      while (top > 0 && heights[stack[top - 1]] >= h) {
+        const tall = heights[stack[top - 1]];
+        top -= 1;
+        const left = top > 0 ? stack[top - 1] + 1 : 0;
+        if (tall * (x - left) > most) {
+          most = tall * (x - left);
+          best = { x: left, y: y - tall + 1, w: x - left, h: tall };
+        }
+      }
+      stack[top] = x;
+      top += 1;
+    }
+  }
+  return best;
+}
+
+const newCanvas = (width, height) => Object.assign(document.createElement('canvas'), { width, height });
+
+/**
+ * The largest frame the pieces fill as drawn, `{ x, y, w, h }` in canvas pixels, or null
+ * when they fill none. `load` turns a piece's address into its picture; `canvas` makes
+ * the small one they are painted on.
+ */
+export async function trimFrame(nodes, { load = loadImage, edge = TRIM_EDGE, canvas = newCanvas } = {}) {
+  const box = piecesFrame(nodes);
+  if (!box || !(box.w > 0) || !(box.h > 0)) return null;
+  const s = Math.min(1, edge / Math.max(box.w, box.h));
+  const cols = Math.max(1, Math.round(box.w * s));
+  const rows = Math.max(1, Math.round(box.h * s));
+  const images = new Map();
+  await Promise.all(
+    nodes.filter((n) => n.url && !n.missing).map(async (n) => {
+      const image = await load(n.url);
+      if (image) images.set(n.id, image);
+    }),
+  );
+  const ctx = canvas(cols, rows).getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.imageSmoothingQuality = 'high';
+  const frame = { minX: box.x, minY: box.y, scale: cols / box.w, scaleY: rows / box.h, width: cols, height: rows };
+  // what the pieces cover does not hang on where they meet
+  paintCollage(ctx, nodes, images, frame, { seams: false });
+  const cells = largestFilled(filledCells(ctx.getImageData(0, 0, cols, rows).data, cols, rows), cols, rows);
+  if (!cells) return null;
+  const kx = box.w / cols;
+  const ky = box.h / rows;
+  return { x: box.x + cells.x * kx, y: box.y + cells.y * ky, w: cells.w * kx, h: cells.h * ky };
 }
