@@ -500,3 +500,17 @@ describe('a GIF on a step', () => {
     expect(document.body.querySelector('[aria-label="About it"]').title).toContain('A GIF plays round and round');
   });
 });
+
+describe('the fields each written element asks', () => {
+  it('asks a timeline none of the text, label or credits fields, as it never did', () => {
+    show({ kind: 'timeline' });
+    expect(document.body.querySelector('[aria-label="Text role"]')).toBeNull();
+    expect(document.body.querySelector('[aria-label="Credits printed"]')).toBeNull();
+    // a text still asks its role, and credits their list once there is one
+    unmount(held);
+    held = null;
+    document.body.innerHTML = '';
+    show({ kind: 'text' });
+    expect(document.body.querySelector('[aria-label="Text role"]')).not.toBeNull();
+  });
+});

@@ -656,7 +656,6 @@
         {#if plain.hidden_names?.length}
           <p class="note hidden-names">Hidden: {plain.hidden_names.join(', ')}. <button type="button" class="text-act"
             onclick={() => (element.plain = { ...plain, hidden_names: [] })}>Show them again</button></p>
-        {:else}
         {/if}
         <button type="button" class="text-act" aria-expanded={colouring} onclick={() => (colouring = !colouring)}>
           {colouring ? 'Hide the colours' : 'Change the colours'}{Object.keys(plain.colours ?? {}).length ? ' · changed' : ''}</button>
@@ -765,7 +764,6 @@
           <button type="button" class="icon-act small" aria-label={`Remove ${entry.said}`} title="Remove the row"
             onclick={() => (entry.extra ? (element.extra = element.extra.filter((_, index) => `extra/${index}` !== entry.key)) : toggleRow(entry.key))}><Icon name="x" size={11} /></button>
         </div>
-      {:else}
       {/each}
       {#if rowsOf.some((entry) => entry.off)}
         <details class="removed">
@@ -810,8 +808,7 @@
         </div>
       {:else if element.kind === 'key'}
         <div class="rows"><span class="key">Title</span><input aria-label="List title" placeholder="No title" maxlength="120" bind:value={element.text} /></div>
-      {:else if element.kind === 'timeline'}
-      {:else if element.kind !== 'credits'}
+      {:else if element.kind === 'text' || element.kind === 'label'}
         {#if element.kind === 'text'}
           <div class="rows">
             <span class="key">Style</span>
@@ -831,7 +828,7 @@
             {/each}
           </div>
         {/if}
-      {:else}
+      {:else if element.kind === 'credits'}
         {#if creditList.length}
           <ul class="credit-list" aria-label="Credits printed">
             {#each creditList as part (part.text)}
