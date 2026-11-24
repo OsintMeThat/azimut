@@ -20,7 +20,9 @@
   import { takeCandidate } from './handoff.js';
   import { recipeCapability } from '../../lib/map/analyzerRules.js';
   import { containsPoint } from '../../lib/measure.js';
-  import { detectionsWithRuns, isActive, plural } from '../../lib/map/detections.js';
+  import { detectionsWithRuns, isActive, passCount, plural } from '../../lib/map/detections.js';
+  import { SPOT_RADIUS, buildSeries, inBatches, spotPicks } from '../../lib/map/detectSeries.js';
+  import CatchUp from './CatchUp.svelte';
   import AnalyzerLibrary from './AnalyzerLibrary.svelte';
   import DetectDetection from './DetectDetection.svelte';
   import DetectHome from './DetectHome.svelte';
@@ -61,6 +63,10 @@
     focusedRunId = $bindable(null),
     /** Every watched area of the case, for the map to draw while the list is up. */
     areaGroups = $bindable([]),
+    /** The spots of the routine whose dashboard is open, for the map to ring, and the one picked. */
+    spots = $bindable([]),
+    spotRadius = $bindable(SPOT_RADIUS),
+    selectedSpot = $bindable(null),
     /** The areas the pointer is on, drawn heavier on the map. */
     highlight = $bindable([]),
     /** A saved item to open (`runs-<id>`, `followups-<id>`, `zones-<id>`). */
@@ -148,7 +154,20 @@
   /** The routine being looked at: its saved body and what it has found. */
   let detectionId = $state(null);
   let detail = $state(null);
-  let findings = $state([]);
+  /** The routine's finished runs as the server reads them together (`engine.series`), or null. */
+  let seriesRows = $state(null);
+  /** Its dashboard window, and how it is looked at, kept while a run of it is opened and closed. */
+  let dashboardOpen = $state(false);
+  /** A run opened from the dashboard: Back to the routine opens the window again. */
+  let reopenDashboard = false;
+  let routineTab = $state('overview');
+  let seriesMode = $state('total');
+  let seriesOnly = $state(null);
+  let spotFilter = $state('all');
+  /** The catch-up list, open over the routine's page. */
+  let catching = $state(false);
+  /** Spots waiting for a yes before their candidates are dismissed. */
+  let dismissing = $state(null);
   let current = $state(null);
   let candidateId = $state(null);
   let busy = $state(false);
@@ -249,7 +268,7 @@
     loadedCase = id; generation++;
     untrack(() => {
       current = null; candidateId = null; draft = null;
-      detectionId = null; detail = null; findings = [];
+      detectionId = null; detail = null; seriesRows = null; catching = false; dismissing = null;
       if (switching) {
         layers = []; zones = []; selectedZone = null; drawing = 'select'; view = 'home';
       }
@@ -339,7 +358,7 @@
     view = 'home';
     draft = null;
     launch = null;
-    detectionId = null; detail = null; findings = [];
+    detectionId = null; detail = null; seriesRows = null; catching = false; dashboardOpen = false;
     zones = []; selectedZone = null; drawing = 'select';
   }
 
@@ -358,11 +377,18 @@
 
   async function openDetection(id) {
     const epoch = generation;
-    const [body, found] = await Promise.all([
-      api.get(`${base()}/followups/${id}`), api.get(`${base()}/followups/${id}/findings`),
+    const [body, rows] = await Promise.all([
+      api.get(`${base()}/followups/${id}`), api.get(`${base()}/followups/${id}/series`),
     ]);
     if (epoch !== generation) return;
-    detectionId = id; detail = body; findings = found;
+    // another routine is looked at afresh; the same one keeps its tab, filters and spot
+    if (detectionId !== id) {
+      routineTab = 'overview'; seriesMode = 'total'; seriesOnly = null; spotFilter = 'all'; selectedSpot = null;
+      reopenDashboard = false;
+    }
+    dashboardOpen = reopenDashboard;
+    reopenDashboard = false;
+    detectionId = id; detail = body; seriesRows = rows; catching = false;
     zones = [];
     draft = null;
     view = 'detection';
@@ -451,6 +477,7 @@
 
   function back() {
     if (launch) { launch = null; onleavepass(); return; }
+    if (catching) { catching = false; onleavepass(); return; }
     if (view === 'library') {
       view = libraryFrom === 'new' && draft ? 'new' : libraryFrom === 'detection' && detection ? 'detection' : 'home';
       return;
@@ -592,6 +619,16 @@
     await refreshRuns(caseId);
   }
 
+  /** Stop a routine's runs, a whole catch-up at once: the waiting ones first, so none starts meanwhile. */
+  async function cancelRuns(list) {
+    const ordered = [...list].sort((one, two) => (one.status === 'running') - (two.status === 'running'));
+    for (const run of ordered) {
+      const answer = await api.post(`${base()}/runs/${run.id}/cancel`, {});
+      if (current?.id === run.id) acceptRun(answer);
+    }
+    await refreshRuns(caseId);
+  }
+
   // A routine or a pass goes to the Trash in one press, unless something else in the
   // case leans on it: then the dialog says what first.
   let removing = $state(null); // { kind, row, target } while that dialog is up
@@ -617,7 +654,80 @@
   async function afterVerdict(run) {
     acceptRun(run);
     if (!detectionId) return;
-    findings = await api.get(`${base()}/followups/${detectionId}/findings`);
+    await reloadSeries();
+  }
+
+  async function reloadSeries(id = detectionId) {
+    if (!id) return;
+    const epoch = generation;
+    const rows = await api.get(`${base()}/followups/${id}/series`);
+    if (epoch === generation && detectionId === id) seriesRows = rows;
+  }
+
+  const series = $derived(seriesRows ? buildSeries(seriesRows, { radius: spotRadius, only: seriesOnly }) : null);
+
+  // A run of the open routine that settles changes its series: read it again then.
+  const settled = $derived(detection ? detection.history.filter((run) => run.status === 'ready')
+    .map((run) => `${run.id}:${run.count}:${run.to_review}`).join('|') : '');
+  // what was settled when the routine opened, which its opening already read
+  let seen = { id: null, key: '' };
+  $effect(() => {
+    const key = settled;
+    const id = detectionId;
+    if (!id) return;
+    if (seen.id !== id) { seen = { id, key }; return; }
+    if (key === seen.key) return;
+    seen = { id, key };
+    untrack(() => void reloadSeries(id).catch((e) => (error = e.message)));
+  });
+
+  // The map rings the spots while the dashboard shows them, and nothing of them otherwise.
+  $effect(() => {
+    spots = view === 'detection' && !catching && series ? series.spots : [];
+  });
+
+  /** One verdict for every candidate of these spots; dismissing asks first. */
+  function judge(list, review) {
+    if (review === 'dismissed') { dismissing = list; return; }
+    void act(() => applyVerdict(list, review));
+  }
+
+  async function applyVerdict(list, review) {
+    const results = list.flatMap(spotPicks);
+    if (!results.length || !detectionId) return;
+    // the server takes so many candidates a request, so a whole filter goes in a few
+    const answer = { changed: 0, pinned: 0 };
+    for (const part of inBatches(results)) {
+      const done = await api.post(`${base()}/followups/${detectionId}/review`, { review, results: part });
+      answer.changed += done.changed ?? 0; answer.pinned += done.pinned ?? 0;
+    }
+    await Promise.all([reloadSeries(), refreshRuns(caseId)]);
+    const said = review === 'dismissed' ? 'dismissed' : 'kept here';
+    toast(`${plural(answer.changed, 'candidate')} ${said}${answer.pinned ? `; ${answer.pinned} pinned left as they are` : ''}`, 'ok');
+    if (review === 'dismissed' && list.some((spot) => spot.id === selectedSpot)) selectedSpot = null;
+  }
+
+  /** Open the run a spot was seen on, at that candidate, with the map on it. */
+  function openSpot(spot, member, { reopen = false } = {}) {
+    reopenDashboard = reopen;
+    selectedSpot = spot.id;
+    onfocus(member.result.coordinates);
+    void act(() => openRun(member.runId, member.result.id));
+  }
+
+  async function queueCatchUp(passes) {
+    if (!detectionId) return;
+    const answer = await api.post(`${base()}/followups/${detectionId}/catch-up`, { passes });
+    catching = false; onleavepass();
+    await refreshRuns(caseId);
+    if (answer.queued.length) toast(`${passCount(answer.queued.length)} queued, oldest first. The top bar follows them.`, 'ok', 6000);
+    if (answer.skipped.length) toast(answer.skipped.map((row) => row.message).join(' · '), 'info', 8000);
+  }
+
+  /** The spot pressed on the map, summed up in the column. */
+  export function pickSpot(id) {
+    collapsed = false;
+    selectedSpot = id;
   }
 
   export async function addManual(geometry) {
@@ -732,7 +842,7 @@
       <button class="cmp-icon" aria-label="Back" title="Back" onclick={back}>
         <Icon name="chevronLeft" size={15} />
       </button>
-      <strong>{launch ? `Run ${launch.title}` : view === 'new' ? kindTitle : view === 'detection' ? 'Routine' : TITLES[view]}</strong>
+      <strong>{launch ? `Run ${launch.title}` : catching && view === 'detection' ? 'Catch up' : view === 'new' ? kindTitle : view === 'detection' ? 'Routine' : TITLES[view]}</strong>
     </header>
   {/if}
 
@@ -778,7 +888,7 @@
         <DetectHome {tab} {routines} passes={runs} methods={catalogue.methods} {busy} bind:layers
           onnew={newDetection}
           onrun={(item) => act(() => prepareLaunch(item))} onrunall={() => act(runAll)}
-          oncancel={(run) => act(() => cancelRun(run))}
+          oncancel={(run) => act(() => cancelRun(run))} oncancelall={(list) => act(() => cancelRuns(list))}
           onopen={(item) => act(() => openDetection(item.id))}
           onopenrun={(run) => act(() => openRun(run.id))}
           oncolour={(group, colour) => act(() => changeRoutineColour(group, colour))}
@@ -794,18 +904,28 @@
     {:else if view === 'detection'}
       <div class="cmp-dock-body-host">
         {#if error}<p class="warn dock-error" role="alert">{error}</p>{/if}
-        {#if detection}
-          <DetectDetection {detection} {detail} {findings} methods={catalogue.methods} {busy}
+        {#if detection && catching}
+          <CatchUp routine={detection} {detail} sensor={detail ? capabilityOf(detail.recipe).sensor : 'sentinel2'}
+            single={!!(detail && capabilityOf(detail.recipe).single)}
+            readDays={(seriesRows ?? []).map((row) => row.dates?.[1]).filter(Boolean)}
+            track={(seriesRows ?? []).at(-1)?.areas?.find((area) => area.time)?.time ?? ''}
+            tiles={detection.history.find((run) => run.status === 'ready')?.total ?? 0}
+            {busy} {onshow} onqueue={(passes) => act(() => queueCatchUp(passes))} />
+        {:else if detection}
+          <DetectDetection {detection} {detail} {series} areas={lists.areas} methods={catalogue.methods} {busy}
+            sensor={detail ? capabilityOf(detail.recipe).sensor : 'sentinel2'}
+            bind:dashboard={dashboardOpen} bind:tab={routineTab} bind:mode={seriesMode} bind:only={seriesOnly} bind:radius={spotRadius}
+            bind:filter={spotFilter} bind:selectedSpot
             onrun={() => act(() => prepareLaunch(detection))}
+            oncatchup={() => { catching = true; }}
             onexport={() => act(() => exportLayer('followups', detection.id))}
-            oncancel={(run) => act(() => cancelRun(run))}
+            oncancel={(list) => act(() => cancelRuns(list))}
             onedit={() => act(() => editDetection(detection.id))}
             ondelete={() => act(() => askRemoveItem('followups', detection))}
-            onopenrun={(run) => act(() => openRun(run.id))}
-            onopenfinding={(row) => act(async () => {
-              onfocus(row.coordinates);
-              await openRun(row.run_id, row.id);
-            })} />
+            onopenrun={(run, { reopen = false } = {}) => { reopenDashboard = reopen; void act(() => openRun(run.id)); }}
+            onopenspot={openSpot}
+            onselectspot={(spot) => onfocus(spot.centre)}
+            onverdict={judge} />
         {:else}
           <div class="cmp-dock-body"><p class="hint">This routine is gone.</p></div>
         {/if}
@@ -837,6 +957,18 @@
   </div>
 </aside>
 
+{#if dismissing}
+  {@const count = dismissing.reduce((sum, spot) => sum + spotPicks(spot).length, 0)}
+  <ConfirmDialog
+    title={dismissing.length === 1 ? `Dismiss ${dismissing[0].id}?` : `Dismiss these ${dismissing.length} spots?`}
+    message={`${plural(count, 'candidate')} leave every pass of this routine. A pin in the case stays.`}
+    detail="A later run can find them again."
+    confirmLabel="Dismiss"
+    icon="x"
+    busy={busy}
+    onconfirm={() => { const list = dismissing; dismissing = null; void act(() => applyVerdict(list, 'dismissed')); }}
+    oncancel={() => (dismissing = null)} />
+{/if}
 {#if removing}
   <ConfirmDialog
     title={removing.kind === 'runs' ? 'Delete this pass?' : 'Delete this routine?'}

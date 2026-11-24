@@ -40,6 +40,9 @@ const settle = async () => { for (let i = 0; i < 120; i++) await Promise.resolve
 const button = (text) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === text);
 const starts = (text) => [...document.querySelectorAll('button')].find((b) => b.textContent.trim().startsWith(text));
 const labelled = (label) => target.querySelector(`button[aria-label="${label}"]`);
+const chip = (text) => [...document.querySelectorAll('.chips .chip')].find((b) => b.textContent.trim().startsWith(text));
+/** The dashboard window, portalled to the page. */
+const board = () => document.querySelector('.dashboard');
 const heading = () => target.querySelector('h3')?.textContent.trim();
 /** Every category of analyzers starts folded; open them all. */
 async function unfold() {
@@ -190,10 +193,18 @@ it('groups the saved runs by routine, and puts one on the map beside its trash',
   await open({ onframe });
   button('Saved').click(); await settle();
   expect([...target.querySelectorAll('.fold .name')].map((node) => node.textContent)).toEqual(['Harbour weekly', 'One passes']);
-  // under its routine a run is told apart by its days, the routine being named above
-  expect(target.textContent).toContain('2026-09-06 · 3 to review');
-  expect(target.textContent).toContain('2026-09-01 → 2026-09-06');
+  // a routine's group opens folded to one line: its last pass, its reference once, what waits
+  const fold = [...target.querySelectorAll('.fold')].find((node) => node.textContent.includes('Harbour weekly'));
+  expect(fold.getAttribute('aria-expanded')).toBe('false');
+  const summary = target.querySelector('.summary');
+  expect(summary.textContent).toContain('Last 6 Sep · 4 candidates');
+  expect(summary.textContent).toContain('against 1 Sep 2026');
+  expect(summary.textContent).toContain('3 to review');
   expect(target.textContent).toContain('Vessels · 1 area');
+  // unfolded, a run is told apart by its day, the routine and its reference being said above
+  fold.click(); await settle();
+  expect(target.querySelector('.day-line').textContent).toContain('6 Sep 2026');
+  expect(target.querySelector('.day-line').textContent).toContain('3 to review of 4');
   // every finished run is on the map from the start, and turns off beside its trash
   const eye = labelled('Hide Port sweep on the map');
   expect(eye.nextElementSibling.getAttribute('aria-label')).toBe('Delete Port sweep');
@@ -203,23 +214,27 @@ it('groups the saved runs by routine, and puts one on the map beside its trash',
   expect(onframe).toHaveBeenCalledWith(area);
   // a routine's runs go off and on together
   labelled('Hide every run of Harbour weekly on the map').click(); await settle();
-  expect(labelled('Show Harbour weekly · 2026-09-01 → 2026-09-06 on the map')).not.toBe(null);
+  expect(labelled('Show Harbour weekly · 2026-09-06 on the map')).not.toBe(null);
   // what was kept goes to the SAT layers from here, a routine's runs into its one layer
   post.mockResolvedValue({});
   labelled('Add Harbour weekly to the SAT layers').click(); await settle();
   expect(post).toHaveBeenCalledWith(`/api/cases/case-a/analysis/followups/${WATCH}/export`, {});
-  labelled('Add Harbour weekly · 2026-09-01 → 2026-09-06 to the SAT layers').click(); await settle();
+  labelled('Add Harbour weekly · 2026-09-06 to the SAT layers').click(); await settle();
   expect(post).toHaveBeenCalledWith(`/api/cases/case-a/analysis/runs/${RUN}/export`, {});
   expect(toast).toHaveBeenCalledWith('Snapshot saved in SAT layers', 'ok');
   // a run with nothing kept has nothing to give a layer, and says so
   const empty = labelled('Add Port sweep to the SAT layers');
   expect(empty.disabled).toBe(true);
   expect(empty.getAttribute('title')).toContain('Keep or pin a candidate first');
-  // and a group folds shut
-  const fold = [...target.querySelectorAll('.fold')].find((node) => node.textContent.includes('Harbour weekly'));
+  // and a group folds shut again
   fold.click(); await settle();
   expect(fold.getAttribute('aria-expanded')).toBe('false');
-  expect(target.textContent).not.toContain('2026-09-06 · 3 to review');
+  expect(target.querySelector('.day-line')).toBe(null);
+  // the summary line opens the routine's dashboard
+  answer({ [`/api/cases/case-a/analysis/followups/${WATCH}`]: watchBody(),
+    '/api/cases/case-a/analysis/followups': [watchRow()], '/api/cases/case-a/analysis/runs': [runRow(), once] });
+  target.querySelector('.summary').click(); await settle();
+  expect(heading()).toBe('Harbour weekly');
 });
 
 it('changes a saved routine colour from its square without folding the group', async () => {
@@ -245,7 +260,9 @@ it('changes a saved routine colour from its square without folding the group', a
   expect(patch).toHaveBeenCalledWith(`/api/cases/case-a/analysis/followups/${WATCH}/colour`,
     { colour: '#22d3ee' });
   expect(target.querySelector('input[aria-label="Colour of Harbour weekly"]').value).toBe('#22d3ee');
-  expect(target.querySelector('.fold[aria-expanded="true"]')).not.toBe(null);
+  // the group stays as it was, folded to its one line
+  expect(target.querySelector('.fold[aria-expanded="false"]')).not.toBe(null);
+  expect(target.querySelector('.summary')).not.toBe(null);
 });
 
 it('changes a one pass colour without changing its recorded analyzer', async () => {
@@ -535,24 +552,55 @@ it('starts every area group folded, hides a whole group at once, and shuts a men
 
 // -- a routine's own page ---------------------------------------------------------
 
-it('opens a routine on what it has found, and runs it again on a chosen pass', async () => {
+const result = (id, coordinates, review = 'new') => ({ id, area_id: 'area', coordinates, review, strength: 'strong',
+  phenomenon: 'Vessel candidate', measure: { value: 6.2 }, area: 90, origin: 'detector', entity_id: null });
+const seriesRun = (id, day, results) => ({ id, title: 'Harbour weekly', created_at: `${day}T10:00:00Z`,
+  dates: ['2026-09-01', day], areas: [{ area_id: 'area', name: 'Area', status: 'ready', a: '2026-09-01', b: day, time: '' }], results });
+const SERIES = [
+  seriesRun('111111111111', '2026-09-06', [result('0-1', [42.95, 14.83], 'noted'), result('0-2', [42.96, 14.81], 'kept')]),
+  seriesRun(RUN, '2026-09-11', [result('1-1', [42.95, 14.83]), result('1-3', [42.97, 14.80])]),
+];
+
+it('opens a routine on a dashboard of its passes, and runs it again on a chosen pass', async () => {
   answer({
     '/api/cases/case-a/analysis/followups': [watchRow()],
     '/api/cases/case-a/analysis/runs': [runRow()],
     [`/api/cases/case-a/analysis/followups/${WATCH}`]: watchBody(),
-    [`/api/cases/case-a/analysis/followups/${WATCH}/findings`]: [finding(), finding({ id: '0-2', review: 'kept' })],
+    [`/api/cases/case-a/analysis/followups/${WATCH}/series`]: SERIES,
   });
   post.mockImplementation(async (path) => (path.endsWith('/acquisitions')
     ? { dates: [{ date: '2026-09-16', cloud: 4, granules: 1, coverage: 1 }], truncated: false }
     : { id: 'fedcba987654', status: 'queued' }));
-  await open();
+  await open({ onfocus: vi.fn() });
   button('Harbour weekly').click(); await settle();
   expect(heading()).toBe('Harbour weekly');
   expect(target.textContent).toContain('Weekly look at the anchorage');
-  // what it has found, across every run, with how each one was kept
-  expect(target.textContent).toContain('Kept here');
-  expect(target.textContent).toContain('Pinned');
-  expect(target.textContent).toContain('Vessel candidate · Strong · 6.2× brighter than the water around it');
+  // the column sums the series up: its passes, candidates, spots and the newest pass
+  expect([...target.querySelectorAll('.figures strong')].map((node) => node.textContent)).toEqual(['2', '4', '3', '2']);
+  expect(target.textContent).toContain('2 to review');
+  expect(target.querySelectorAll('[aria-label="Candidates per pass"] .column')).toHaveLength(2);
+  expect(board()).toBe(null);
+  // and opens the dashboard in a window with room for its charts
+  target.querySelector('.glance .open').click(); await settle();
+  expect([...board().querySelectorAll('.tile .figure')].map((node) => node.textContent)).toEqual(['2', '4', '3', '2']);
+  expect(board().textContent).toContain('Candidates per pass');
+  expect(board().textContent).toContain('Spots that appeared and left');
+  expect(board().textContent).toContain('Spots by kind');
+  board().querySelector('button[aria-label="Close"]').click(); await settle();
+  expect(board()).toBe(null);
+  // a run of it that settles is read into the dashboard, and only then
+  const seriesReads = () => get.mock.calls.filter(([path]) => path.endsWith('/series')).length;
+  expect(seriesReads()).toBe(1);
+  await refreshRuns('case-a'); await settle();
+  expect(seriesReads()).toBe(1);
+  answer({
+    '/api/cases/case-a/analysis/followups': [watchRow()],
+    '/api/cases/case-a/analysis/runs': [runRow(), runRow({ id: 'fedcba987654', dates: ['2026-09-01', '2026-09-16'], created_at: '2026-09-16T10:00:00Z' })],
+    [`/api/cases/case-a/analysis/followups/${WATCH}`]: watchBody(),
+    [`/api/cases/case-a/analysis/followups/${WATCH}/series`]: SERIES,
+  });
+  await refreshRuns('case-a'); await settle();
+  expect(seriesReads()).toBe(2);
 
   // a routine is relaunched against a day, and asks which one
   button('Run routine').click(); await settle();
@@ -561,6 +609,117 @@ it('opens a routine on what it has found, and runs it again on a chosen pass', a
   button('Use').click(); await settle();
   button('Check for new passes').click(); await settle();
   expect(post).toHaveBeenCalledWith(`/api/cases/case-a/analysis/followups/${WATCH}/run`, { area_dates: [expect.objectContaining({ b: expect.objectContaining({ date: '2026-09-16' }) })] });
+});
+
+it('gathers a routine\'s candidates into spots, and judges a spot across its passes at once', async () => {
+  answer({
+    '/api/cases/case-a/analysis/followups': [watchRow()],
+    '/api/cases/case-a/analysis/runs': [runRow()],
+    [`/api/cases/case-a/analysis/followups/${WATCH}`]: watchBody(),
+    [`/api/cases/case-a/analysis/followups/${WATCH}/series`]: SERIES,
+  });
+  post.mockResolvedValue({ changed: 1, pinned: 0 });
+  const props = liveProps({ caseId: 'case-a', onfocus: vi.fn(), spots: [], selectedSpot: null });
+  live = mount(Panel, { target, props });
+  await settle();
+  button('Harbour weekly').click(); await settle();
+  // the map rings the spots while the routine is open
+  expect(props.spots.map((spot) => spot.id)).toEqual(['S1', 'S2', 'S3']);
+  target.querySelector('.glance .open').click(); await settle();
+  [...board().querySelectorAll('[role="tab"]')].find((tab) => tab.textContent.includes('Spots')).click(); await settle();
+  expect(board().textContent).toContain('Same spot within');
+  const rows = board().querySelectorAll('.line.spot');
+  expect(rows).toHaveLength(3);
+  expect(rows[0].textContent).toContain('S1');
+  expect(rows[0].textContent).toContain('2/2');
+  // a filter narrows to its kind and says its rule
+  chip('New').click(); await settle();
+  expect(board().querySelectorAll('.line.spot')).toHaveLength(1);
+  expect(board().textContent).toContain('First seen on the newest pass.');
+  chip('All').click(); await settle();
+  // keeping a spot here reaches each of its candidates still to review, pins left alone
+  board().querySelector('button[aria-label="Keep S1 here"]').click(); await settle();
+  expect(post).toHaveBeenCalledWith(`/api/cases/case-a/analysis/followups/${WATCH}/review`, { review: 'noted',
+    results: [{ run_id: '111111111111', result_id: '0-1' }, { run_id: RUN, result_id: '1-1' }] });
+  expect(toast).toHaveBeenCalledWith('1 candidate kept here', 'ok');
+  // dismissing asks first
+  post.mockClear();
+  board().querySelector('button[aria-label="Dismiss S1"]').click(); await settle();
+  expect(post).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain('Dismiss S1?');
+  button('Dismiss').click(); await settle();
+  expect(post).toHaveBeenCalledWith(`/api/cases/case-a/analysis/followups/${WATCH}/review`, expect.objectContaining({ review: 'dismissed' }));
+  // shown on the map from its row, the window gives way and the column sums it up
+  board().querySelector('button[aria-label="Show S2 on the map"]').click(); await settle();
+  expect(board()).toBe(null);
+  expect(props.selectedSpot).toBe('S2');
+  expect(target.querySelector('.picked').textContent).toContain('S2');
+  // a spot pressed on the map is summed up the same way
+  live.pickSpot('S3'); await settle();
+  expect(props.selectedSpot).toBe('S3');
+  expect(target.querySelector('.picked').textContent).toContain('S3');
+});
+
+it('opens a pass from the dashboard and brings the window back on Back', async () => {
+  const saved = { ...runRow(), engine_version: 2, frames: {}, results: [],
+    input: { title: 'Harbour weekly', zones: area, recipe: structuredClone(vessels), followup_id: WATCH,
+      a: { provider: 'sentinel2', date: '2026-09-01' }, b: { provider: 'sentinel2', date: '2026-09-11' },
+      offline: false, date_rule: 'latest_previous' } };
+  answer({
+    '/api/cases/case-a/analysis/followups': [watchRow()],
+    '/api/cases/case-a/analysis/runs': [runRow()],
+    [`/api/cases/case-a/analysis/followups/${WATCH}`]: watchBody(),
+    [`/api/cases/case-a/analysis/followups/${WATCH}/series`]: SERIES,
+    [`/api/cases/case-a/analysis/runs/${RUN}`]: saved,
+  });
+  await open();
+  button('Harbour weekly').click(); await settle();
+  target.querySelector('.glance .open').click(); await settle();
+  board().querySelectorAll('[aria-label="Candidates per pass"] .column')[1].dispatchEvent(new MouseEvent('click', { bubbles: true })); await settle();
+  expect(board()).toBe(null);
+  expect(get).toHaveBeenCalledWith(`/api/cases/case-a/analysis/runs/${RUN}`);
+  labelled('Back').click(); await settle();
+  expect(board()).not.toBe(null);
+  // a routine opened afresh from the list opens on its column, not the window
+  board().querySelector('button[aria-label="Close"]').click(); await settle();
+  labelled('Back').click(); await settle();
+  button('Routines').click(); await settle();
+  button('Harbour weekly').click(); await settle();
+  expect(heading()).toBe('Harbour weekly');
+  expect(board()).toBe(null);
+});
+
+it('catches a routine up on the passes it missed, one run each, after one catalogue request', async () => {
+  answer({
+    '/api/cases/case-a/analysis/followups': [watchRow({ method: 'surface' })],
+    '/api/cases/case-a/analysis/runs': [runRow({ dates: ['2026-09-01', '2026-09-11'] })],
+    [`/api/cases/case-a/analysis/followups/${WATCH}`]: watchBody({ recipe: structuredClone(recipe),
+      b: { provider: 'sentinel2', date: '', maxcc: 30 } }),
+    [`/api/cases/case-a/analysis/followups/${WATCH}/series`]: SERIES,
+  });
+  post.mockImplementation(async (path) => (path.endsWith('/acquisitions')
+    ? { dates: [{ date: '2026-09-21', cloud: 3, coverage: 1 }, { date: '2026-09-16', cloud: 80, coverage: 1 },
+      { date: '2026-09-11', cloud: 2, coverage: 1 }, { date: '2026-09-08', cloud: 1, coverage: 1 }], truncated: false }
+    : { queued: [{ id: 'a' }, { id: 'b' }], skipped: [] }));
+  await open();
+  button('Harbour weekly').click(); await settle();
+  starts('Catch up').click(); await settle();
+  // nothing is asked of Copernicus before the press
+  expect(post).not.toHaveBeenCalled();
+  button('Look for passes').click(); await settle();
+  expect(post).toHaveBeenCalledWith('/api/satellite/sentinel/acquisitions',
+    expect.objectContaining({ zones: area, start: '2026-09-06' }));
+  // the newer clear pass is ticked; the cloudy one and the gap wait for the analyst
+  const ticked = () => [...target.querySelectorAll('.pass input')].map((box) => box.checked);
+  expect(ticked()).toEqual([true, false, true, false]);
+  expect(target.textContent).toContain('over the 30% cloud limit');
+  expect(target.textContent).toContain('missed between two runs');
+  target.querySelector('input[aria-label="Read 2026-09-08"]').click(); await settle();
+  starts('Read 2 passes').click(); await settle();
+  expect(post).toHaveBeenLastCalledWith(`/api/cases/case-a/analysis/followups/${WATCH}/catch-up`,
+    { passes: [{ date: '2026-09-08' }, { date: '2026-09-21' }] });
+  expect(toast).toHaveBeenCalledWith('2 passes queued, oldest first. The top bar follows them.', 'ok', 6000);
+  expect(heading()).toBe('Harbour weekly');
 });
 
 it('shows the last pass per area and leaves a current routine unqueued', async () => {
@@ -632,8 +791,7 @@ it('lists a routine\'s runs, and opens one on its candidates', async () => {
   });
   await open();
   button('Harbour weekly').click(); await settle();
-  starts('Runs').click(); await settle();
-  starts('2026-09-06 · 3 to review').click(); await settle();
+  starts('6 Sep 2026').click(); await settle();
   expect(target.textContent).toContain('Completed · 1 tile · 2026-09-06');
 });
 

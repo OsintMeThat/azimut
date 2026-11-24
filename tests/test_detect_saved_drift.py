@@ -97,7 +97,8 @@ def test_a_routine_with_dropped_fields_opens_saves_runs_and_remembers(client, sc
     opened = client.get(base + f"/followups/{watch['id']}").json()
     saved = client.put(base + f"/followups/{watch['id']}", json={key: opened[key] for key in WIZARD})
     assert saved.status_code == 200, saved.text
-    assert len(client.get(base + f"/followups/{watch['id']}/findings").json()) == 1
+    [ran] = client.get(base + f"/followups/{watch['id']}/series").json()
+    assert [row["review"] for row in ran["results"]] == ["noted"]
     later = "2026-05-18"
     seed_images({**body, "b": {**body["b"], "date": later}})
     again = client.post(base + f"/followups/{watch['id']}/run", json={"date": later})
