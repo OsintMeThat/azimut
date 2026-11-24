@@ -443,7 +443,7 @@
       </div>
       {#if zones.length >= MAX_AREAS}<p class="hint">{FULL}.</p>{/if}
       {#if drawing !== 'select'}
-        <p class="hint">{drawing === 'polygon' ? 'Click corners on the map; Enter finishes, Escape cancels.' : 'Drag on the map. Escape cancels.'}</p>
+        <p class="hint">{drawing === 'polygon' ? 'Click corners on the map; Enter finishes, Escape cancels.' : 'Click two corners on the map, or drag. Escape cancels.'}</p>
       {:else if !zones.length}
         <p class="hint">{areas.length ? 'Tick saved areas above, draw on the map, or take the current view.' : 'Draw on the map, or take the current view.'}</p>
       {/if}

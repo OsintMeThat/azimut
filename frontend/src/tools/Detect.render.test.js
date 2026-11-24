@@ -603,7 +603,7 @@ describe('Detect', () => {
     expect(ruler.getAttribute('aria-pressed')).toBe('false');
     ruler.click(); flushSync();
     expect(ruler.getAttribute('aria-pressed')).toBe('true');
-    expect(target.textContent).toContain('Drag from one end to the other');
+    expect(target.textContent).toContain('Click one end, then the other');
     const canvas = drawingCanvas();
     press(canvas, 'pointerdown', 40, 14);
     press(canvas, 'pointermove', 43, 14);
@@ -621,6 +621,36 @@ describe('Detect', () => {
     expect(ruler.getAttribute('aria-pressed')).toBe('true');
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); flushSync();
     expect(ruler.getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('measures with two clicks, and drops the first end when the ruler is put down', async () => {
+    await open();
+    const ruler = labelled('Measure');
+    ruler.click(); flushSync();
+    const canvas = drawingCanvas();
+    press(canvas, 'pointerdown', 40, 14);
+    press(canvas, 'pointerup', 40, 14);
+    flushSync();
+    expect(target.textContent).toContain('Click the far end');
+    expect(ruler.getAttribute('aria-pressed')).toBe('true');
+    press(canvas, 'pointermove', 42, 14);
+    press(canvas, 'pointerdown', 42, 14);
+    flushSync();
+    expect(target.querySelector('.annotation-canvas .mark text')?.textContent).toMatch(/^\d+(\.\d)? km$/);
+    expect(ruler.getAttribute('aria-pressed')).toBe('false');
+    press(canvas, 'pointerup', 42, 14);
+    flushSync();
+
+    // a first end left down goes with the ruler, and the next pick starts clean
+    ruler.click(); flushSync();
+    press(drawingCanvas(), 'pointerdown', 40, 16);
+    press(drawingCanvas(), 'pointerup', 40, 16);
+    flushSync();
+    expect(target.textContent).toContain('Click the far end');
+    labelled('Stop measuring').click(); flushSync();
+    expect(target.querySelectorAll('.annotation-canvas .mark text')).toHaveLength(1);
+    ruler.click(); flushSync();
+    expect(target.textContent).toContain('Click one end, then the other');
   });
 
   it('starts a measure on the right-clicked point, finished by the next click', async () => {

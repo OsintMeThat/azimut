@@ -1,7 +1,7 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import {
-    ANGLED, STAMPED, canTurn, glyphBox, glyphParts, isModelMark, markCentre, markLabel, markSize, markTop,
+    ANGLED, ANNOTATION_TOOLS, STAMPED, canTurn, glyphBox, glyphParts, isModelMark, markCentre, markLabel, markSize, markTop,
     modelMarkup, movedMark, nextMarkNumber, onSide, projectMark, screenHeading, stampInk, turnedMark,
   } from '../../lib/map/compareAnnotations.js';
   import { isModel } from '../../lib/icons/catalog.js';
@@ -14,7 +14,7 @@
     tool = $bindable('select'), selectedId = $bindable(null), colour = '#f6a81a',
     strokeWidth = 4, fillOpacity = 0, annotationSide = 'both', glyph = 'point',
     stampSize = 16, editVertices = false, edgeOnly = false, bearing = 0, turnable = false,
-    onchange = () => {} } = $props();
+    trailing = $bindable(false), onchange = () => {} } = $props();
   let svg = $state();
   let revision = $state(0);
   let draft = $state(null);
@@ -27,6 +27,10 @@
 
   /** Below this, a pointer press is a click: a shape is picked, never nudged. */
   const DRAG_SLOP = 4;
+  // A shape of two points is dragged out, or clicked at both ends: a press that
+  // never travels leaves its first end down and the next click sets the other,
+  // as Satellite's ruler does, rather than throwing the tool away.
+  const TWO_POINTS = new Set(ANNOTATION_TOOLS.filter((item) => item.points === 2).map((item) => item.id));
   // A note is a single anchor and a freehand stroke is hundreds of them, so
   // neither gains anything from grips: one is already dragged whole, the other
   // would be buried under its own handles.
@@ -94,6 +98,16 @@
   const pathOf = (shape) => shape.path.map(([x, y], i) => `${i ? 'L' : 'M'}${x},${y}`).join(' ') + (shape.closed ? ' Z' : '');
   const relay = (event) => relayWheel(event, { engine, root: svg });
 
+  // A shape half drawn belongs to the tool that started it: putting that tool
+  // down from outside (its button, a key, another tool taken up) drops the
+  // shape rather than leaving it trailing after the pointer.
+  $effect(() => {
+    const kind = tool;
+    untrack(() => {
+      if (draft && draft.kind !== kind) { draft = null; gesture = null; trailing = false; }
+    });
+  });
+
   function point(event) {
     const box = svg?.getBoundingClientRect();
     if (!box?.width || !engine) return null;
@@ -140,6 +154,7 @@
     if (STAMPED.has(tool)) { stamp(at); return; }
     draft = makeMark([at, at]);
     gesture = { kind: 'trail', start: at };
+    trailing = true;
   }
 
   /** The trailing end is set: keep the mark if it spans more than a click. */
@@ -152,6 +167,7 @@
     }
     draft = null;
     gesture = null;
+    trailing = false;
     tool = 'select';
   }
 
@@ -243,6 +259,11 @@
       if (Math.hypot(last[0] - first[0], last[1] - first[1]) >= 3) {
         onchange([...annotations, draft], true);
         selectedId = draft.id;
+      } else if (TWO_POINTS.has(draft.kind)) {
+        // a click, not a drag: its end stays down and the next click sets the other
+        gesture = { kind: 'trail', start: draft.points[0] };
+        trailing = true;
+        return;
       }
       draft = null;
       tool = 'select';
@@ -338,7 +359,7 @@
   onMount(() => {
     const key = (event) => {
       if (!active || event.target?.closest?.('input, textarea, select')) return;
-      if (event.key === 'Escape') { draft = null; editor = null; gesture = null; tool = 'select'; }
+      if (event.key === 'Escape') { draft = null; editor = null; gesture = null; trailing = false; tool = 'select'; }
       if (event.key === 'Enter') finishPolygon(event);
     };
     document.addEventListener('keydown', key);

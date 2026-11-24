@@ -33,7 +33,8 @@
           { "icon": "calendar", "text": "Catch up lists the passes a routine missed and reads the ones you tick, one run each, oldest first." },
           { "icon": "trash", "text": "Deleting a proof takes its geolocation with it, and restoring it from the Trash puts it back." },
           { "icon": "polygon", "text": "Save place's arrow offers Save zone: click its corners, name it, and a click in the area opens its card. Edit footprint drags its corners." },
-          { "icon": "pin", "text": "Click a lead to pick it, then press Delete to remove it." }
+          { "icon": "pin", "text": "Click a lead to pick it, then press Delete to remove it." },
+          { "icon": "ruler", "text": "In Compare and Detect, a measure, an arrow or a box takes two clicks as well as a drag." }
         ]
       }
     ]
