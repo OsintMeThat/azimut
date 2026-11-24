@@ -28,7 +28,10 @@
           { "icon": "zoneSearch", "text": "Inspect searches a part of a picture: draw a zone over it, then press Google Lens, Yandex, Bing or TinEye." },
           { "icon": "video", "text": "A file's mark plays it in its card, a stack one at a time, and Play beside the map takes it to the panel where it was." },
           { "icon": "move", "text": "Move place on a place's card picks it up and puts it down where you click. A proof's point is moved in its proof." },
-          { "icon": "proof", "text": "A proof's point is filed without a question, and where its video stands the map shows the video alone, with the proof's dot." }
+          { "icon": "proof", "text": "A proof's point is filed without a question, and where its video stands the map shows the video alone, with the proof's dot." },
+          { "icon": "trash", "text": "Deleting a proof takes its geolocation with it, and restoring it from the Trash puts it back." },
+          { "icon": "polygon", "text": "Save place's arrow offers Save zone: click its corners, name it, and a click in the area opens its card. Edit footprint drags its corners." },
+          { "icon": "pin", "text": "Click a lead to pick it, then press Delete to remove it." }
         ]
       }
     ]

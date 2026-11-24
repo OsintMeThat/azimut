@@ -124,13 +124,21 @@ def send(
     case: Case,
     entities: list[dict[str, Any]],
     tombstones: list[dict[str, Any]],
+    also: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Journal a delete before changing files, indexes or graph rows."""
+    """Journal a delete before changing files, indexes or graph rows.
+
+    ``also`` is links between survivors that the delete takes back with it (a deleted
+    proof's point posed on footage that stays): journalled with the group, so a
+    restore puts them back with everything else.
+    """
     with case.lock:
         group_id = _new_id("t")
         root = _group_dir(case, group_id)
         ids = {e["id"] for e in entities}
         links = collect_links(case, ids)
+        known = {link["id"] for link in links}
+        links += [link for link in also or [] if link["id"] not in known]
         entity_images = case.entity_images_touching(list(ids))
         files = _travelling_files(case, entities)
         target = entities[0]

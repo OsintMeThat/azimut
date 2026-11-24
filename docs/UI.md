@@ -3310,8 +3310,9 @@ one mark, a red drop with a white heart (`lib/mapMarkers.placeMark`). While a sc
 geolocated the button reads **Drop a lead** with
 the scene's dot, the pale pin is the next lead with its number, and each click drops one
 with nothing asked, until Escape or the button again; the right-click's *Save place here…* reads
-*Drop a lead here* then. A lead is dragged to move it and clicked to centre the map on
-it. What marks the
+*Drop a lead here* then. A lead is dragged to move it, and clicked to centre the map on
+it and pick it, ringed in white: `Delete` (or Backspace) removes the lead picked, and
+`Esc` or a click elsewhere lets it go. What marks the
 point, and whether that point is the map's centre or a pin dropped somewhere,
 is one small menu beside them: both are set once and the two acts are pressed
 all day. The engine's scale bracket reads under the coordinates, where how far
@@ -3591,6 +3592,19 @@ and it replaces whatever said how precise the point was — its earlier shape, o
 the circle a radius drew. The panel names what it is replacing before Save, and
 a radius typed back over a traced shape asks in Details before dropping it: the
 map draws one of the two, so a place states its precision once.
+
+A shape already traced opens with its corners: **Edit footprint** on the card. Each
+corner is dragged to move it, the dot halfway along a side is dragged to add a corner
+there, and a corner clicked is picked for `Delete` to remove (Backspace takes the last
+one back). A click on the map adds a corner after the last.
+
+**A zone is saved in one go.** Save place's arrow (▾) offers **Save place** and **Save
+zone**: the zone's corners are clicked on the map and its name typed in the panel, and
+Save files a place with its area, its pin inside it (`POST /satellite/place` with a
+`footprint`, marked `zone`). Its card says **Zone**. A click inside a place's area opens
+its card, while no tool owns the map's clicks, so a measure or a pin dropped inside a zone
+still lands. A zone reshaped away from its pin takes the pin along rather than being
+refused, since its pin is only where its card hangs.
 
 **A place's card moves it.** **Move place** picks it up: a page cannot put the
 pointer on the point, so the map slides until the point is under the press, a pale
@@ -4721,7 +4735,12 @@ back to To geolocate**, as a delete always gave it back, or it **is removed with
 (`DELETE /cases/{id}/proofs/{name}?scene=drop`): the scenes to prove it took up or gave back
 leave its video's Inspect work and none is given back, in one go under the case's lock, the
 scenes put back if the delete fails. Restored, the proof states its passages as it did, and
-deleted again it gives a scene of them back. The proof open goes to the next proof of its
+deleted again it gives a scene of them back. **A deleted proof takes its geolocation with
+it**, from any door (Geo Proof, the sidebar, a multi-selection): the place only it held goes
+to the Trash with it, and its point comes off the footage it was posed on, so the map stops
+drawing the video there. A place saved by hand, or one another proof still concludes on,
+stays and loses only what this proof posed (`satellite.proof_leaving`). All of it is in the
+delete's one Trash group, so a restore puts the geolocation back. The proof open goes to the next proof of its
 video, else the one before, else the home.
 
 **Overlays.** Ctrl+V, a drop on the canvas, or `+ Add overlay` put an image

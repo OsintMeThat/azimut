@@ -11,7 +11,8 @@
  * asked first.
  *
  * It draws the scene's leads too, unless the Layers panel hid them, and the pin waiting
- * for its name: a lead is dragged to move it and clicked to centre the map on it. The
+ * for its name: a lead is dragged to move it, and clicked to centre the map on it and
+ * select it, which Delete then removes (Escape or a click elsewhere lets it go). The
  * pin under the pointer and the pin waiting are a place's own mark
  * (`lib/mapMarkers.placeMark`), in the red a place wears until it is given a colour.
  *
@@ -20,6 +21,7 @@
  * @param {() => object|null} deps.held the scene the case geolocates, or null
  * @param {(at: {lat: number, lon: number}) => Promise<object>} deps.dropLead
  * @param {(id: string, at: {lat: number, lon: number}) => Promise<object>} deps.moveLead
+ * @param {(id: string) => Promise<void>} deps.removeLead
  * @param {(place: {lat: number, lon: number, title: string}) => Promise<void>} deps.savePlace
  * @param {(at: {lat: number, lon: number}) => void} deps.centre
  * @param {(message: string, kind?: string, ms?: number) => void} deps.notify
@@ -58,8 +60,10 @@ export function leadSvg(n, color) {
 /** What a click on a lead and a drag of it are told apart by: a drag ends in a click. */
 const AFTER_DRAG_MS = 300;
 
-export function createDropState({ engine, held, dropLead, moveLead, savePlace, centre, notify }) {
+export function createDropState({ engine, held, dropLead, moveLead, removeLead, savePlace, centre, notify }) {
   let armed = $state(false);
+  // the lead picked on the map, which Delete removes
+  let selected = $state(null);
   // the pin waiting for its name: `{ lat, lon, title }`
   let naming = $state(null);
   let saving = $state(false);
@@ -131,20 +135,24 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
     // hidden from the Layers panel, the leads are not drawn; dropping one still works
     const leads = scene?.leads ?? [];
     const color = sceneColorAt(scene?.order);
+    // a lead deleted elsewhere (the pill, the extension) is no longer the one picked
+    if (selected && !leads.some((lead) => lead.id === selected)) selected = null;
     const shapes = leads.map((lead) => ({
       id: `lead-${lead.id}`,
       kind: 'marker',
       at: { lat: lead.lat, lon: lead.lon },
-      className: 'sat-lead',
+      className: lead.id === selected ? 'sat-lead is-selected' : 'sat-lead',
       html: leadSvg(lead.n, color),
       size: LEAD_GEOMETRY.size,
       anchor: LEAD_GEOMETRY.anchor,
-      title: `Lead ${lead.n}: drag to move, click to centre`,
+      title: `Lead ${lead.n}: drag to move, click to select, Delete to remove`,
       zIndex: 560,
       draggable: true,
       keyboard: false,
       onClick: () => {
         if (Date.now() - draggedAt < AFTER_DRAG_MS) return;
+        selected = lead.id;
+        draw();
         centre({ lat: lead.lat, lon: lead.lon });
       },
       onDragStart: () => (draggedAt = Date.now()),
@@ -200,6 +208,29 @@ export function createDropState({ engine, held, dropLead, moveLead, savePlace, c
     },
     get dropping() {
       return dropping;
+    },
+    /** The lead picked on the map, or null. */
+    get selected() {
+      return selected;
+    },
+    /** Let go of the lead picked. True when there was one. */
+    deselect() {
+      if (!selected) return false;
+      selected = null;
+      draw();
+      return true;
+    },
+    /** Remove the lead picked, as Delete does. True when there was one to remove. */
+    removeSelected() {
+      const id = selected;
+      const lead = (held()?.leads ?? []).find((one) => one.id === id);
+      if (!lead) return false;
+      selected = null;
+      draw();
+      removeLead(id)
+        .then(() => notify(`Lead ${lead.n} deleted`, 'ok', 2200))
+        .catch((e) => notify(`Could not delete the lead: ${e.message}`, 'danger', 6000));
+      return true;
     },
     start() {
       armed = true;

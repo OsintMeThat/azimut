@@ -112,3 +112,28 @@ describe('a place’s mark', () => {
     expect(mark.html).not.toContain('saved-mark-name');
   });
 });
+
+describe('a place’s traced area', () => {
+  const square = { type: 'Polygon', coordinates: [[[2, 48], [2.2, 48], [2.2, 48.2], [2, 48.2], [2, 48]]] };
+  const drawnShapes = (items, props = {}) => {
+    draw(items, props);
+    return drawn.at(-1).filter((shape) => shape.kind === 'geojson');
+  };
+
+  it('opens its place’s card when clicked, where no tool owns the map’s clicks', () => {
+    const [area] = drawnShapes([{ ...place, footprint: square }], { areas: true });
+    expect(area.style.interactive).toBe(true);
+    expect(typeof area.onClick).toBe('function');
+  });
+
+  it('leaves every click to the map while a tool is armed', () => {
+    const [area] = drawnShapes([{ ...place, footprint: square }], { areas: false });
+    expect(area.style.interactive).toBe(false);
+    expect(area.onClick).toBeUndefined();
+  });
+
+  it('wears the colour its place was given, and amber without one', () => {
+    expect(drawnShapes([{ ...place, footprint: square, color: '#1f77b4' }])[0].style.stroke).toBe('#1f77b4');
+    expect(drawnShapes([{ ...place, footprint: square }])[0].style.stroke).toBe('#f5a623');
+  });
+});

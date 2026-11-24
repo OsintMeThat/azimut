@@ -20,7 +20,7 @@
   import { createFootprintState } from './satellite/state/footprint.svelte.js';
   import { createPlaceMove } from './satellite/state/placeMove.svelte.js';
   import { createDropState, DROP_HELP } from './satellite/state/drop.svelte.js';
-  import { dropLead, geolocating, moveLead } from '../lib/geolocating.svelte.js';
+  import { dropLead, geolocating, moveLead, removeLead } from '../lib/geolocating.svelte.js';
   import { sceneColorAt } from '../lib/scenes.js';
   import {
     createCaptureState,
@@ -122,6 +122,7 @@
   import SunPanel from './satellite/SunPanel.svelte';
   import GridSearchPanel from './satellite/GridSearchPanel.svelte';
   import FootprintPanel from './satellite/FootprintPanel.svelte';
+  import FloatingMenu from '../components/FloatingMenu.svelte';
   import ScreenshotDialog from './satellite/ScreenshotDialog.svelte';
   import ExtensionGate from './satellite/ExtensionGate.svelte';
   import RefPicker from './satellite/RefPicker.svelte';
@@ -705,7 +706,25 @@
     onSaved: async (ownerCaseId) => {
       if (caseState.current?.id === ownerCaseId) await reloadCase();
     },
+    // a new zone (Save place's arrow): a place of the case with its area, its pin inside
+    createZone: async ({ title, at, footprint: shape }) => {
+      const c = await ensureCase();
+      await api.post(`/api/cases/${c.id}/satellite/place`, { lat: at.lat, lon: at.lon, zoom: center.zoom, bearing, title, footprint: shape });
+      // a zone saved is seen: its layer comes back on if it was off
+      placesOn = true;
+    },
   });
+
+  // Save place's arrow: a pin, or a zone drawn corner by corner
+  let placeMenu = $state(false);
+  let placeMenuAnchor = $state(null);
+  async function startZone() {
+    placeMenu = false;
+    await ensureCase();
+    if (!footprint.startNew()) return;
+    closeOthers(modes, 'footprint');
+    toast('Click the corners of the zone, then name it', 'info', 4000);
+  }
 
   // --- moving a saved place: picked up from its card, put down with a click ---
   const placeMove = createPlaceMove({
@@ -913,6 +932,18 @@
       e.preventDefault();
       return;
     }
+    // a lead picked on the map goes with Delete (or Backspace)
+    if (!typing && (e.key === 'Delete' || e.key === 'Backspace') && drop.removeSelected()) {
+      e.preventDefault();
+      return;
+    }
+    // a zone's corner picked goes with Delete; Backspace takes the last one back
+    if (!typing && footprint.on && (e.key === 'Delete' || e.key === 'Backspace')) {
+      if (footprint.removeSelected() || (e.key === 'Backspace' && footprint.undo())) {
+        e.preventDefault();
+        return;
+      }
+    }
     // Backspace takes the last point back while a measure is drawn; Delete, or
     // Backspace once it is finished, takes the selected one off the map
     if (!typing && lines && (e.key === 'Backspace' || e.key === 'Delete')) {
@@ -951,6 +982,8 @@
     if (lines?.escape()) return;
     // a pin waiting for its name is let go of before the mode ends
     if (drop.cancel()) return;
+    // a lead picked is let go of before anything closes
+    if (drop.deselect()) return;
     // a place in the hand stays where it was
     if (placeMove.cancel()) return;
     if (armedMode) return disarm(modes);
@@ -1452,6 +1485,8 @@
   // then the measure tools. Each mode answers whether it took it.
   /** Where the analyst clicked, `{ lat, lon }` from the façade. */
   function onMapClick(at) {
+    // a click on the map lets go of the lead picked, whatever it does next
+    drop.deselect();
     if (myLayers.armed) return;
     if (placeMove.place(at)) return;
     if (drop.place(at)) return;
@@ -2376,6 +2411,7 @@
     held: () => heldScene,
     dropLead: (at) => dropLead(caseState.current.id, at),
     moveLead: (id, at) => moveLead(caseState.current.id, id, at),
+    removeLead: (id) => removeLead(caseState.current.id, id),
     savePlace: async ({ lat, lon, title }) => {
       const c = await ensureCase();
       const place = await api.post(`/api/cases/${c.id}/satellite/place`, { lat, lon, zoom: center.zoom, bearing, title });
@@ -2827,6 +2863,7 @@
           activeKey={mediaView ? mediaView.items[mediaView.index]?.key : null}
           movingKey={placeMove.row ? (placeMove.row.key ?? placeMove.row.id) : null}
           names={namesOn}
+          areas={!armedMode}
           onopen={openSaved}
           onedit={editSaved}
           ondelete={(row) => placeDeletion.open(row.id)}
@@ -2993,6 +3030,8 @@
                 points={footprint.points.length}
                 complete={footprint.complete}
                 covers={footprint.covers}
+                ready={footprint.ready}
+                bind:title={footprint.title}
                 saving={footprint.saving}
                 undo={() => footprint.undo()}
                 save={() => footprint.save()}
@@ -3157,21 +3196,44 @@
         <MarkerMenu bind:style={markerStyle} free={moveMode} toggleFree={toggleMoveMode} />
         <!-- One button arms the drop: each click on the map drops a lead of the scene
              being geolocated, or a pin to name and save as a place. Escape ends it. -->
-        <button
-          class="btn place-drop"
-          class:on={drop.armed}
-          data-guide="sat.place"
-          aria-pressed={drop.armed}
-          onclick={() => arm(modes, 'drop')}
-          title={drop.armed ? DROP_HELP.stop : heldScene ? DROP_HELP.lead : DROP_HELP.place}
-        >
-          {#if heldScene}
-            <span class="drop-dot" style:--scene={sceneColorAt(heldScene.order)} aria-hidden="true"></span>
-            <Icon name="pin" size={15} /> Drop a lead
-          {:else}
-            <Icon name="pin" size={15} /> Save place
-          {/if}
-        </button>
+        <span class="place-split" data-guide="sat.place">
+          <button
+            class="btn place-drop"
+            class:on={drop.armed}
+            aria-pressed={drop.armed}
+            onclick={() => arm(modes, 'drop')}
+            title={drop.armed ? DROP_HELP.stop : heldScene ? DROP_HELP.lead : DROP_HELP.place}
+          >
+            {#if heldScene}
+              <span class="drop-dot" style:--scene={sceneColorAt(heldScene.order)} aria-hidden="true"></span>
+              <Icon name="pin" size={15} /> Drop a lead
+            {:else}
+              <Icon name="pin" size={15} /> Save place
+            {/if}
+          </button>
+          <button
+            class="btn place-more"
+            class:on={footprint.on && footprint.place?.fresh}
+            bind:this={placeMenuAnchor}
+            aria-haspopup="menu"
+            aria-expanded={placeMenu}
+            aria-label="Save a place or a zone"
+            title="Save a place or a zone"
+            onclick={() => (placeMenu = !placeMenu)}
+          ><Icon name="chevronDown" size={13} /></button>
+        </span>
+        {#if placeMenu}
+          <FloatingMenu anchor={placeMenuAnchor} width={200} label="Save a place or a zone" onclose={() => (placeMenu = false)}>
+            <button class="fm-item" role="menuitem" onclick={() => { placeMenu = false; arm(modes, 'drop'); }}
+              title="Drop a pin where you click, then name it">
+              <Icon name="pin" size={13} /> Save place
+            </button>
+            <button class="fm-item" role="menuitem" onclick={startZone}
+              title="Click the corners of an area, then name it">
+              <Icon name="polygon" size={13} /> Save zone
+            </button>
+          </FloatingMenu>
+        {/if}
         <!-- capture controls: one split button. The main part re-runs whichever
              mode was used last — a centred capture at the chosen size, or
              arming a marquee to drag a custom area — and the arrow opens the
@@ -3659,6 +3721,12 @@
     cursor: grab;
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
   }
+  /* the lead picked, which Delete removes: ringed in white, a size up, its tip kept */
+  :global(.sat-lead.is-selected > svg) {
+    transform: scale(1.2);
+    transform-origin: 13px 35px;
+    filter: drop-shadow(0 0 0 #fff) drop-shadow(0 0 1.5px #fff) drop-shadow(0 0 1.5px #fff);
+  }
   /* the pin waiting for its name, the place's own drop: grabbed to move it */
   :global(.sat-naming) {
     cursor: grab;
@@ -3805,6 +3873,24 @@
   }
   .place-drop {
     white-space: nowrap;
+  }
+  /* Save place and its arrow, one button in two parts as Capture's is */
+  .place-split {
+    display: inline-flex;
+  }
+  .place-split > .place-drop {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+  .place-more {
+    padding-inline: 6px;
+    border-left: 1px solid var(--border);
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+  }
+  .place-more.on {
+    border-color: var(--accent);
+    color: var(--text-1);
   }
   /* armed: the accent edge says each click on the map now drops one */
   .place-drop.on {

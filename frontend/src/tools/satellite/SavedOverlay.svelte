@@ -7,7 +7,7 @@
   import { createSurface } from '../../lib/map/surface.js';
   import { paths } from '../../components/Icon.svelte';
   import { groupSavedMarkers, markLook, markName, markerPrecision } from '../../lib/savedMarkers.js';
-  import { DROP_CARD_OFFSET, TEARDROP, TEARDROP_CARD_OFFSET, placeMark } from '../../lib/mapMarkers.js';
+  import { DROP_CARD_OFFSET, TEARDROP, TEARDROP_CARD_OFFSET, placeColour, placeMark } from '../../lib/mapMarkers.js';
   import { escapeXml } from '../../lib/plate.js';
   import { openEntity } from '../../lib/navigate.js';
   import { coneMark } from '../../lib/horizon/marks.js';
@@ -26,6 +26,9 @@
     movingKey = null,
     // each place's name written under its mark (the Places layer's Names switch)
     names = false,
+    // a place's traced area answers a click with its card: off while a tool owns the
+    // map's clicks, so a measure or a pin dropped inside a zone still lands
+    areas = false,
     onopen,
     onedit,
     ondelete,
@@ -166,13 +169,14 @@
     const cid = caseId;
     const precision = markerPrecision(zoom);
     const named = names;
+    const clickable = areas;
     const held = popupOpen; // tracked, so closing the card applies what waited
     if (!engine) return;
     // A different case is never deferred: leaving another case's marks on the map
     // would be worse than closing a card.
     if (held && builtFor === cid) return;
     builtFor = cid;
-    rebuild(rows, precision, named);
+    rebuild(rows, precision, named, clickable);
   });
 
   /**
@@ -192,9 +196,12 @@
    * a guess about where something is. A view's is the ground its lens took in,
    * out to the skyline, drawn the same way and fainter: it can reach far.
    */
-  function shapesFor(mark, id) {
+  function shapesFor(mark, id, clickable) {
     const row = mark.items.find((r) => r.footprint || r.radius_m > 0);
     if (!row) return [];
+    // a zone is the place: a click inside it opens the card its pin opens
+    const opens = clickable && row.kind === 'place' && row.footprint;
+    const tint = row.kind === 'place' && row.color ? placeColour(row.color) : '#f5a623';
     const style = row.kind === 'comparison' || row.kind === 'view'
       ? {
           stroke: '#f5a623',
@@ -204,16 +211,22 @@
           interactive: false,
         }
       : {
-          stroke: '#f5a623',
+          stroke: tint,
           strokeWidth: 1.5,
           strokeOpacity: 0.9,
-          fill: '#f5a623',
+          fill: tint,
           fillOpacity: 0.12,
-          // never steals the click from the pin it sits under
-          interactive: false,
+          // never steals the click from the pin it sits under, nor from a tool
+          interactive: Boolean(opens),
         };
     return row.footprint
-      ? [{ id: `${id}:shape`, kind: 'geojson', geometry: row.footprint, style }]
+      ? [{
+          id: `${id}:shape`,
+          kind: 'geojson',
+          geometry: row.footprint,
+          style,
+          ...(opens ? { onClick: () => surface?.element(id)?.click() } : {}),
+        }]
       : [{ id: `${id}:shape`, kind: 'circle', at: mark, radiusM: row.radius_m, style }];
   }
 
@@ -238,7 +251,7 @@
   // whether the marks on the map carry their names, as they were last built
   let builtNames = false;
 
-  function rebuild(rows, precision, named) {
+  function rebuild(rows, precision, named, clickable = false) {
     builtNames = named;
     const marks = groupSavedMarkers(rows, precision);
     surface ??= createSurface(engine, {
@@ -248,7 +261,7 @@
     surface.set(
       marks.flatMap((mark, at) => [
         // the shape first, so the pin stays on top of its own uncertainty
-        ...shapesFor(mark, at),
+        ...shapesFor(mark, at, clickable),
         ...conesFor(mark, at),
         {
           id: at,

@@ -19,6 +19,7 @@ from fastapi import HTTPException
 
 from ...engine import entities as entity_engine
 from ...engine import links as link_engine
+from ...engine import satellite as satellite_engine
 from ...engine import scenes as scene_engine
 from ...engine import sheets as sheet_engine
 from ...engine import timeline as timeline_engine
@@ -56,8 +57,22 @@ def delete_entities_deep(case: Case, entity_ids: list[str], *, give_back: bool =
 
     ``give_back`` False keeps a proof's scene from going back to its video's work:
     Geo Proof's delete asked to remove the scene with the proof (`api/proofs.delete_proof`).
+
+    - a proof takes its geolocation with it (`satellite.proof_leaving`): the places
+      only it held go in the same group, and its point posed on footage that stays
+      comes off with the action and is kept in the group, so undoing it puts the
+      whole geolocation back.
     """
     with case.lock:
+        proofs = frozenset(
+            entity_id for entity_id in entity_ids
+            if (case.get_entity(entity_id) or {}).get("type") == "proof"
+        )
+        also_links: list[dict[str, Any]] = []
+        for proof_id in proofs:
+            places, posed = satellite_engine.proof_leaving(case, proof_id, leaving=proofs)
+            entity_ids = [*entity_ids, *places]
+            also_links += [link for link in posed if link not in also_links]
         going_by_id: dict[str, dict[str, Any]] = {}
         tombstoned: set[str] = set()
         for entity_id in dict.fromkeys(entity_ids):
@@ -114,7 +129,7 @@ def delete_entities_deep(case: Case, entity_ids: list[str], *, give_back: bool =
             if give_back and entity.get("type") == "proof":
                 scene_engine.give_back(case, entity, set(going_by_id))
 
-        group = trash_engine.send(case, going, scars)
+        group = trash_engine.send(case, going, scars, also=also_links)
         try:
             for survivor_id, lost_sources in losses.items():
                 link_engine.add_tombstones(
@@ -125,6 +140,8 @@ def delete_entities_deep(case: Case, entity_ids: list[str], *, give_back: bool =
             for entity in going:
                 if case.get_entity(entity["id"]) is not None:
                     case.remove_entity(entity["id"])
+            for link in also_links or []:
+                case.remove_link(link["id"])
             trash_engine.commit(case, group["id"])
         except Exception:
             trash_engine.rollback(case, group["id"])
