@@ -269,8 +269,10 @@ def test_a_proof_of_two_captures_takes_up_the_scene_and_the_queue_drops_it(clien
     assert took.status_code == 200, took.text
     assert (took.json()["video"], took.json()["draft"], took.json()["stated"]) == (video, "sc_whole", True)
     assert (video, "sc_whole") not in _queue_scenes(client, cid)
-    # a proof that takes the scene up ends its geolocating
-    assert client.get(f"/api/cases/{cid}/geolocating").json()["geolocating"] is None
+    # a proof that takes the scene up with no place checked yet keeps it geolocated, the pill
+    # opening that proof rather than making another (`engine/geolocate.py`, `_settled`)
+    held = client.get(f"/api/cases/{cid}/geolocating").json()["geolocating"]
+    assert (held["id"], held["proof"]) == ("sc_whole", name)
     listed = client.get(f"/api/cases/{cid}/scenes", params={"video": video}).json()
     assert [(row["kind"], row.get("proof")) for row in listed["scenes"]] == [("proof", name)]
     assert listed["taken"] == ["sc_whole"]
