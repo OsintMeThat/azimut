@@ -98,6 +98,25 @@ test('linked maps keep annotations on the ground through pan, modes and save', a
   expect(errors).toEqual([]);
 });
 
+test('a measure takes two clicks, its far end following the pointer between them', async ({ page }) => {
+  const { errors } = await openCompare(page);
+  const canvas = page.getByLabel('Annotations on imagery A', { exact: true });
+  const box = await canvas.boundingBox();
+  await page.getByTitle('Measure (M)', { exact: true }).click();
+  await page.mouse.click(box.x + 80, box.y + 80);
+  await page.mouse.move(box.x + 200, box.y + 120, { steps: 4 });
+  // drawn on the map it was started on, until the second click lays it on both
+  await expect(page.locator('.annotation-canvas .mark')).toHaveCount(1);
+  await page.mouse.click(box.x + 200, box.y + 120);
+  await expect(page.locator('.annotation-canvas .mark')).toHaveCount(2);
+  await expect(canvas.locator('.mark text').first()).toHaveText(/\d.*(m|km)$/);
+  // the tool is put down, so the next click is the map's and draws nothing
+  await expect(canvas).not.toHaveClass(/drawing/);
+  await page.mouse.click(box.x + 260, box.y + 60);
+  await expect(page.locator('.annotation-canvas .mark')).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
+
 test('stamps a numbered marker and a symbol on the ground, and saves both', async ({ page }) => {
   const { errors, saved } = await openCompare(page);
   const canvas = page.getByLabel('Annotations on imagery A', { exact: true });

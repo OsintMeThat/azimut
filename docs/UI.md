@@ -2467,7 +2467,8 @@ draws it, filled and haloed. The maps are seen from above, so a vehicle model is
 and the picker's View switch stays away. A model lands nose up on the screen it was
 stamped on, and its size is its length. Both stamps are sized by their own
 number rather than by a line width, and one of the eight older symbols that takes a
-weight has a second control for it. Polygon drawing ends
+weight has a second control for it. Arrows, boxes, ellipses, lines and measures
+are dragged out or clicked at both ends. Polygon drawing ends
 with a double-click or Enter; Escape cancels. Select a mark to move it or edit its style,
 double-click a note to edit its text, and use Undo/Redo for annotation changes. A
 selected mark shows its corner handles, so its geometry is corrected where it was
@@ -4138,8 +4139,8 @@ Satellite's point menu, cut to what Detect can do:
 copy the point, **What is here?**, **Measure from here**, **Centre the map here**,
 **Compare here…** and **Open in…**, which lists Satellite and Compare first. While a finished run is under review, a point
 inside one of its areas also offers **Add candidate here**, for a hull the
-detector missed. The ruler under the compass, or `M`, measures a length: drag
-from one end to the other, then drag either end to adjust it. The label reads in
+detector missed. The ruler under the compass, or `M`, measures a length: click
+both ends, or drag from one to the other, then drag either end to adjust it. The label reads in
 the units set in Settings. `Delete` drops the selected measure and the bin beside
 the ruler clears them all. Measures are a scratch aid and are not saved. Taking
 the ruler up lets go of an area or a candidate being drawn, and drawing one puts

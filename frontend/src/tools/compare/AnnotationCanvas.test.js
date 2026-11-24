@@ -173,6 +173,54 @@ it('anchors a measure on a point handed to it, and closes it on the next click',
   expect(saved[0].points[1][0]).toBeCloseTo(6);
 });
 
+it('takes a two-point shape from two clicks as well as from a drag', () => {
+  for (const kind of ['measure', 'arrow', 'line', 'rect', 'ellipse']) {
+    const onchange = vi.fn();
+    const svg = stage({ annotations: [], editVertices: true, tool: kind, onchange });
+    // A press that does not travel puts the first end down and keeps the tool in hand.
+    press(svg, 'pointerdown', 10, 10);
+    press(svg, 'pointerup', 11, 10);
+    expect(onchange).not.toHaveBeenCalled();
+    expect(svg.classList.contains('drawing')).toBe(true);
+    press(svg, 'pointermove', 60, 30);
+    expect(target.querySelectorAll('.mark')).toHaveLength(1);   // the far end follows the pointer
+    press(svg, 'pointerdown', 60, 30);
+    const [saved, commit] = onchange.mock.calls.at(-1);
+    expect(commit).toBe(true);
+    expect(saved).toHaveLength(1);
+    expect(saved[0].kind).toBe(kind);
+    expect(saved[0].points[0]).toEqual([1, 1]);
+    expect(saved[0].points[1]).toEqual([6, 3]);
+    expect(svg.classList.contains('drawing')).toBe(false);       // put down, so it can be adjusted
+    // the second press's release adds nothing
+    press(svg, 'pointerup', 60, 30);
+    expect(onchange).toHaveBeenCalledTimes(1);
+    unmount(live);
+    live = null;
+  }
+});
+
+it('throws a half-drawn shape away on Escape, and a freehand click as before', () => {
+  const onchange = vi.fn();
+  const svg = stage({ annotations: [], tool: 'measure', onchange });
+  press(svg, 'pointerdown', 10, 10);
+  press(svg, 'pointerup', 10, 10);
+  press(svg, 'pointermove', 60, 10);
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  flushSync();
+  expect(target.querySelectorAll('.mark')).toHaveLength(0);
+  expect(svg.classList.contains('drawing')).toBe(false);
+  unmount(live);
+
+  // a stroke is drawn by its drag, so a click of it draws nothing and puts it down
+  const stroke = stage({ annotations: [], tool: 'freehand', onchange });
+  press(stroke, 'pointerdown', 10, 10);
+  press(stroke, 'pointerup', 10, 10);
+  press(stroke, 'pointerdown', 60, 10);
+  expect(onchange).not.toHaveBeenCalled();
+  expect(stroke.classList.contains('drawing')).toBe(false);
+});
+
 it('draws a box along a turned camera, not along north', () => {
   const onchange = vi.fn();
   const engine = turningEngine(30);

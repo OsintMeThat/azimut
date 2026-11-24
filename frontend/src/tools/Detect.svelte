@@ -266,10 +266,9 @@
   let measureTool = $state('select');
   let selectedMeasure = $state(null);
   let measureCanvas = $state(null);
-  /** A measure started from the right-click menu, which only wants its far end. */
+  /** A measure with its first end down, which only wants its far end. */
   let trailing = $state(false);
   const measuring = $derived(measureTool === 'measure');
-  $effect(() => { if (!measuring) trailing = false; });
   // One tool holds the pointer at a time: drawing an area or a candidate puts
   // the ruler down, and taking the ruler up lets go of both.
   $effect(() => {
@@ -514,7 +513,6 @@
       armMeasure();
       await tick();
       measureCanvas?.startFrom([point.lon, point.lat]);
-      trailing = true;
     } else if (id === 'centre') {
       engine.setView(point, engine.getZoom());
     } else if (id === 'horizon') {
@@ -890,7 +888,7 @@
         <!-- Over the areas, so a measure started inside one takes the press. -->
         <AnnotationCanvas bind:this={measureCanvas} annotations={measures} {engine} letter="a" units={prefs.units}
           active={!personalLayers.armed}
-          editVertices={true} bind:tool={measureTool} bind:selectedId={selectedMeasure} colour="#f5a623"
+          editVertices={true} bind:tool={measureTool} bind:selectedId={selectedMeasure} bind:trailing colour="#f5a623"
           strokeWidth={2} stampSize={14} onchange={(next) => (measures = next)} />
         {#if pointMenu}
           <MapContextMenu
@@ -922,7 +920,7 @@
         </div>
       {/if}
       {#if measuring}
-        <div class="manual-chip cmp-glass">{trailing ? 'Click the far end' : 'Drag from one end to the other'}
+        <div class="manual-chip cmp-glass">{trailing ? 'Click the far end' : 'Click one end, then the other'}
           <button class="cmp-icon" aria-label="Stop measuring" title="Stop measuring (Esc)" onclick={() => (measureTool = 'select')}><Icon name="x" size={13} /></button>
         </div>
       {/if}
