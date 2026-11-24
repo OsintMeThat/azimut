@@ -104,11 +104,14 @@
   /** The colours and icons worn where the palette opened, for the key to name. */
   const wornColours = $derived(hexes([...layerColours, ...(mixed ? [] : [colour])]));
   const wornKeys = $derived(point ? [...new Set([...used.map((style) => style.icon || style.symbol), ...(mixed ? [] : [icon || symbol])])].filter(Boolean) : []);
-  /** The groups of the grid, as chips over it: a press scrolls the grid there. */
-  const themes = $derived(words.length ? [] : [...(layerOwn.length ? [ICON_HELP.layerIcons] : []),
-    ...libraryGroups.map((section) => section.group), ...sections.map((section) => section.group)]);
-  function goTo(theme) {
-    const node = [...(grid?.querySelectorAll('.theme') ?? [])].find((one) => one.dataset.theme === theme);
+  /** The groups of the grid, as chips over it: a press scrolls the grid there. An id tells
+   *  the analyst's groups from the app's, since a library may hold a "Vehicles" of its own. */
+  const themes = $derived(words.length ? [] : [
+    ...(layerOwn.length ? [{ id: 'layer', name: ICON_HELP.layerIcons }] : []),
+    ...libraryGroups.map((section) => ({ id: `own:${section.group}`, name: section.group })),
+    ...sections.map((section) => ({ id: `app:${section.group}`, name: section.group }))]);
+  function goTo(id) {
+    const node = [...(grid?.querySelectorAll('.theme') ?? [])].find((one) => one.dataset.theme === id);
     if (node) grid.scrollTo?.({ top: node.offsetTop - 2 });
   }
   const visible = $derived(choices.filter((choice) => matches(`${choice.label} ${choice.group} ${(choice.keywords ?? []).join(' ')}`)));
@@ -202,12 +205,12 @@
   <input type="search" class="find" aria-label={`${label} find icon`} bind:value={query} placeholder="Find an icon" />
   {#if themes.length > 1}
     <div class="themes" role="group" aria-label={`${label} icon groups`}>
-      {#each themes as theme (theme)}<button type="button" class="theme-chip" title={`Go to ${theme}`} onclick={() => goTo(theme)}>{theme}</button>{/each}
+      {#each themes as theme (theme.id)}<button type="button" class="theme-chip" title={`Go to ${theme.name}`} onclick={() => goTo(theme.id)}>{theme.name}</button>{/each}
     </div>
   {/if}
   <div class="icons" role="group" aria-label={`${label} icon palette`} bind:this={grid}>
     {#if layerOwn.length}
-      <p class="theme" data-theme={ICON_HELP.layerIcons} title={ICON_HELP.layerIconsHint}>{ICON_HELP.layerIcons}</p>
+      <p class="theme" data-theme="layer" title={ICON_HELP.layerIconsHint}>{ICON_HELP.layerIcons}</p>
       {#each layerOwn as held (held.key)}
         {@const shown = iconLibrary.look(held.key, { caseId, layer, mode: held.mode })}
         <button type="button" class:chosen={!mixed && icon === held.key} title={held.name || ICON_HELP.layerIcon}
@@ -218,7 +221,7 @@
       {/each}
     {/if}
     {#each libraryGroups as section (section.group)}
-      <p class="theme" data-theme={section.group}>{section.group}</p>
+      <p class="theme" data-theme={`own:${section.group}`}>{section.group}</p>
       {#each section.items as entry (entry.key)}
         <button type="button" class:chosen={!mixed && icon === entry.key} title={entry.name}
           aria-label={`${label} ${entry.name} icon, ${entry.group || DEFAULT_GROUP}`} aria-pressed={!mixed && icon === entry.key}
@@ -232,7 +235,7 @@
         <button type="button" class="link" title={ICON_HELP.openSettings} onclick={openIconSettings}>Import icons</button></p>
     {/if}
     {#each sections as section (section.group)}
-      {#if section.group}<p class="theme" data-theme={section.group}>{section.group}</p>{/if}
+      {#if section.group}<p class="theme" data-theme={`app:${section.group}`}>{section.group}</p>{/if}
       {#each section.items as choice (choice.id)}
         <button type="button" class:chosen={!mixed && !icon && choice.id === symbol} title={choice.label}
           aria-label={`${label} ${choice.label} icon`} aria-pressed={!mixed && !icon && choice.id === symbol}

@@ -110,13 +110,20 @@ describe('a proof point’s menu', () => {
     menu({ index: 2, onraise, onremove });
     open(2);
     item('Make it the conclusion').click(); flushSync();
+    // removing is a trash button beside the menu, in sight without opening it
+    const trash = document.querySelector('[aria-label="Remove point 3"]');
+    expect(trash.title).toBe('Remove this point');
+    expect(trash.previousElementSibling.getAttribute('aria-label')).toBe('Point 3 actions');
     open(2);
-    item('Remove this point').click();
+    expect(item('Remove this point')).toBeUndefined();
+    trash.click(); flushSync();
+    expect(document.querySelector('[role="menu"]')).toBeNull();
     expect([onraise.mock.calls.length, onremove.mock.calls.length]).toEqual([1, 1]);
     unmount(held); held = null; document.body.innerHTML = '';
     menu({});
     open();
     expect(item('Make it the conclusion')).toBeUndefined();
+    expect(document.querySelector('[aria-label^="Remove point"]')).toBeNull();
   });
 });
 

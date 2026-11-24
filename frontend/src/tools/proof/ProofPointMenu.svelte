@@ -1,7 +1,9 @@
 <script>
   /**
    * What one point of a proof can do besides being moved on the map: join one
-   * of the analyst's layers, become the conclusion, or go.
+   * of the analyst's layers, become the conclusion, or go. Going is a trash
+   * button of its own beside the menu, in plain sight, on every point but the
+   * first.
    *
    * Joining a layer goes a step at a time, in the one menu (`LayerTargetSteps`):
    * the layer, its group, then the marker's icon when the group's features each
@@ -35,6 +37,10 @@
      on a button with a face like the eye beside it so it reads as one to press. -->
 <button type="button" class="point-more" aria-label={label} title="Layers and more" aria-expanded={open} bind:this={anchor}
   onclick={() => (open ? close() : (open = true))}><Icon name="layers" size={14} /></button>
+{#if onremove}
+  <button type="button" class="point-more point-remove" aria-label={`Remove point ${index + 1}`} title="Remove this point"
+    onclick={() => { close(); onremove(); }}><Icon name="trash" size={13} /></button>
+{/if}
 
 {#if open}
   <FloatingMenu {anchor} align="end" width={step?.group ? 264 : 248} {label} onclose={close}>
@@ -54,14 +60,10 @@
     {/if}
     {#if !step}
       {#if ready && unsaved}<p class="fm-note">The proof is saved first, so the layer follows what it says.</p>{/if}
-      {#if onraise || onremove}<div class="fm-sep"></div>{/if}
       {#if onraise}
+        <div class="fm-sep"></div>
         <button type="button" class="fm-item" onclick={() => act(onraise)}>
           <Icon name="chevronUp" size={14} /><span class="fm-grow">Make it the conclusion</span></button>
-      {/if}
-      {#if onremove}
-        <button type="button" class="fm-item danger" onclick={() => act(onremove)}>
-          <Icon name="x" size={14} /><span class="fm-grow">Remove this point</span></button>
       {/if}
     {/if}
   </FloatingMenu>
@@ -75,4 +77,5 @@
   }
   .point-more:hover { color: var(--text-1); border-color: var(--text-3); }
   .point-more[aria-expanded='true'] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+  .point-remove:hover { color: var(--danger, #e05c5c); border-color: var(--danger, #e05c5c); }
 </style>

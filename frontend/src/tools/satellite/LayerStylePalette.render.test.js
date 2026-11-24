@@ -87,6 +87,30 @@ it('offers a chip per group of icons, gone while a search answers', async () => 
   expect(chips()).toEqual([]);
 });
 
+it("keeps a library group apart from the app's group of the same name, each chip going to its own", async () => {
+  // a library already read holding a "Vehicles" of its own, as the app has: the chips
+  // were keyed by name, and the repeated key broke the palette before it showed
+  expect(choices.some((choice) => choice.group === 'Vehicles')).toBe(true);
+  const { iconLibrary } = await import('../../lib/iconLibrary.svelte.js');
+  answers.icons = [...LIBRARY, { key: 'ffffffffffffffff', name: 'Pickup', group: 'Vehicles', mode: 'disc' }];
+  await iconLibrary.load(true);
+  try {
+    await show({});
+    const grid = document.querySelector('.icons');
+    const headers = [...grid.querySelectorAll('.theme')].filter((node) => node.textContent.trim() === 'Vehicles');
+    expect(headers.map((node) => node.dataset.theme)).toEqual(['own:Vehicles', 'app:Vehicles']);
+    headers.forEach((node, index) => Object.defineProperty(node, 'offsetTop', { value: 100 + index * 400 }));
+    grid.scrollTo = vi.fn();
+    const chips = [...document.querySelectorAll('.themes .theme-chip')].filter((node) => node.textContent === 'Vehicles');
+    expect(chips).toHaveLength(2);
+    chips.forEach((chip) => chip.click());
+    expect(grid.scrollTo.mock.calls).toEqual([[{ top: 98 }], [{ top: 498 }]]);
+  } finally {
+    answers.icons = LIBRARY;
+    await iconLibrary.load(true);
+  }
+});
+
 it("offers none of the analyst's icons where a symbol is the app's only", async () => {
   const onpick = vi.fn();
   await show({ own: false, onpick });

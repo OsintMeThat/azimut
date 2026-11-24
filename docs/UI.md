@@ -2963,8 +2963,8 @@ a group in one colour, its icon alone. A group with one style takes the point at
 is, and **New layer…** makes one and opens it. A proof with unsaved changes is
 saved first, and a point the imagery only proposed is checked on the map first. Under the point, each
 layer it is in reads as one line, with **Open** for the marker on the map and ×
-to take it back out, with Undo. The same ⋯ makes a later point the conclusion or
-removes it.
+to take it back out, with Undo. The same ⋯ makes a later point the conclusion, and
+the trash beside it removes that point.
 
 **Remove from this layer** in the popup or editor removes a marker and offers
 **Undo**. Popup actions use compact icons with accessible names and hover labels.

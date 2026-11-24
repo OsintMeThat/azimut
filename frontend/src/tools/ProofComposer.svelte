@@ -8195,6 +8195,8 @@
                   onraise={i > 0 ? () => raisePoint(i) : null}
                   onremove={i > 0 ? () => removePoint(i) : null}
                 />
+                <!-- the conclusion has no trash: its room is kept so the rows' columns line up -->
+                {#if i === 0 && proof.points.length > 1}<span class="point-spare" aria-hidden="true"></span>{/if}
               </div>
               <LayerPlaces
                 places={pointPlaces.get(i) ?? []}
@@ -9405,6 +9407,7 @@
   .coords-field .field-act.check { color: var(--warn, #e8a33d); }
   /* The name is as wide as a name needs to be; the coordinate takes the rest. */
   .point-row .label-field { width: 110px; flex: none; }
+  .point-spare { width: 28px; flex: none; }
   .point-label { width: 100%; min-width: 0; font-size: var(--fs-xs); padding: 5px 8px; }
   .point-hint { margin-top: 5px; font-size: var(--fs-xs); color: var(--text-3); }
   .desc-input { resize: vertical; min-height: 44px; line-height: 1.35; }

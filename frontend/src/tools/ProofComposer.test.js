@@ -744,6 +744,8 @@ describe('the points a proof states', () => {
     // its menu offers the layers only: there is nothing to remove and nothing to move
     expect(source).toContain('onraise={i > 0 ? () => raisePoint(i) : null}');
     expect(source).toContain('onremove={i > 0 ? () => removePoint(i) : null}');
+    // with several, the conclusion keeps the room of the trash the others have, so columns line up
+    expect(source).toContain('{#if i === 0 && proof.points.length > 1}<span class="point-spare" aria-hidden="true"></span>{/if}');
     expect(source).toContain('placeholder="lat, lon"');
     expect(source).toContain('placeholder="label"');
   });
