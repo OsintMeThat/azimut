@@ -580,6 +580,19 @@ it('opens a routine on a dashboard of its passes, and runs it again on a chosen 
   expect(target.textContent).toContain('Candidates per pass');
   expect(target.textContent).toContain('Spots that appeared and left');
   expect(target.querySelectorAll('[aria-label="Candidates per pass"] .column')).toHaveLength(2);
+  // a run of it that settles is read into the dashboard, and only then
+  const seriesReads = () => get.mock.calls.filter(([path]) => path.endsWith('/series')).length;
+  expect(seriesReads()).toBe(1);
+  await refreshRuns('case-a'); await settle();
+  expect(seriesReads()).toBe(1);
+  answer({
+    '/api/cases/case-a/analysis/followups': [watchRow()],
+    '/api/cases/case-a/analysis/runs': [runRow(), runRow({ id: 'fedcba987654', dates: ['2026-09-01', '2026-09-16'], created_at: '2026-09-16T10:00:00Z' })],
+    [`/api/cases/case-a/analysis/followups/${WATCH}`]: watchBody(),
+    [`/api/cases/case-a/analysis/followups/${WATCH}/series`]: SERIES,
+  });
+  await refreshRuns('case-a'); await settle();
+  expect(seriesReads()).toBe(2);
 
   // a routine is relaunched against a day, and asks which one
   button('Run routine').click(); await settle();

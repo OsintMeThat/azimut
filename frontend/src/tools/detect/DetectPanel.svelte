@@ -663,13 +663,16 @@
   // A run of the open routine that settles changes its series: read it again then.
   const settled = $derived(detection ? detection.history.filter((run) => run.status === 'ready')
     .map((run) => `${run.id}:${run.count}:${run.to_review}`).join('|') : '');
-  let seenSettled = '';
+  // what was settled when the routine opened, which its opening already read
+  let seen = { id: null, key: '' };
   $effect(() => {
     const key = settled;
-    if (!detectionId || key === seenSettled) return;
-    const first = seenSettled === '';
-    seenSettled = key;
-    if (!first) untrack(() => void reloadSeries().catch((e) => (error = e.message)));
+    const id = detectionId;
+    if (!id) return;
+    if (seen.id !== id) { seen = { id, key }; return; }
+    if (key === seen.key) return;
+    seen = { id, key };
+    untrack(() => void reloadSeries(id).catch((e) => (error = e.message)));
   });
 
   // The map rings the spots while the dashboard shows them, and nothing of them otherwise.
