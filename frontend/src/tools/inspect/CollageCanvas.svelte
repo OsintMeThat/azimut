@@ -12,6 +12,7 @@
   import { CUT_MIN_SCREEN, CUT_SNAP_SCREEN, cutOf, dragCut, snapLines } from '../../lib/collageCut.js';
   import { cutBounds } from '../../lib/inspect.js';
   import { leftOutLine, leftOutWords } from '../../lib/leftOut.js';
+  import { seamClipPath, seamHoles } from '../../lib/seams.js';
   import { shortcut } from '../../lib/keys.js';
   import Icon from '../../components/Icon.svelte';
 
@@ -158,6 +159,10 @@
 
   // The pieces the last stitch left where they were, by id, with why.
   const leftOut = $derived(new Map(unstitched.map((piece) => [piece.id, piece])));
+
+  // Where the stitched pieces meet, as the saved picture has them (lib/seams.js): what each
+  // piece is drawn without. A piece in hand is drawn whole, to be lined up.
+  const holes = $derived(seamHoles(collage.nodes));
 
   /** Pieces moved by hand are no longer the ones a stitch left out. */
   function placed(ids) {
@@ -617,7 +622,7 @@
       style:height={clipShown ? `${clipShown.h}px` : null}
     >
       <div class="pieces-in" style:transform={clipShown ? `translate(${-clipShown.x}px, ${-clipShown.y}px)` : null}>
-        {#each collage.nodes as node (node.id)}
+        {#each collage.nodes as node, i (node.id)}
           {@const box = boxOf(node)}
           {@const left = leftOut.get(node.id)}
           {#if !box.url}
@@ -654,6 +659,7 @@
               style:width={`${box.w}px`}
               style:height={`${box.h}px`}
               style:transform={quadMatrix3d(box.w, box.h, node.quad)}
+              style:clip-path={node.ghost || movingIds.includes(node.id) ? null : seamClipPath(node, holes[i])}
               style:outline-width={left ? `${2 / scale}px` : null}
               draggable="false"
               onpointerdown={(e) => (e.stopPropagation(), startMove(e, node))}
