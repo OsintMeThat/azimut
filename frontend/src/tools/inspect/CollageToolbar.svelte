@@ -112,12 +112,14 @@
    * the message after what the stitch says, and `undoAll` is its Undo, which takes the
    * frames back with their stitch. Answers how many pieces moved, or null.
    */
+  // A Panorama's stitch: it says nothing when it fails, and answers why, as the Panorama
+  // takes its frames back and says so once.
   export function stitchPan(note = null, undoAll = null) {
-    return runStitch(mode === 'planar' ? 'cylindrical' : mode, note, undoAll);
+    return runStitch(mode === 'planar' ? 'cylindrical' : mode, note, undoAll, true);
   }
 
-  async function runStitch(asked, note = null, undoAll = null) {
-    if (few || stitching) return null;
+  async function runStitch(asked, note = null, undoAll = null, pan = false) {
+    if (few || stitching) return pan ? { placed: 0, why: 'A stitch is already under way' } : null;
     stitching = true;
     if (cut) cut.editing = false;
     // the whole stitch is one undo, however many steps its pieces come back in
@@ -135,6 +137,7 @@
         // the areas painted out of a piece's matching, sent only when a piece has some
         ...(exclude ? { exclude } : {}),
       });
+      if (pan && res.nodes.length < 2) return { placed: res.nodes.length, why: 'Its frames do not overlap' };
       // A stitch is solved in source pixels, so the canvas follows it: the answer
       // carries the size that keeps the pieces at full resolution, and the export
       // is the pieces' bounds, so a canvas left too small *is* the lost detail.
@@ -167,8 +170,9 @@
       const undo = { label: 'Undo', onClick: undoAll ?? undoStitch };
       const words = stitchedWords(res.nodes.length, left.map((piece) => piece.why), asked, res.span_deg ?? null);
       toast(note ? `${words}. ${note.replace(/\.$/, '')}` : words, left.length ? 'warn' : 'ok', null, undo);
-      return res.nodes.length;
+      return pan ? { placed: res.nodes.length } : res.nodes.length;
     } catch (e) {
+      if (pan) return { placed: 0, why: e.message };
       toast(e.message, 'danger');
       return null;
     } finally {
