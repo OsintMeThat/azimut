@@ -102,6 +102,10 @@ describe('the hole at the North Pole', () => {
     expect(card.textContent).toContain('If you came all the way down here to geolocate something');
     expect(document.querySelector('.np-depth').textContent).toContain('−6 371 km');
     expect(document.querySelector('.np-depth').textContent).toContain('centre of the Earth');
+    // at the bottom, a lamp and two eyes and nothing else: no beak, no body
+    const who = document.querySelector('.np-who');
+    expect(who.querySelectorAll('.np-wink')).toHaveLength(2);
+    expect(who.querySelectorAll('path')).toHaveLength(0);
     expect(fetch).not.toHaveBeenCalled();
   });
 
