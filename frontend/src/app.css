@@ -104,6 +104,7 @@
   --motion-slide: 220ms;   /* the rail's and the tabs' amber mark following the choice */
   --motion-stagger: 14ms;  /* between two rows of a menu */
   --motion-turn: 420ms;    /* an icon turning or lifting on hover, slow enough to follow */
+  --motion-draw: 220ms;    /* a tick drawn into its box */
   --motion-shift: 4px;
   --motion-shift-lg: 8px;
   --motion-scale: 0.98;
@@ -119,6 +120,7 @@
     --motion-press: 0ms;
     --motion-slide: 0ms;
     --motion-stagger: 0ms;
+    --motion-draw: 0ms;
     --motion-shift: 0px;
     --motion-shift-lg: 0px;
     --motion-scale: 1;
@@ -225,6 +227,8 @@
    dark tokens locally, so it's a no-op in dark mode and a hard revert in light.
    Values mirror the :root dark palette above — keep them in step. */
 :root[data-theme='light'] .dark-surface {
+  --check-tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%23141414' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --check-dash: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' fill='none' stroke='%23141414' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   --bg-0: #151515;
   --bg-1: #1c1c1c;
   --bg-2: #252525;
@@ -317,12 +321,68 @@ select {
   font: inherit;
 }
 
-/* native checks, radios and sliders take the accent like the rest of the interface */
-input[type='checkbox'],
+/* native radios and sliders take the accent like the rest of the interface */
 input[type='radio'],
 input[type='range'],
 progress {
   accent-color: var(--accent);
+}
+
+/* -- check boxes ---------------------------------------------------
+   Drawn by the app rather than the browser, alike in every browser and theme:
+   a quiet box, filled with the accent when ticked, the tick drawn in from the
+   left as a cover of the box's own colour slides off it (a dash for a box that
+   is partly ticked). Still a plain input, so clicks, keys, labels and forms
+   work as before. Every rule sits in :where(), which weighs nothing, so a box
+   a tool styles itself (Website's switch in Settings) keeps its own look. */
+:root {
+  --check-tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%23141414' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --check-dash: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' fill='none' stroke='%23141414' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+/* the quiet accents' deep ink in the light theme takes a white tick */
+:root[data-theme='light'][data-accent='sand'],
+:root[data-theme='light'][data-accent='slate'],
+:root[data-theme='light'][data-accent='graphite'] {
+  --check-tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6.5' fill='none' stroke='%23ffffff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --check-dash: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' fill='none' stroke='%23ffffff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+:where(input[type='checkbox']) {
+  --check-fill: var(--bg-2);
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  background-color: var(--check-fill);
+  background-image: linear-gradient(var(--check-fill), var(--check-fill)), var(--check-tick);
+  background-repeat: no-repeat;
+  background-size: 100% 100%, 100% 100%;
+  background-position: 0 0, center;
+  cursor: pointer;
+  transition: border-color var(--motion-hover) var(--ease), background-position var(--motion-draw) var(--ease-out);
+}
+:where(input[type='checkbox']:hover:not(:disabled, :checked, :indeterminate)) {
+  border-color: var(--text-3);
+}
+:where(input[type='checkbox']:checked),
+:where(input[type='checkbox']:indeterminate) {
+  --check-fill: var(--accent);
+  border-color: var(--accent);
+  background-position: 14px 0, center;
+}
+:where(input[type='checkbox']:indeterminate) {
+  background-image: linear-gradient(var(--check-fill), var(--check-fill)), var(--check-dash);
+}
+:where(input[type='checkbox']:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+:where(input[type='checkbox']:disabled) {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 img {
@@ -775,7 +835,6 @@ svg[id^='azimut-mermaid-'] .label {
 }
 .markdown input[type='checkbox'] {
   margin-right: 6px;
-  accent-color: var(--accent);
 }
 .markdown img,
 .markdown video {
