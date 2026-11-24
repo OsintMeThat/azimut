@@ -1162,10 +1162,8 @@ describe('a frame captured in no scene', () => {
     await openFile('Convoy clip');
     await captureAt(2.01);
     const [offer] = offers();
-    // the whole video kept from the arrow while the offer is up
-    target.querySelector('[aria-label="More ways to mark"]').click();
-    flushSync();
-    [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent.includes('Whole video')).click();
+    // the whole video kept from Mark to geolocate while the offer is up
+    [...target.querySelectorAll('.mark .kind')].find((b) => b.textContent.includes('Whole video')).click();
     await settle();
 
     choice(offer, 'Whole video').onClick();

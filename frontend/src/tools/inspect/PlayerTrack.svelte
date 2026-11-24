@@ -1,7 +1,7 @@
 <script>
   import { untrack } from 'svelte';
   import {
-    clampWindow, followWindow, frameDuration, frameGrid, isWholeWindow, narrowestSpan, panWindow, preciseClock,
+    clampWindow, drawnStretch, followWindow, frameDuration, frameGrid, isWholeWindow, narrowestSpan, panWindow, preciseClock,
     tileAt, tileScale, tileStyle, waveformBars, waveformColumns, wheelFactor, windowFraction, windowTime, zoomWindow,
   } from '../../lib/inspectPlayer.js';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
@@ -22,6 +22,12 @@
   // marker it passes close to, never crosses the other end, and shows the frame it
   // stands on; `onedit(which, time)` hands the time up. A press anywhere else still
   // moves through the clip.
+  //
+  // While `drawing`, a drag across the bar draws a passage instead of moving through the
+  // clip: pressed where the place shows, let go where it ends, both on frame edges and
+  // catching on a marker close by, the clip showing the frame at the moving end.
+  // `ondraw({ start, end })` hands it up on release; a click draws nothing and only
+  // moves the clip.
   //
   // A click on a scene's pin, a press that stays where it landed, moves the clip like
   // any other and names that scene too (`onscene(key)`), which Inspect opens in its
@@ -54,6 +60,8 @@
     onedit,
     onscene,
     bandsOpen = true,
+    drawing = false,
+    ondraw,
   } = $props();
 
   const SNAP_PX = 6;
@@ -77,6 +85,7 @@
   let grab = $state(null); // 'start' or 'end' while a handle is dragged
   let nearGrip = $state(false);
   let pressed = null; // where a press landed: { x, scene }
+  let sketch = $state(null); // the passage being drawn: { from, to }
 
   const bars = $derived(waveformBars(waveform));
   // What the bar shows: the whole clip, or the stretch the wheel zoomed to.
@@ -100,6 +109,11 @@
     ...targets,
     ...scenes.filter((s) => s.end != null).map((s) => ({ time: s.end, label: s.label, key: s.key })),
   ].filter((t) => t.key !== editing.key) : []);
+  // What a drawn passage catches on: the same, and where every scene ends.
+  const drawTargets = $derived(drawing ? [
+    ...targets,
+    ...scenes.filter((s) => s.end != null).map((s) => ({ time: s.end, label: s.label })),
+  ].filter((t) => Number.isFinite(t.time)) : []);
 
   $effect(() => {
     if (!track) return;
@@ -137,10 +151,15 @@
   $effect(() => {
     const t = time;
     untrack(() => {
-      if (!zoom || grab || performance.now() - wheeledAt < FOLLOW_AFTER_MS) return;
+      if (!zoom || grab || sketch || performance.now() - wheeledAt < FOLLOW_AFTER_MS) return;
       const next = followWindow(view, t, duration);
       if (next !== view) zoom = next;
     });
+  });
+
+  // Drawing called off (Escape, another file) drops the passage still in hand.
+  $effect(() => {
+    if (!drawing) sketch = null;
   });
 
   /** Where a time is drawn on a bar `w` pixels wide. */
@@ -189,7 +208,8 @@
     wheeledAt = performance.now();
     zoom = isWholeWindow(next, duration) ? null : next;
     // the moment under the pointer, read on the new scale
-    if (!grab) hover = point(e.clientX);
+    if (sketch) drawTo(e.clientX);
+    else if (!grab) hover = drawing ? drawHover(e.clientX) : point(e.clientX);
   }
 
   /** Zoom the bar's time about the playhead by `steps`: in for more than 0, out for less. */
@@ -250,10 +270,44 @@
     showGrip(grab, time);
   }
 
+  /** Where a passage drawn at `clientX` stands: on a marker within reach, else a frame edge. */
+  function drawAt(clientX) {
+    const rect = track.getBoundingClientRect();
+    const w = rect.width;
+    const x = Math.min(Math.max(0, clientX - rect.left), w);
+    const snap = snapAt(x, w, drawTargets);
+    const time = Math.min(snap ? snap.time : snapToFrame(w ? windowTime(x / w, view) : 0, fps), duration);
+    return { x: xOf(time, w), time, snap };
+  }
+
+  const drawLabel = (which, snap) => (snap?.label ? `${which} · ${snap.label}` : which);
+
+  /** Before the press: where the passage would start. */
+  function drawHover(clientX) {
+    const p = drawAt(clientX);
+    return { x: p.x, time: p.time, label: drawLabel('Start', p.snap), exact: true };
+  }
+
+  /** The passage's moving end, the frame inside it shown: the last before an end, the first at a start. */
+  function drawTo(clientX) {
+    const p = drawAt(clientX);
+    sketch = { ...sketch, to: p.time };
+    const ending = p.time >= sketch.from;
+    hover = { x: p.x, time: p.time, label: drawLabel(ending ? 'End' : 'Start', p.snap), exact: true };
+    onseek?.(ending ? Math.max(0, p.time - frameDuration(fps)) : p.time, true);
+  }
+
   function onpointerdown(e) {
     if (e.button !== 0 || !(duration > 0)) return;
     e.preventDefault();
     track.setPointerCapture?.(e.pointerId);
+    if (drawing) {
+      const p = drawAt(e.clientX);
+      sketch = { from: p.time, to: p.time };
+      hover = { x: p.x, time: p.time, label: drawLabel('Start', p.snap), exact: true };
+      onseek?.(p.time, true);
+      return;
+    }
     const grip = gripAt(e.clientX);
     if (grip) {
       // Taken where it stands: it moves once the pointer does.
@@ -268,6 +322,14 @@
   }
 
   function onpointermove(e) {
+    if (sketch) {
+      drawTo(e.clientX);
+      return;
+    }
+    if (drawing) {
+      hover = drawHover(e.clientX);
+      return;
+    }
     if (grab) {
       dragGrip(e.clientX);
       return;
@@ -279,11 +341,24 @@
   }
 
   function onpointerup(e) {
+    if (sketch) {
+      const stretch = drawnStretch(sketch.from, sketch.to, fps, duration);
+      sketch = null;
+      track.releasePointerCapture?.(e.pointerId);
+      if (stretch) ondraw?.(stretch);
+      return;
+    }
     if (pressed?.scene && Math.abs(e.clientX - pressed.x) <= CLICK_PX) onscene?.(pressed.scene);
     pressed = null;
     dragging = false;
     grab = null;
     track.releasePointerCapture?.(e.pointerId);
+  }
+
+  // A drag the browser took away draws nothing.
+  function onpointercancel(e) {
+    sketch = null;
+    onpointerup(e);
   }
 
   const tile = $derived(hover ? tileAt(hover.time, tiles) : null);
@@ -297,7 +372,8 @@
 <div
   class="track"
   class:waved={bars.length > 0}
-  class:resize={grab != null || (nearGrip && editing != null)}
+  class:resize={!drawing && (grab != null || (nearGrip && editing != null))}
+  class:drawing
   bind:this={track}
   role="slider"
   tabindex="0"
@@ -306,14 +382,14 @@
   aria-valuemax={duration}
   aria-valuenow={time}
   aria-valuetext={preciseClock(time)}
-  title={hover ? '' : editing ? INSPECT_HELP.barScene : INSPECT_HELP.bar}
+  title={hover ? '' : drawing ? INSPECT_HELP.barDraw : editing ? INSPECT_HELP.barScene : INSPECT_HELP.bar}
   {onpointerdown}
   {onpointermove}
   {onpointerup}
   {onwheel}
-  onpointercancel={onpointerup}
+  {onpointercancel}
   onpointerleave={() => {
-    if (!grab) hover = null;
+    if (!grab && !sketch) hover = null;
     nearGrip = false;
   }}
 >
@@ -338,6 +414,15 @@
       {/if}
     {/each}
     <span class="played" style:width={pct(Math.min(1, Math.max(0, windowFraction(time, view))))}></span>
+    {#if sketch}
+      {@const from = Math.min(sketch.from, sketch.to)}
+      <span
+        class="sketch"
+        data-testid="passage-sketch"
+        style:left={at(from)}
+        style:width={across(from, Math.max(sketch.from, sketch.to))}
+      ></span>
+    {/if}
     {#if loop.a != null}
       <span
         class="loop"
@@ -373,6 +458,9 @@
     {/if}
     {#if hover}<span class="hair" style:left={`${hover.x}px`}></span>{/if}
   </div>
+  {#if drawing && !hover}
+    <div class="peek cue" data-testid="draw-cue">{INSPECT_HELP.barDraw}</div>
+  {/if}
   {#if hover}
     <div class="peek" style:left={`${hoverLeft}px`}>
       {#if tile}<span class="thumb" style={tileStyle(tile, tiles, stripUrl, PEEK)}></span>{/if}
@@ -534,6 +622,23 @@
   .track.resize {
     cursor: ew-resize;
   }
+  /* Waiting for a passage to be drawn: the bar ringed, the pointer a crosshair. */
+  .track.drawing {
+    cursor: crosshair;
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  /* The passage being drawn, in the accent until it is kept as a scene. */
+  .sketch {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    min-width: 2px;
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+    border-left: 2px solid var(--accent);
+    border-right: 2px solid var(--accent);
+    border-bottom: 3px solid var(--accent);
+    pointer-events: none;
+  }
   /* A handle: a bar in the scene's colour, standing proud of the track. */
   .grip {
     position: absolute;
@@ -631,6 +736,15 @@
     display: block;
     border-radius: 2px;
     background-color: #000;
+  }
+  .cue {
+    left: 50%;
+    max-width: 100%;
+    white-space: normal;
+    text-align: center;
+    padding: 3px 8px;
+    font-size: var(--fs-xs);
+    color: var(--text-1);
   }
   .peek-time {
     font-size: var(--fs-xs);

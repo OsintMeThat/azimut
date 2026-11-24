@@ -5,6 +5,7 @@
       {
         "title": "And also",
         "items": [
+          { "icon": "clock", "text": "Mark to geolocate lays out Whole video, Passage and Instant side by side: press Passage, then drag across the bar from where the place shows to where it ends." },
           { "icon": "pin", "text": "Save place drops a pin where you click and asks its name; while a scene is geolocated it drops numbered leads in the scene's colour, gone once the scene is proved." },
           { "icon": "layers", "text": "Places and Media are two map layers of their own, both on, so a place you save is always seen; captures stay in the Saved panel." },
           { "icon": "proof", "text": "A proof saved with no place yet keeps its scene geolocated: the pill opens that proof with your new captures, and its point map lists the scene's leads." },

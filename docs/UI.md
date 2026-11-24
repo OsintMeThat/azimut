@@ -1911,9 +1911,15 @@ picture opens on Scenes, a video on the clip rather than a frame of it:
 
 **A video's scenes are where its geolocations happen**, since a long clip often holds
 several: a route filmed from a car, or a day's events cut together. **Mark to geolocate**
-under Capture frame, or **S**, keeps a scene at the frame on screen, and its arrow offers
-This instant or Whole video. A scene is an instant until **End here** or **Shift+S** gives
-it an end at the frame on screen, and then a stretch, the kind its row calls Passage. On
+under Capture frame lays the three kinds side by side, in the order a scene's time names
+them, each one press: **Whole video**, **Passage** and **Instant**, which keeps a scene at
+the frame on screen as **S** does. Passage, lit while it waits, rings the bar: a drag across
+it, pressed where the place shows and let go where it ends, draws the passage on frame
+edges, catching on a marker close by, with the frame at the moving end on screen, and keeps
+it as a scene on release. A click there only moves the clip, and Escape or a second press on
+Passage calls it off. A scene is an instant until **End here** or
+**Shift+S** gives it an end at the frame on screen, and then a stretch, the kind its row
+calls Passage. On
 screen, a scene's parts are its **passages**, each an instant or a stretch; the Moments
 tab keeps the word moment for its marks. A scene that states no time is about the **whole video** and prints no timecode anywhere. The bar draws each one in its
 colour, a pin at an instant and a band over a passage, named on hover. A click on a pin
@@ -1926,7 +1932,7 @@ Shift+S mark them. The question stays while the clip holds no live scene and goe
 first; nothing of it is remembered. The strip says only that the frames captured are kept
 with the video.
 **An instant always keeps its frame.** One marked in Inspect (S, Mark to geolocate's
-press, the instant the scene about the whole video takes, one added or moved on a scene's
+Instant, the instant the scene about the whole video takes, one added or moved on a scene's
 open row and applied) puts the frame at that time in the strip, as Capture frame does,
 unless one within half a frame of it is there already. It is a work frame: filed to the
 case once a proof uses it, as Make the proof files the frames it takes. A passage gets
@@ -1943,11 +1949,11 @@ still to prove is offered Whole video, in its open row's kinds and in the Collag
 only as the video's one live scene still to prove with no scene holding passages beside
 it, a proof's included. Otherwise Whole video is greyed and its hover says why: *Another
 scene of this video is already about the whole video*, or *Other scenes of this video
-already hold passages, so the whole of it is not one place*. Mark to geolocate's arrow
-greys it the same way and the capture's offer leaves it out; the whole video kept while a
+already hold passages, so the whole of it is not one place*. Mark to geolocate's Whole
+video greys it the same way and the capture's offer leaves it out; the whole video kept while a
 scene is about it already answers that scene. While the clip's one live scene is still
-to prove and about the whole video, a passage marked with S, the main press, Shift+S or a
-shot kept goes to that scene instead of a second one. It keeps its label, its captures
+to prove and about the whole video, a time marked with S, Instant, a passage drawn,
+Shift+S or a shot kept goes to that scene instead of a second one. It keeps its label, its captures
 and its geolocating; Shift+S gives it the passage from the clip's start, and the toast,
 *Scene now at 0:09, no longer the whole video*, has its Undo. Beside a proof stating
 passages it stays as it is and the passage is a scene of its own. A proof about the whole
@@ -1962,8 +1968,8 @@ prove about the whole video, the same question asked twice, get a quiet line ove
 list, *2 scenes for the whole video · Join them*. One press joins them into the first as
 Same place as… joins two: its label first and the other's after it, the captures gathered,
 the geolocating moved. The toast's Undo parts them again, ids and captures included. Until
-they are joined, where no scene holds a time, S, the main press, Shift+S and a shot kept
-take none, since either could, and their toast offers Join them. A scene about the whole
+they are joined, where no scene holds a time, S, Instant, a passage drawn, Shift+S and a
+shot kept take none, since either could, and their toast offers Join them. A scene about the whole
 video beside scenes at a time says so in its open row, *This video also has scenes at a
 time*, with **Give it a time**, which makes it the instant on screen as S would and keeps
 that frame in the strip, and **Abandon…**, which asks for the usual word; closed, its row

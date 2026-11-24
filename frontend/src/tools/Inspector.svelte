@@ -113,6 +113,9 @@
   // Bumped whenever the open file changes, so a render or a capture that returns
   // afterwards can tell it belongs to a file no longer open.
   let openRun = 0;
+  // The bar waits for a passage to be dragged across it; Escape, another file or a
+  // frame opened calls it off.
+  let drawingPassage = $state(false);
   // Every preview blob this file made. A duplicated frame shares its original's,
   // so they are freed together when the file closes rather than one at a time.
   const blobs = new Set();
@@ -304,6 +307,7 @@
   // -- opening a file -----------------------------------------------------------
   function closeFile() {
     openRun += 1;
+    drawingPassage = false;
     for (const url of blobs) URL.revokeObjectURL(url);
     blobs.clear();
     work.caseId = null;
@@ -773,6 +777,7 @@
   }
 
   function select(id) {
+    drawingPassage = false;
     cropEditing = false;
     cropBefore = null;
     shared.cropMode = false;
@@ -916,6 +921,11 @@
     if (zoning && key === 'Escape') {
       e.preventDefault();
       closeZone();
+      return;
+    }
+    if (drawingPassage && key === 'Escape') {
+      e.preventDefault();
+      drawingPassage = false;
       return;
     }
     if (activeFrame && cropEditing) {
@@ -1317,7 +1327,7 @@
   }
 
   /**
-   * An instant always keeps its frame. One marked here (S, Mark to geolocate's press,
+   * An instant always keeps its frame. One marked here (S, Mark to geolocate's Instant,
    * the instant the scene about the whole video takes, one added or moved on a scene's
    * open row) puts the frame at that time into the strip, as Capture frame does, unless
    * one within half a frame of it is there already. It is a work frame, filed to the
@@ -1338,6 +1348,16 @@
   function addSceneHere() {
     if (!isVideo) return;
     keepScene({ start: shownTime() }, (scene) => `Scene kept at ${sceneTime(scene)}`);
+  }
+
+  // Mark to geolocate's Passage readies the bar (`drawingPassage`): the next drag across
+  // it draws the passage, kept as a scene on release. A second press calls it off.
+  const drawPassage = () => (drawingPassage = isVideo && !drawingPassage);
+
+  /** The passage dragged across the bar, kept as a scene as Shift+S would end one. */
+  function keepDrawnPassage(stretch) {
+    drawingPassage = false;
+    keepScene(stretch, (scene) => `Scene kept, ${sceneTime(scene)}`);
   }
 
   /** A scene about the whole video, with no timecode. */
@@ -2154,7 +2174,7 @@
     toast('Press S where a place shows as the video plays, and Shift+S where it ends', 'info', 8000);
   }
 
-  // Why Mark to geolocate's arrow does not offer the whole video: a scene says so, or
+  // Why Mark to geolocate's Whole video is greyed: a scene says so, or
   // scenes hold passages of the clip, which makes it several places.
   const markWholeOff = $derived(
     { whole: INSPECT_HELP.markWholeTaken, timed: INSPECT_HELP.markWholeTimed }[wholeBarred(scenes)] ?? '',
@@ -2399,6 +2419,8 @@
               onedit={dragScene}
               onscene={pressedOnBar}
               bandsOpen={scenesShown}
+              drawing={drawingPassage}
+              ondraw={keepDrawnPassage}
             />
           {:else if activeFrame?.url}
             <FrameViewer
@@ -2462,7 +2484,9 @@
               </button>
               <MarkScene
                 wholeOff={markWholeOff}
-                onmoment={addSceneHere}
+                drawing={drawingPassage}
+                oninstant={addSceneHere}
+                onpassage={drawPassage}
                 onwhole={keepWholeVideo}
               />
               {#if unfiledCount}

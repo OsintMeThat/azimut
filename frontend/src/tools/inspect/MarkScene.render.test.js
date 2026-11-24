@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import MarkScene from './MarkScene.svelte';
 
-/** Mark to geolocate, above the tabs: the main press, and what its arrow offers. */
+/** Mark to geolocate, above the tabs: Whole video, Passage and Instant, side by side. */
 
 let live = [];
 let targets = [];
@@ -28,68 +28,54 @@ function render(props) {
   return target;
 }
 
-const item = (name) => [...document.querySelectorAll('[role="menuitem"]')].find((b) => b.textContent.includes(name));
-const openMenu = (root) => {
-  root.querySelector('[aria-label="More ways to mark"]').click();
-  flushSync();
-};
+const kind = (root, name) => [...root.querySelectorAll('.kind')].find((b) => b.textContent.includes(name));
 
 describe('Mark to geolocate', () => {
-  it('keeps a scene at the frame on screen from its main press, S said on it', () => {
-    const onmoment = vi.fn();
-    const root = render({ onmoment });
-    const press = root.querySelector('.press');
-    expect(press.textContent).toContain('Mark to geolocate');
-    expect(press.querySelector('kbd').textContent).toBe('S');
-    press.click();
-    expect(onmoment).toHaveBeenCalledTimes(1);
+  it('names itself over the three kinds, in the order a scene\'s time names them, S said on Instant', () => {
+    const root = render({});
+    expect(root.querySelector('.mark-head').textContent.trim()).toBe('Mark to geolocate');
+    expect([...root.querySelectorAll('.kind .name')].map((n) => n.textContent)).toEqual(['Whole video', 'Passage', 'Instant']);
+    expect(kind(root, 'Instant').querySelector('kbd').textContent).toBe('S');
+    expect(kind(root, 'Instant').getAttribute('title')).toBe('A scene at the frame on screen (S), and Shift+S ends one there');
+    expect(kind(root, 'Whole video').getAttribute('title')).toBe('A scene about the whole video, with no timecode');
   });
 
-  it('offers This instant and Whole video from its arrow, and closes on a pick', () => {
-    const onmoment = vi.fn();
+  it('does what each press says, in one press', () => {
+    const oninstant = vi.fn();
+    const onpassage = vi.fn();
     const onwhole = vi.fn();
-    const root = render({ onmoment, onwhole });
-    const arrow = root.querySelector('[aria-label="More ways to mark"]');
-    expect(arrow.getAttribute('aria-expanded')).toBe('false');
-    openMenu(root);
-    expect(arrow.getAttribute('aria-expanded')).toBe('true');
-    expect(item('This instant').querySelector('kbd').textContent).toBe('S');
-    expect(document.querySelector('.fm-note').textContent).toContain('Shift+S ends a scene at the frame on screen');
-    item('Whole video').click();
-    flushSync();
-    expect(onwhole).toHaveBeenCalledTimes(1);
-    expect(item('Whole video')).toBeUndefined();
-
-    openMenu(root);
-    item('This instant').click();
-    flushSync();
-    expect(onmoment).toHaveBeenCalledTimes(1);
+    const root = render({ oninstant, onpassage, onwhole });
+    kind(root, 'Whole video').click();
+    kind(root, 'Passage').click();
+    kind(root, 'Instant').click();
+    expect([onwhole, onpassage, oninstant].map((f) => f.mock.calls.length)).toEqual([1, 1, 1]);
   });
 
-  it('greys Whole video once a scene to geolocate says so already', () => {
-    const onwhole = vi.fn();
-    const root = render({ wholeOff: 'The whole video is marked already', onwhole });
-    openMenu(root);
-    expect(item('Whole video').disabled).toBe(true);
-    expect(item('Whole video').getAttribute('title')).toBe('The whole video is marked already');
-    expect(item('This instant').disabled).toBe(false);
+  it('lights Passage while the bar waits for the drag, its hover saying how to stop', () => {
+    const root = render({ drawing: true });
+    const passage = kind(root, 'Passage');
+    expect(passage.classList.contains('on')).toBe(true);
+    expect(passage.getAttribute('aria-pressed')).toBe('true');
+    expect(passage.getAttribute('title')).toBe('Stop waiting for a drag across the bar (Esc)');
+    const idle = render({});
+    expect(kind(idle, 'Passage').getAttribute('aria-pressed')).toBe('false');
+    expect(kind(idle, 'Passage').getAttribute('title')).toBe('A scene over a passage you drag across the bar');
+  });
+
+  it('greys Whole video once a scene to geolocate says so already, the others still pressed', () => {
+    const root = render({ wholeOff: 'The whole video is marked already' });
+    expect(kind(root, 'Whole video').disabled).toBe(true);
+    expect(kind(root, 'Whole video').getAttribute('title')).toBe('The whole video is marked already');
+    expect([kind(root, 'Passage').disabled, kind(root, 'Instant').disabled]).toEqual([false, false]);
   });
 
   it('greys Whole video beside scenes holding passages, and says why on hover', () => {
     const onwhole = vi.fn();
     const root = render({ wholeOff: 'Scenes already hold passages of this video, so the whole of it is not one place', onwhole });
-    openMenu(root);
-    const whole = item('Whole video');
+    const whole = kind(root, 'Whole video');
     expect(whole.disabled).toBe(true);
     expect(whole.getAttribute('title')).toBe('Scenes already hold passages of this video, so the whole of it is not one place');
     whole.click();
     expect(onwhole).not.toHaveBeenCalled();
-  });
-
-  it('offers Whole video with its own hover when nothing bars it', () => {
-    const root = render({});
-    openMenu(root);
-    expect(item('Whole video').disabled).toBe(false);
-    expect(item('Whole video').getAttribute('title')).toBe('A scene about the whole video, with no timecode');
   });
 });

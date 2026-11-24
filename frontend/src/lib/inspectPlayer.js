@@ -241,6 +241,18 @@ export function followWindow(win, time, duration) {
   return clampWindow({ start: time - win.span * LEAD, span: win.span }, duration);
 }
 
+/**
+ * The passage a drag across the bar draws, from where it was pressed to where it is
+ * now, both read on frame edges: the earlier one starts it, the later one ends it,
+ * never past the clip. Null while they are less than a frame apart, as a click is.
+ */
+export function drawnStretch(from, to, fps, duration = 0) {
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return null;
+  const start = Math.max(0, Math.min(from, to));
+  const end = duration > 0 ? Math.min(Math.max(from, to), duration) : Math.max(from, to);
+  return end - start >= frameDuration(fps) - NOISE ? { start, end } : null;
+}
+
 /** Frames drawn narrower than this get no line between them. */
 const GRID_PX = 6;
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_FPS, FRAME_PX, SPEEDS, captureMoment, clampTime, clampWindow, faster, followWindow, frameDuration,
+  DEFAULT_FPS, FRAME_PX, SPEEDS, captureMoment, clampTime, clampWindow, drawnStretch, faster, followWindow, frameDuration,
   frameGrid, frameIndex, histogram, isWholeWindow, loopIsSet, loopRestart, narrowestSpan, panWindow,
   preciseClock, seekInto, setLoopEnd, shownFrameTime, slower, sortedMarks, speedLabel, stepTarget, tileAt,
   tileScale, tileStyle, waveformBars, waveformColumns, wheelFactor, wholeWindow, windowFraction, windowTime,
@@ -180,6 +180,28 @@ describe('the bar', () => {
     ]);
     expect(waveformColumns([], 10, wholeWindow(10), 100)).toEqual([]);
     expect(waveformColumns(bars, 0, wholeWindow(0), 100)).toEqual([]);
+  });
+});
+
+describe('a passage drawn on the bar', () => {
+  const fps = 25;
+
+  it('starts at the earlier end and ends at the later, whichever way it was dragged', () => {
+    expect(drawnStretch(2, 5.2, fps, 20)).toEqual({ start: 2, end: 5.2 });
+    expect(drawnStretch(5.2, 2, fps, 20)).toEqual({ start: 2, end: 5.2 });
+  });
+
+  it('is a frame at the least, a click drawing none', () => {
+    expect(drawnStretch(3, 3, fps, 20)).toBeNull();
+    expect(drawnStretch(3, 3.02, fps, 20)).toBeNull();
+    expect(drawnStretch(3, 3.04, fps, 20)).toEqual({ start: 3, end: 3.04 });
+  });
+
+  it('stays inside the clip, and reads nothing from a time that is not one', () => {
+    expect(drawnStretch(18, 25, fps, 20)).toEqual({ start: 18, end: 20 });
+    expect(drawnStretch(-1, 2, fps, 20)).toEqual({ start: 0, end: 2 });
+    expect(drawnStretch(null, 2, fps, 20)).toBeNull();
+    expect(drawnStretch(1, Number.NaN, fps, 20)).toBeNull();
   });
 });
 

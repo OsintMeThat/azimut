@@ -19,6 +19,7 @@ export const INSPECT_HELP = {
   zoneIcon: 'Search a zone of the picture on the reverse-search engines (R)',
   bar: 'Click or drag to move through the clip, the wheel zooms in on its time',
   barScene: 'Drag a handle to move the scene, or click to move through the clip',
+  barDraw: 'Drag across the bar from where the place shows to where it ends, Esc cancels',
   barZoom: 'The bar zoomed by the wheel or + and -, click for the whole clip',
   keys: 'Space play · ←/→ frame · Shift+←/→ second · J/L speed · C capture · S scene · M mark · +/- bar zoom · hold O unadjusted',
 
@@ -50,10 +51,10 @@ export const INSPECT_HELP = {
   fit: 'Reset zoom, pan and turn',
 
   // scenes
-  markHere: 'Keep the frame on screen as a scene to geolocate (S)',
-  markMenu: 'Mark this instant or the whole video',
-  markMoment: 'A scene at the frame on screen (S)',
   markWhole: 'A scene about the whole video, with no timecode',
+  markPassage: 'A scene over a passage you drag across the bar',
+  markPassageOff: 'Stop waiting for a drag across the bar (Esc)',
+  markInstant: 'A scene at the frame on screen (S), and Shift+S ends one there',
   markWholeTaken: 'The whole video is marked already',
   markWholeTimed: 'Scenes already hold passages of this video, so the whole of it is not one place',
   markPicture: 'Keep the whole picture as a place to geolocate',

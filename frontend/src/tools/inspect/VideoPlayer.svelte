@@ -51,6 +51,9 @@
     // A press on a scene's pin, or on its band while `bandsOpen`, by the scene's key.
     onscene,
     bandsOpen = true,
+    // Mark to geolocate's Passage: a drag across the bar draws one, handed up on release.
+    drawing = false,
+    ondraw,
     // Zone search (`ZoneSearch`): offered when the tool gives the zone's picture.
     // Open, it pauses the clip and stands it upright, the left button draws the zone
     // and the middle one pans.
@@ -329,6 +332,8 @@
       {onedit}
       {onscene}
       {bandsOpen}
+      {drawing}
+      {ondraw}
     />
     <div class="controls">
       <button class="player-btn" onclick={togglePlay} aria-label={paused ? 'Play' : 'Pause'} title={INSPECT_HELP.play}>

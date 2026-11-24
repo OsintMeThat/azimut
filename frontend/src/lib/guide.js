@@ -1257,6 +1257,7 @@ export const KEYMAP = [
       { combo: 'C', does: 'captures the frame on screen' },
       { combo: 'S', does: 'keeps a scene to geolocate at the frame on screen' },
       { combo: 'Shift+S', does: 'ends the last scene at the frame on screen' },
+      { combo: 'Drag on the bar', does: 'after Mark to geolocate\'s Passage, keeps the passage dragged as a scene; Escape calls it off' },
       { combo: 'S / Shift+S', does: 'with a scene\'s time open, moves the start or the end of the passage in hand to the frame on screen' },
       { combo: '↑ / ↓', does: 'in a scene\'s time, nudges it a frame, Shift for a second' },
       { combo: 'Escape', does: 'lets go of a scene\'s time, then closes the scenes' },

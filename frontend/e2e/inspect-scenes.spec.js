@@ -199,21 +199,50 @@ test('hangs the collages of the clip under their scenes, and offers them to the 
   await expect(page).toHaveURL(/#collage/);
 });
 
-test('offers Mark to geolocate above the tabs, its arrow This instant and Whole video', async ({ page }) => {
+/** Mark to geolocate's three, above the tabs. */
+const mark = (page) => page.getByRole('group', { name: 'Mark to geolocate' });
+
+test('offers Mark to geolocate above the tabs: Whole video, Passage and Instant side by side', async ({ page }) => {
   await serve(page, { scenes: [] });
-  await page.getByRole('button', { name: 'More ways to mark' }).click();
-  await expect(page.getByRole('menuitem', { name: /This instant/ })).toBeVisible();
-  await expect(page.getByRole('menuitem', { name: /Whole video/ })).toBeEnabled();
+  await expect(mark(page).getByRole('button')).toHaveText([/Whole video/, /Passage/, /Instant\s*S/]);
+  await expect(mark(page).getByRole('button', { name: /Whole video/ })).toBeEnabled();
+  // side by side on one row
+  const [whole, instant] = await Promise.all([/Whole video/, /Instant/].map((name) => mark(page).getByRole('button', { name }).boundingBox()));
+  expect(Math.abs(whole.y - instant.y)).toBeLessThan(2);
   await shoot(page, 'mark-menu');
 });
 
-test('greys Whole video once a scene holds a passage, in the arrow and in another scene\'s kinds, saying why', async ({ page }) => {
+test('keeps a passage dragged across the bar once Passage is picked', async ({ page }) => {
+  const { server } = await serve(page, { scenes: [] });
+  const passage = mark(page).getByRole('button', { name: /Passage/ });
+  await passage.click();
+  const track = page.locator('.track');
+  await expect(track).toHaveClass(/drawing/);
+  await expect(passage).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('draw-cue')).toBeVisible();
+  const bar = await track.boundingBox();
+  const at = (time) => [bar.x + (bar.width * time) / STEPS_DURATION, bar.y + bar.height / 2];
+  await page.mouse.move(...at(0.2));
+  await page.mouse.down();
+  await page.mouse.move(...at(0.5), { steps: 4 });
+  await page.mouse.move(...at(0.8), { steps: 4 });
+  await expect(page.getByTestId('passage-sketch')).toBeVisible();
+  await shoot(page, 'passage-drawn');
+  await page.mouse.up();
+  await expect.poll(() => server.saves.at(-1)?.spec?.scenes?.map((sc) => [sc.start, sc.end])).toEqual([
+    [expect.closeTo(0.2, 1), expect.closeTo(0.8, 1)],
+  ]);
+  await expect(track).not.toHaveClass(/drawing/);
+  await expect(passage).toHaveAttribute('aria-pressed', 'false');
+  await expect(rows(page)).toHaveCount(1);
+  await expect(rows(page).first().getByRole('radio', { name: 'Passage' })).toHaveAttribute('aria-checked', 'true');
+});
+
+test('greys Whole video once a scene holds a passage, in Mark to geolocate and in another scene\'s kinds, saying why', async ({ page }) => {
   await serve(page, { scenes: [kept('sc_1', 0.4, 0.9, 'Road bridge?'), kept('sc_2', 1, null, '')] });
-  await page.getByRole('button', { name: 'More ways to mark' }).click();
-  const item = page.getByRole('menuitem', { name: /Whole video/ });
+  const item = mark(page).getByRole('button', { name: /Whole video/ });
   await expect(item).toBeDisabled();
   await expect(item).toHaveAttribute('title', 'Scenes already hold passages of this video, so the whole of it is not one place');
-  await page.keyboard.press('Escape');
   const kind = rows(page).first().getByRole('radio', { name: 'Whole video' });
   await expect(kind).toBeDisabled();
   await expect(kind).toHaveAttribute('title', 'Other scenes of this video already hold passages, so the whole of it is not one place');
@@ -344,9 +373,9 @@ test('an instant marked keeps its frame in the strip, unfiled, and a passage tak
   await page.keyboard.press('Shift+S');
   await expect(frames(page)).toHaveCount(1);
 
-  // Mark to geolocate's main press, at another frame: another instant, another frame
+  // Mark to geolocate's Instant, at another frame: another instant, another frame
   for (let i = 0; i < 6; i += 1) await page.keyboard.press('ArrowRight');
-  await page.locator('.pinned').getByRole('button', { name: /^Mark to geolocate/ }).click();
+  await mark(page).getByRole('button', { name: /Instant/ }).click();
   await expect(rows(page)).toHaveCount(2);
   await expect(frames(page)).toHaveCount(2);
 });
@@ -418,12 +447,12 @@ test('points once at the To-do tab from the open sidebar, the toast keeping its 
 
   // never again in this browser
   await views.getByRole('tab', { name: 'Folders' }).click();
-  await page.locator('.pinned').getByRole('button', { name: /^Mark to geolocate/ }).click();
+  await mark(page).getByRole('button', { name: /Instant/ }).click();
   await expect(page.locator('.toast', { hasText: 'Scene kept at 0:00' }).last()).toBeVisible();
   await expect(coach).toHaveCount(0);
   await page.reload();
   await openFile(page, 'Convoy clip');
-  await page.locator('.pinned').getByRole('button', { name: /^Mark to geolocate/ }).click();
+  await mark(page).getByRole('button', { name: /Instant/ }).click();
   await expect(page.locator('.toast', { hasText: 'Scene kept at 0:00' })).toBeVisible();
   await expect(coach).toHaveCount(0);
 });

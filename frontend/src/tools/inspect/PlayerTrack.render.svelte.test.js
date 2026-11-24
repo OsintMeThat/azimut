@@ -42,13 +42,14 @@ function open(props) {
   observers = [];
   target = document.createElement('div');
   document.body.append(target);
-  const held = $state({ time: props.time ?? 0, zoom: null });
+  const held = $state({ time: props.time ?? 0, zoom: null, drawing: props.drawing ?? false });
   box = held;
   live = mount(PlayerTrack, {
     target,
     props: {
       duration: 10,
       ...props,
+      get drawing() { return box.drawing; },
       get time() { return box.time; },
       get zoom() { return box.zoom; },
       set zoom(value) { box.zoom = value; },
@@ -286,6 +287,116 @@ describe('the handles of a scene whose time is open', () => {
     expect(track.classList.contains('resize')).toBe(true);
     move(track, 35);
     expect(track.classList.contains('resize')).toBe(false);
+  });
+});
+
+describe('a passage drawn across the bar', () => {
+  const move = (track, x) => {
+    track.dispatchEvent(new PointerEvent('pointermove', { clientX: x, bubbles: true }));
+    flushSync();
+  };
+  const down = (track, x) => {
+    track.dispatchEvent(new PointerEvent('pointerdown', { clientX: x, button: 0, bubbles: true }));
+    flushSync();
+  };
+  const up = (track, x, type = 'pointerup') => {
+    track.dispatchEvent(new PointerEvent(type, { clientX: x, button: 0, bubbles: true }));
+    flushSync();
+  };
+  const drag = (track, from, to) => {
+    down(track, from);
+    move(track, to);
+    up(track, to);
+  };
+  const sketch = () => target.querySelector('[data-testid="passage-sketch"]');
+  const near = (stretch) => stretch && { start: Number(stretch.start.toFixed(6)), end: Number(stretch.end.toFixed(6)) };
+
+  // 10 fps on 100 px over 10 s: a frame is a tenth of a second, a pixel
+  const fps = 10;
+
+  it('runs from where it is pressed to where it is let go, the clip showing the frame at the moving end', () => {
+    const ondraw = vi.fn();
+    const onseek = vi.fn();
+    const track = open({ drawing: true, fps, ondraw, onseek });
+    down(track, 20.3);
+    expect(onseek).toHaveBeenLastCalledWith(2, true);
+    move(track, 52);
+    expect(sketch().style.left).toBe('20%');
+    expect(Number.parseFloat(sketch().style.width)).toBeCloseTo(32, 6);
+    // the last frame inside the passage
+    expect(onseek.mock.calls.at(-1)[0]).toBeCloseTo(5.1, 6);
+    expect(target.querySelector('.peek-time').textContent).toBe('0:05.200 · End');
+    up(track, 52);
+    expect(ondraw).toHaveBeenCalledTimes(1);
+    expect(near(ondraw.mock.calls[0][0])).toEqual({ start: 2, end: 5.2 });
+    expect(sketch()).toBeNull();
+  });
+
+  it('is the same passage dragged backwards, the clip showing its first frame', () => {
+    const ondraw = vi.fn();
+    const onseek = vi.fn();
+    const track = open({ drawing: true, fps, ondraw, onseek });
+    down(track, 52);
+    move(track, 20);
+    expect(onseek).toHaveBeenLastCalledWith(2, true);
+    expect(target.querySelector('.peek-time').textContent).toBe('0:02.000 · Start');
+    up(track, 20);
+    expect(near(ondraw.mock.calls[0][0])).toEqual({ start: 2, end: 5.2 });
+  });
+
+  it('draws nothing from a click, which only moves the clip', () => {
+    const ondraw = vi.fn();
+    const onseek = vi.fn();
+    const track = open({ drawing: true, fps, ondraw, onseek });
+    press(track, 30);
+    expect(ondraw).not.toHaveBeenCalled();
+    expect(onseek).toHaveBeenCalledWith(3, true);
+  });
+
+  it('catches on a marker close by, and on where another scene ends', () => {
+    const ondraw = vi.fn();
+    const scenes = [{ key: 'sc_1', start: 1, end: 7, color: 'red', label: 'Bridge' }];
+    const track = open({ drawing: true, fps, ondraw, scenes, frames: [{ id: 'f1', time: 3.55 }] });
+    down(track, 35);
+    move(track, 68);
+    expect(target.querySelector('.peek-time').textContent).toBe('0:07.000 · End · Bridge');
+    up(track, 68);
+    expect(near(ondraw.mock.calls[0][0])).toEqual({ start: 3.55, end: 7 });
+  });
+
+  it('leaves the handles and the scenes alone while it waits, and says how on the bar', () => {
+    const ondraw = vi.fn();
+    const onedit = vi.fn();
+    const onscene = vi.fn();
+    const scenes = [{ key: 'sc_1', start: 2, end: 5, color: 'red', label: 'Bridge', scene: { key: 'sc_1' } }];
+    const track = open({ drawing: true, fps, ondraw, onedit, onscene, scenes, editing: { key: 'sc_1', start: 2, end: 5, color: 'red' } });
+    expect(track.classList.contains('drawing')).toBe(true);
+    expect(target.querySelector('[data-testid="draw-cue"]').textContent).toBe('Drag across the bar from where the place shows to where it ends, Esc cancels');
+    move(track, 50);
+    expect(track.classList.contains('resize')).toBe(false);
+    expect(target.querySelector('[data-testid="draw-cue"]')).toBeNull();
+    expect(target.querySelector('.peek-time').textContent).toBe('0:05.000 · Start · Bridge');
+    drag(track, 20, 40);
+    expect([onedit, onscene].map((f) => f.mock.calls.length)).toEqual([0, 0]);
+    expect(near(ondraw.mock.calls[0][0])).toEqual({ start: 2, end: 4 });
+  });
+
+  it('draws nothing when the browser takes the drag away, or when drawing is called off', () => {
+    const ondraw = vi.fn();
+    const track = open({ drawing: true, fps, ondraw });
+    down(track, 20);
+    move(track, 40);
+    up(track, 40, 'pointercancel');
+    expect(sketch()).toBeNull();
+
+    down(track, 20);
+    move(track, 40);
+    box.drawing = false;
+    flushSync();
+    expect(sketch()).toBeNull();
+    up(track, 40);
+    expect(ondraw).not.toHaveBeenCalled();
+    expect(track.classList.contains('drawing')).toBe(false);
   });
 });
 

@@ -1,103 +1,109 @@
 <script>
-  import FloatingMenu from '../../components/FloatingMenu.svelte';
   import Icon from '../../components/Icon.svelte';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
 
-  // Mark to geolocate, under Capture frame: the main press keeps a scene at the frame
-  // on screen, as S does, and the arrow offers that or the whole video. `wholeOff` says
-  // why the whole video is not offered, greyed with those words on hover: a scene says
-  // so already, or scenes hold passages of the video. Both keys are said here.
-  let { wholeOff = '', onmoment, onwhole } = $props();
-
-  let arrow = $state(null);
-  let open = $state(false);
-
-  function pick(act) {
-    open = false;
-    act?.();
-  }
+  // Mark to geolocate, under Capture frame: the three kinds a scene's time takes, side by
+  // side in the order its editor names them, each one press. Whole video keeps a scene
+  // about all of it; Passage readies the bar for a drag across it, lit while it waits
+  // (`drawing`), a second press calling it off; Instant keeps the frame on screen, as S
+  // does. `wholeOff` says why the whole video is not offered, greyed with those words on
+  // hover: a scene says so already, or scenes hold passages of the video.
+  let { wholeOff = '', drawing = false, oninstant, onpassage, onwhole } = $props();
 </script>
 
-<div class="split" role="group" aria-label="Mark to geolocate" data-guide="inspect.scene">
-  <button class="btn btn-sm press" onclick={() => onmoment?.()} title={INSPECT_HELP.markHere}>
-    <Icon name="pin" size={13} />
-    <span>Mark to geolocate</span>
-    <kbd>S</kbd>
-  </button>
-  <button
-    class="btn btn-sm more"
-    bind:this={arrow}
-    onclick={() => (open = !open)}
-    aria-haspopup="menu"
-    aria-expanded={open}
-    aria-label="More ways to mark"
-    title={INSPECT_HELP.markMenu}
-  >
-    <Icon name="chevronDown" size={13} />
-  </button>
-</div>
-
-{#if open}
-  <FloatingMenu anchor={arrow} width={200} align="end" label="Mark to geolocate" onclose={() => (open = false)}>
-    <button class="fm-item" role="menuitem" onclick={() => pick(onmoment)} title={INSPECT_HELP.markMoment}>
-      <Icon name="pin" size={13} />
-      <span class="fm-grow">This instant</span>
-      <kbd class="hint">S</kbd>
+<div class="mark" role="group" aria-label="Mark to geolocate" data-guide="inspect.scene">
+  <span class="mark-head"><Icon name="pin" size={12} /> Mark to geolocate</span>
+  <div class="kinds">
+    <button class="btn btn-sm kind" disabled={Boolean(wholeOff)} onclick={() => onwhole?.()} title={wholeOff || INSPECT_HELP.markWhole}>
+      <Icon name="video" size={13} />
+      <span class="name">Whole video</span>
     </button>
     <button
-      class="fm-item"
-      role="menuitem"
-      disabled={Boolean(wholeOff)}
-      onclick={() => pick(onwhole)}
-      title={wholeOff || INSPECT_HELP.markWhole}
+      class="btn btn-sm kind"
+      class:on={drawing}
+      aria-pressed={drawing}
+      onclick={() => onpassage?.()}
+      title={drawing ? INSPECT_HELP.markPassageOff : INSPECT_HELP.markPassage}
     >
-      <Icon name="video" size={13} />
-      <span class="fm-grow">Whole video</span>
+      <Icon name="clock" size={13} />
+      <span class="name">Passage</span>
     </button>
-    <div class="fm-sep"></div>
-    <p class="fm-note"><kbd class="hint">Shift+S</kbd> ends a scene at the frame on screen</p>
-  </FloatingMenu>
-{/if}
+    <button class="btn btn-sm kind" onclick={() => oninstant?.()} title={INSPECT_HELP.markInstant}>
+      <Icon name="pin" size={13} />
+      <span class="name">Instant</span>
+      <kbd>S</kbd>
+    </button>
+  </div>
+</div>
 
 <style>
-  .split {
+  .mark {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+  }
+  .mark-head {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+  }
+  .mark-head :global(svg) {
+    color: var(--accent);
+  }
+  /* One bar in three parts: a hairline between, the outer corners rounded. */
+  .kinds {
     display: flex;
     width: 100%;
   }
-  .press {
-    flex: 1;
+  .kind {
+    flex: 1 1 0;
     min-width: 0;
     justify-content: center;
-    gap: 6px;
-    border-top-right-radius: 0;
-    border-bottom-right-radius: 0;
+    gap: 5px;
+    border-radius: 0;
   }
-  .press :global(svg) {
-    color: var(--accent);
-  }
-  .more {
-    flex: 0 0 30px;
-    justify-content: center;
-    padding-left: 0;
-    padding-right: 0;
+  .kind + .kind {
     margin-left: -1px;
-    border-top-left-radius: 0;
-    border-bottom-left-radius: 0;
   }
-  .more[aria-expanded='true'] {
+  .kind:first-child {
+    border-top-left-radius: var(--r-sm);
+    border-bottom-left-radius: var(--r-sm);
+  }
+  .kind:last-child {
+    border-top-right-radius: var(--r-sm);
+    border-bottom-right-radius: var(--r-sm);
+  }
+  .kind :global(svg) {
+    flex: none;
     color: var(--accent);
+  }
+  .kind:disabled :global(svg) {
+    color: inherit;
+  }
+  .name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Passage while the bar waits for the drag. */
+  .kind.on {
+    position: relative;
+    z-index: 1;
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
   kbd {
+    flex: none;
     padding: 0 4px;
     border-radius: 3px;
     border: 1px solid currentColor;
     font-size: 10px;
     font-family: var(--font-mono);
     opacity: 0.6;
-  }
-  .hint {
-    flex: none;
-    color: var(--text-3);
-    opacity: 1;
   }
 </style>
