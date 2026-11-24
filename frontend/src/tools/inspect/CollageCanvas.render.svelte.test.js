@@ -402,6 +402,66 @@ describe('opening a collage', () => {
   });
 });
 
+describe('the hand', () => {
+  const piece = (i) => target.querySelectorAll('img.node')[i];
+  const drag = (el, [x0, y0], [x1, y1], init = {}) => {
+    pointer(el, 'pointerdown', x0, y0, init);
+    pointer(window, 'pointermove', x1, y1, init);
+    pointer(window, 'pointerup', x1, y1, init);
+  };
+
+  it('pans over a piece not in hand, moving nothing, and a click takes it in hand', () => {
+    const view = $state({ zoom: 1, x: 0, y: 0 });
+    show([], null, view);
+    const [x, y] = [view.x, view.y];
+    drag(piece(1), [40, 30], [100, 70]);
+    expect([view.x - x, view.y - y]).toEqual([60, 40]);
+    expect(collage.nodes.map((n) => n.quad)).toEqual([rect, rect]);
+    expect(props.selectedIds).toEqual([]);
+    // the jitter of a click is still a click
+    drag(piece(1), [40, 30], [41, 31]);
+    expect(props.selectedIds).toEqual(['nd_2']);
+  });
+
+  it('moves what is in hand, and the middle button pans even over it', () => {
+    const view = $state({ zoom: 1, x: 0, y: 0 });
+    show(['nd_1', 'nd_2'], null, view);
+    drag(piece(1), [40, 30], [60, 40]);
+    expect(collage.nodes.map((n) => n.quad[0])).toEqual([[20, 10], [20, 10]]);
+
+    const x = view.x;
+    drag(piece(1), [40, 30], [90, 30], { button: 1 });
+    expect(view.x - x).toBe(50);
+    expect(collage.nodes.map((n) => n.quad[0])).toEqual([[20, 10], [20, 10]]);
+    expect(props.selectedIds).toEqual(['nd_1', 'nd_2']);
+  });
+
+  it('keeps the hand through a pan of the background, and a click there puts it down', () => {
+    const view = $state({ zoom: 1, x: 0, y: 0 });
+    show(['nd_1'], null, view);
+    const wrap = target.querySelector('.wrap');
+    drag(wrap, [500, 400], [560, 400]);
+    expect(props.selectedIds).toEqual(['nd_1']);
+    drag(wrap, [500, 400], [500, 400]);
+    expect(props.selectedIds).toEqual([]);
+  });
+
+  it('takes every piece in hand on Ctrl+A, and leaves it to a field being typed in', () => {
+    show([]);
+    const ctrlA = (el) => {
+      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true, cancelable: true }));
+      flushSync();
+    };
+    const field = document.createElement('input');
+    document.body.append(field);
+    ctrlA(field);
+    expect(props.selectedIds).toEqual([]);
+    field.remove();
+    ctrlA(window);
+    expect(props.selectedIds).toEqual(['nd_1', 'nd_2']);
+  });
+});
+
 describe('the brush', () => {
   const brushOn = (more = {}) => ({ on: true, size: 40, erase: false, ...more });
   const piece = (i) => target.querySelectorAll('img.node')[i];
@@ -489,6 +549,9 @@ describe('where stitched pieces meet', () => {
   it('draws a piece in hand whole, to be lined up, and cuts it again once put down', () => {
     show([], null, undefined, { collage: { nodes: pieces() } });
     const img = [...target.querySelectorAll('img.node')][1];
+    // a click takes it in hand, and the drag after moves it
+    pointer(img, 'pointerdown', 300, 200);
+    pointer(window, 'pointerup', 300, 200);
     pointer(img, 'pointerdown', 300, 200);
     pointer(window, 'pointermove', 340, 210);
     expect(clipOf('b')).toBe('');

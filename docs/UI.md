@@ -2190,7 +2190,10 @@ nothing, and a stitch that fails, or joins no two frames, takes its frames back 
 says why.
 
 **The canvas answers the hand.** The mouse wheel zooms toward the pointer a notch at a
-time; on a touchpad two fingers pan and a pinch zooms; a drag on the background pans. The
+time; on a touchpad two fingers pan and a pinch zooms. A drag pans, on the background or
+over a piece not in hand, so a panorama that fills the view still pans; the middle button
+pans even over what is in hand. Only what is in hand moves: a click takes a piece, Shift
+adds one, Ctrl+A takes them all, and a click on the background puts them down. The
 arrows nudge the selected piece or block a canvas pixel, ten with Shift, a burst of them
 one undo; Delete removes it.
 

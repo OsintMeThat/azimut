@@ -336,7 +336,7 @@ export const PAGES = {
     lead: 'Frames and images from any number of files, laid out on one canvas and saved as a picture.',
     shot: 'collage',
     marks: [
-      { anchor: 'collage.canvas', title: 'The canvas', text: 'Scroll to zoom, pull a corner to warp a piece, Shift-click to select several.' },
+      { anchor: 'collage.canvas', title: 'The canvas', text: 'Scroll to zoom and drag to pan. Click a piece to move it, or Ctrl+A for all.' },
       { anchor: 'collage.add', title: 'Add pieces', text: 'A video plays in a rail under the canvas, and the case’s images go on in one press.' },
       { anchor: 'collage.arrange', title: 'Auto-stitch', text: 'Stitches overlapping pieces into one picture, and its arrow picks planar, cylindrical or spherical.' },
       {
