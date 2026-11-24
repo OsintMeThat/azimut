@@ -284,9 +284,10 @@ test('starts a new scene in the look of the slide left, with no panel, point or 
   // the Scene tab, its player on the video, is where the next step is
   await expect(page.getByRole('tablist', { name: 'Proof settings' }).getByRole('tab', { name: 'Scene' })).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('scene-player')).toBeVisible();
-  // the strip shows it, not saved, after the live scenes and before the abandoned one
+  // the strip shows it, not saved, after the live scenes and before the abandoned one,
+  // titled by its time as a slide with no name is
   await expect(tiles(page)).toHaveCount(6);
-  await expect(tiles(page).nth(4)).toHaveText(/New slide\s*Not saved/);
+  await expect(tiles(page).nth(4)).toHaveText(/Whole video\s*Not saved/);
   await expect(tiles(page).nth(4)).toHaveAttribute('aria-selected', 'true');
   // nothing was owed: the bridge had no change
   expect(saves).toHaveLength(0);

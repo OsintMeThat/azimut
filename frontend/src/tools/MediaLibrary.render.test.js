@@ -327,7 +327,6 @@ describe('open in… from a row', () => {
     expect(uiState.tool).toBe('reverse');
     expect(uiState.reverseTarget).toEqual({
       path: 'media/clip.mp4',
-      blob: null,
       kind: 'video',
       label: 'clip.mp4',
       time: null,

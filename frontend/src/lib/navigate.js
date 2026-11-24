@@ -397,8 +397,7 @@ export function openWhatsNew() {
  *
  * The press is made where the picture is being looked at, so the tab opens on it
  * rather than on an empty picker. `target` is a case file (`{ path, kind, label,
- * time? }`) or a picture held only in memory (`{ blob, label }`); see
- * `normalizeReverseTarget`. Returns whether the tab was changed.
+ * time? }`); see `normalizeReverseTarget`. Returns whether the tab was changed.
  */
 export function openInReverseSearch(target) {
   const picture = normalizeReverseTarget(target);
