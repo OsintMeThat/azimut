@@ -16,6 +16,7 @@ export const INSPECT_HELP = {
   mute: 'Sound on or off',
   fullscreen: 'Full screen',
   captureIcon: 'Capture this frame (C)',
+  zoneIcon: 'Search a zone of the picture on the reverse-search engines (R)',
   bar: 'Click or drag to move through the clip, the wheel zooms in on its time',
   barScene: 'Drag a handle to move the scene, or click to move through the clip',
   barZoom: 'The bar zoomed by the wheel or + and -, click for the whole clip',
@@ -127,7 +128,16 @@ export const INSPECT_HELP = {
   ela: 'Resave the frame as JPEG and show where it changes most',
   elaOpacity: 'How strongly the error levels cover the frame',
   elaShow: 'Show the error levels over the frame',
-  reverse: 'Search the web for this frame as shown',
+  reverse: 'Draw the zone to search on the frame, or take all of it (R)',
+
+  // zone search, over the viewer
+  zoneWhole: 'Take the whole picture',
+  zoneCopy: 'Copy the zone, for an engine of your own',
+  zoneClose: 'Stop searching (Esc)',
+  zoneFill: 'Opens with the zone in it',
+  zonePaste: 'Copies the zone, then paste it in the tab (Ctrl+V)',
+  zoneDrag: 'Saves the zone, then drag the file into the tab',
+  zoneSmall: 'A zone this small may match little',
   horizon: 'Lay this frame over the Horizon view, to find where it was taken from',
 };
 

@@ -62,8 +62,9 @@ const uiState = { tool: 'inspect', inspectPath: null, openInspect: null, focusMe
 const toast = vi.fn();
 const dismissToast = vi.fn();
 const reloadCase = vi.fn(async () => {});
-vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast, dismissToast, reloadCase }));
-vi.mock('../lib/navigate.js', () => ({ openInReverseSearch: vi.fn(), openTodo: vi.fn() }));
+const prefs = { reversePrefill: false };
+vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, prefs, toast, dismissToast, reloadCase }));
+vi.mock('../lib/navigate.js', () => ({ openInHorizon: vi.fn(), openTodo: vi.fn() }));
 const deletedToast = vi.fn();
 vi.mock('../lib/trash.js', () => ({ deletedToast }));
 // The Scenes tab as far as Inspect needs it here: a row's Make the proof, Geolocate,
@@ -1241,5 +1242,85 @@ describe('a frame captured in no scene', () => {
 
     const [offer] = offers();
     expect(offer.action.map((a) => a.label)).toEqual(['This instant']);
+  });
+});
+
+describe('searching a zone', () => {
+  const overlay = () => target.querySelector('.zone-overlay');
+  const zoneButton = () => target.querySelector('button[aria-label="Search a zone"]');
+  const cut = (body) => body.ops.at(-1);
+
+  beforeEach(() => {
+    globalThis.ClipboardItem = class {
+      constructor(items) {
+        this.items = items;
+      }
+    };
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write: vi.fn(async () => {}) } });
+  });
+
+  it('cuts the frame on screen from the file, as Capture would, and files nothing', async () => {
+    await start();
+    await openFile('Convoy clip');
+    playheadAt(0.5);
+    press('r');
+    expect(overlay()).not.toBeNull();
+    expect(zoneButton().getAttribute('aria-pressed')).toBe('true');
+    button('Whole picture').click();
+    flushSync();
+    await settle(300);
+
+    const body = renders().at(-1);
+    expect(body).toMatchObject({ path: 'media/clip.mp4', time: 0.5, snap: true });
+    expect(cut(body)).toEqual({ op: 'crop', params: { x: 0, y: 0, w: 1, h: 1 } });
+    expect(target.querySelectorAll('.strip > div.tile')).toHaveLength(0);
+  });
+
+  it('hands an engine the render the zone already started, rather than a second one', async () => {
+    await start();
+    await openFile('Roof');
+    press('r');
+    button('Whole picture').click();
+    flushSync();
+    await settle(300);
+    const before = renders().length;
+    expect(renders().at(-1)).toMatchObject({ path: 'media/roof.png', time: null });
+
+    button('Copy').click();
+    await settle();
+    expect(navigator.clipboard.write).toHaveBeenCalledTimes(1);
+    expect(renders()).toHaveLength(before);
+    expect(toast).toHaveBeenCalledWith('Copied the zone', 'ok', 4500);
+  });
+
+  it('opens from Analyze on a frame, and closes with Escape or a second R', async () => {
+    await start();
+    await openFile('Roof');
+    tab('Analyze').click();
+    flushSync();
+    button('Reverse image search').click();
+    flushSync();
+    expect(overlay()).not.toBeNull();
+    press('Escape');
+    expect(overlay()).toBeNull();
+    press('r');
+    expect(overlay()).not.toBeNull();
+    press('r');
+    expect(overlay()).toBeNull();
+  });
+
+  it('gives way to a crop', async () => {
+    await start();
+    await openFile('Roof');
+    press('r');
+    expect(overlay()).not.toBeNull();
+    target.querySelector('.viewport').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    flushSync();
+    expect(overlay()).not.toBeNull(); // a double-click inside the zone draws no crop
+    toAdjust();
+    button('Crop').click();
+    flushSync();
+    expect(overlay()).toBeNull();
+    expect(zoneButton()).toBeNull();
   });
 });

@@ -84,7 +84,6 @@ describe('openInReverseSearch', () => {
     expect(uiState.tool).toBe('reverse');
     expect(uiState.reverseTarget).toEqual({
       path: 'media/clip.mp4',
-      blob: null,
       kind: 'video',
       label: 'Clip',
       time: 3,

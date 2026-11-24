@@ -59,6 +59,18 @@ describe('pan and click', () => {
     expect(view.pan).toEqual({ x: 0, y: 0 });
   });
 
+  it('stands back upright and keeps its zoom and pan', () => {
+    const view = new ViewTransform();
+    view.wheel(wheel(-1, 50, 50), RECT);
+    const { zoom, pan } = view;
+    view.matrix = [0, 1, -1, 0, 0, 0];
+    view.upright();
+    expect(view.angle).toBe(0);
+    expect(view.zoom).toBe(zoom);
+    expect(view.pan).toEqual(pan);
+    expect(view.zoom).toBeGreaterThan(1);
+  });
+
   it('puts zoom, pan and turn back in one reset', () => {
     const view = new ViewTransform();
     view.wheel(wheel(-1, 50, 50), RECT);

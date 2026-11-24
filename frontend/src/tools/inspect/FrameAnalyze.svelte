@@ -9,22 +9,13 @@
   //
   // `analysis` belongs to the frame and the edits it was run on: `current` says the
   // frame still reads that way, and a stale one asks to be run again.
+  //
+  // Reverse image search opens zone search over the frame in the viewer, where the
+  // part to search is drawn; `searching` says it is open.
   let {
     frame, analyses, analysis = null, current = false, running = null, onrun,
-    reverse, horizon = null,
+    reverse, searching = false, horizon = null,
   } = $props();
-
-  let reversing = $state(false);
-
-  async function reverseActive() {
-    if (reversing) return;
-    reversing = true;
-    try {
-      await reverse(frame);
-    } finally {
-      reversing = false;
-    }
-  }
 </script>
 
 <div class="module" data-guide="inspect.analyze">
@@ -65,8 +56,8 @@
 
   <div class="block">
     <span class="head">Search from it</span>
-    <button class="btn btn-sm wide" disabled={reversing} onclick={reverseActive} title={INSPECT_HELP.reverse}>
-      <Icon name="search" size={14} /> {reversing ? 'Preparing…' : 'Reverse image search'}
+    <button class="btn btn-sm wide" class:active={searching} aria-pressed={searching} onclick={() => reverse()} title={INSPECT_HELP.reverse}>
+      <Icon name="zoneSearch" size={14} /> Reverse image search
     </button>
     {#if horizon}
       <button class="btn btn-sm wide" onclick={() => horizon(frame)} title={INSPECT_HELP.horizon}>
@@ -117,17 +108,18 @@
   .toggle input {
     accent-color: var(--accent);
   }
+  /* the slider as Adjust's and Map plate's draw it */
   .opacity {
     display: grid;
-    grid-template-columns: 70px 1fr;
+    grid-template-columns: 74px minmax(0, 1fr);
     align-items: center;
     gap: 8px;
-    font-size: var(--fs-sm);
-    color: var(--text-2);
+    font-size: 11px;
+    color: var(--text-3);
   }
   .opacity input {
     width: 100%;
-    accent-color: var(--accent);
+    min-width: 0;
   }
   .hint {
     color: var(--text-3);

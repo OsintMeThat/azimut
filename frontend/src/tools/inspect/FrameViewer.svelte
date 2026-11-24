@@ -1,10 +1,12 @@
 <script>
+  import { untrack } from 'svelte';
   import { cropAspect, cropImgStyle, styleText } from '../../lib/inspect.js';
   import { ViewTransform } from '../../lib/viewTransform.svelte.js';
   import { INSPECT_HELP } from '../../lib/inspectHelp.js';
   import TurnGuide from '../../components/TurnGuide.svelte';
   import Icon from '../../components/Icon.svelte';
   import CropBox from './CropBox.svelte';
+  import ZoneSearch from './ZoneSearch.svelte';
 
   // One frame, to be read closely, with the zoom, pan and turn of
   // `lib/viewTransform.svelte.js`.
@@ -18,6 +20,10 @@
   // them (a filter CSS cannot preview); otherwise the frame's own pixels take the
   // CSS preview. `original` drops both while the analyst holds the compare key.
   // `overlay` is an analysis laid over the frame, Error Level Analysis today.
+  //
+  // Zone search (`ZoneSearch`) is offered when the parent gives the zone's picture.
+  // Open, it stands the frame upright, the left button draws the zone and the
+  // middle one pans; it is not offered while a crop is drawn.
   let {
     frame,
     preview,
@@ -29,12 +35,16 @@
     cropMode = $bindable(false),
     onbegincrop,
     oncommitcrop,
+    zonePicture = null,
+    zoning = $bindable(false),
+    zone = $bindable(null),
   } = $props();
 
   const view = new ViewTransform();
   let stageEl = $state(); // turned stage (image + crop overlay)
   let zoomEl = $state(); // zoom/pan layer, the reference box for screen → local
   let viewportEl = $state(); // outer viewport, the reference box for the marker
+  let pictureEl = $state(); // the picture as drawn, cropped or whole, which a zone is read on
 
   // A new frame starts from a fitted, upright view.
   $effect(() => {
@@ -46,6 +56,18 @@
   const filter = $derived(original || src ? '' : preview.filter);
   const transform = $derived(original || src ? '' : preview.transform);
   const laid = $derived(overlay && !original && !cropEditing ? overlay : null);
+  // the picture's own pixels as shown: after the crop, when there is one
+  const shownW = $derived(frame.crop ? frame.w * frame.crop.w : frame.w);
+  const shownH = $derived(frame.crop ? frame.h * frame.crop.h : frame.h);
+
+  $effect(() => {
+    if (zoning) untrack(() => view.upright());
+  });
+
+  function toggleZone() {
+    zoning = !zoning;
+    zone = null;
+  }
 
   function onwheel(e) {
     e.preventDefault();
@@ -55,10 +77,11 @@
   function onpointerdown(e) {
     if (e.button === 1) {
       e.preventDefault();
-      if (!cropEditing) view.turnFrom(e, { viewport: viewportEl, layer: zoomEl, stage: stageEl }); // the crop box stays upright
+      if (zoning) view.panFrom(e); // the zone stays upright, so the middle button pans
+      else if (!cropEditing) view.turnFrom(e, { viewport: viewportEl, layer: zoomEl, stage: stageEl }); // the crop box stays upright
       return;
     }
-    if (e.button !== 0 || cropMode || cropEditing) return; // the crop box owns drags
+    if (e.button !== 0 || cropMode || cropEditing || zoning) return; // the crop box or the zone owns drags
     e.preventDefault(); // no native image-drag ghost
     view.panFrom(e);
   }
@@ -68,19 +91,19 @@
 <div
   class="viewport"
   class:cropping={cropMode}
-  class:pannable={!cropMode && !cropEditing}
+  class:pannable={!cropMode && !cropEditing && !zoning}
   class:rotating={view.turning}
   bind:this={viewportEl}
   {onwheel}
   onmousedown={(e) => e.button === 1 && e.preventDefault()}
   {onpointerdown}
   onauxclick={(e) => e.preventDefault()}
-  ondblclick={() => onbegincrop?.()}
+  ondblclick={() => !zoning && onbegincrop?.()}
 >
   <div class="zoom-layer" bind:this={zoomEl} style:transform={view.layerCss}>
     <div class="stage" bind:this={stageEl} style:transform={view.stageCss} style:transform-origin="0 0">
       {#if frame.crop && !cropEditing}
-        <div class="crop-view" style:--ar={cropAspect(frame.crop, frame.w, frame.h) ?? 1}>
+        <div class="crop-view" bind:this={pictureEl} style:--ar={cropAspect(frame.crop, frame.w, frame.h) ?? 1}>
           <img
             src={shown}
             alt="frame"
@@ -94,7 +117,7 @@
           {/if}
         </div>
       {:else}
-        <img src={shown} alt="frame" draggable="false" style:filter style:transform />
+        <img bind:this={pictureEl} src={shown} alt="frame" draggable="false" style:filter style:transform />
         {#if laid}
           <img class="overlay" src={laid.url} alt="" draggable="false" style:opacity={laid.opacity} />
         {/if}
@@ -120,10 +143,35 @@
       <button class="btn btn-ghost btn-sm" onclick={() => view.reset()} title={INSPECT_HELP.fit}>
         <Icon name="eye" size={14} /> Fit
       </button>
+    {:else if zoning}
+      <span class="hint">scroll zoom · middle-drag pans · Esc closes</span>
     {:else}
       <span class="hint">scroll zoom · drag pan · middle-drag turns · double-click crop</span>
     {/if}
+    {#if zonePicture && !cropEditing}
+      <button
+        class="btn btn-ghost btn-sm zone-btn"
+        class:on={zoning}
+        onclick={toggleZone}
+        aria-label="Search a zone"
+        aria-pressed={zoning}
+        title={INSPECT_HELP.zoneIcon}
+      >
+        <Icon name="zoneSearch" size={14} />
+      </button>
+    {/if}
   </div>
+  {#if zoning && zonePicture && !cropEditing}
+    <ZoneSearch
+      box={() => pictureEl}
+      watch={view.layerCss}
+      width={shownW}
+      height={shownH}
+      bind:zone
+      picture={zonePicture}
+      onclose={toggleZone}
+    />
+  {/if}
 </div>
 
 <style>
@@ -198,6 +246,7 @@
   }
   .view-ctl {
     position: absolute;
+    z-index: 3;
     right: 10px;
     bottom: 10px;
     display: flex;
@@ -218,5 +267,8 @@
     font-size: 11px;
     color: var(--text-3);
     user-select: none;
+  }
+  .zone-btn.on {
+    color: var(--accent);
   }
 </style>

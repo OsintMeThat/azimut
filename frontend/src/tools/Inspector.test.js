@@ -48,13 +48,28 @@ describe('Inspect — crop keys', () => {
   });
 });
 
-describe('Inspect → Reverse Search', () => {
-  it('hands the frame over as it reads here, rendered without filing it', () => {
-    expect(source).toContain(
-      'const blob = await renderBlob(frame.path, frame.time, buildFrameOps(filters, frame));'
-    );
-    expect(source).toContain('openInReverseSearch({ blob, label:');
-    expect(source).toContain('reverse={reverseFrame}');
+describe('Inspect → the reverse-search engines', () => {
+  it('cuts a zone after everything the frame already says, the video like a capture', () => {
+    // a frame's own turn, crop and tones come first, so the zone is what the viewer shows
+    expect(source).toContain('ops: [...buildFrameOps(filters, activeFrame), cut]');
+    // the video's zone is the frame on screen as Capture takes it, its turn and tones applied
+    expect(source).toContain('const frame = { sourceOps: rotationOps(videoRotation), adjust: videoSeed(filters, work.videoAdjust) };');
+    expect(source).toContain('const time = captureMoment(shared.currentTime, shared.frameTime);');
+    expect(source).toContain('reverse={openZone}');
+    expect(source).not.toContain('openInReverseSearch');
+  });
+
+  it('renders a zone once, and only once it holds still', () => {
+    expect(source).toContain('if (zoneRender?.key !== key) {');
+    expect(source).toContain('const timer = setTimeout(() => untrack(zonePicture), 250);');
+    // a zone drawn and never searched leaves no unhandled rejection behind
+    expect(source).toContain('png.catch(() => {});');
+  });
+
+  it('closes the zone with the picture it was drawn on', () => {
+    expect(source).toMatch(/function select\(id\) \{[\s\S]*?closeZone\(\);/);
+    expect(source).toMatch(/function beginCrop\(\) \{[\s\S]*?closeZone\(\);/);
+    expect(source).toMatch(/frameAspect = null;\n\s*closeZone\(\);/);
   });
 
   it('keeps one render route for frames, previews and the handoff', () => {

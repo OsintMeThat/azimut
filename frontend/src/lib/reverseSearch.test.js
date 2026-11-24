@@ -37,12 +37,9 @@ describe('UPLOAD_PAGES', () => {
 });
 
 describe('normalizeReverseTarget', () => {
-  const png = () => new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
-
   it('takes a case image by its path, and names it after the file when nothing else does', () => {
     expect(normalizeReverseTarget({ path: 'media/quai.jpg', kind: 'image' })).toEqual({
       path: 'media/quai.jpg',
-      blob: null,
       kind: 'image',
       label: 'quai.jpg',
       time: null,
@@ -70,15 +67,9 @@ describe('normalizeReverseTarget', () => {
     }
   });
 
-  it('carries a picture held only in memory as the image itself', () => {
-    const blob = png();
-    const picture = normalizeReverseTarget({ blob, label: 'clip.mp4 · 00:12', path: 'ignored.jpg', kind: 'video' });
-    expect(picture).toEqual({ path: null, blob, kind: 'image', label: 'clip.mp4 · 00:12', time: null });
-  });
-
-  it('refuses a blob that is empty or not an image', () => {
-    expect(normalizeReverseTarget({ blob: new Blob([], { type: 'image/png' }) })).toBeNull();
-    expect(normalizeReverseTarget({ blob: new Blob(['x'], { type: 'text/html' }) })).toBeNull();
+  it('takes no picture held only in memory: a part of one is searched from Inspect', () => {
+    const blob = new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+    expect(normalizeReverseTarget({ blob, label: 'clip.mp4 · 00:12' })).toBeNull();
   });
 
   it('answers null for nothing at all', () => {

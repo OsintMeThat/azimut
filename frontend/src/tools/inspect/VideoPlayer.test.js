@@ -14,6 +14,21 @@ const props = (extra = {}) => ({
 });
 
 describe('Inspect video player', () => {
+  it('offers zone search only where the tool renders the zone, beside Capture', () => {
+    expect(render(VideoPlayer, { props: props() }).body).not.toContain('aria-label="Search a zone"');
+    const { body } = render(VideoPlayer, { props: props({ zonePicture: () => null }) });
+    expect(body).toContain('aria-label="Search a zone"');
+    expect(body.indexOf('aria-label="Search a zone"')).toBeLessThan(body.indexOf('aria-label="Capture this frame"'));
+    expect(body).toContain('scroll zoom · drag pan · middle-drag turns · click plays');
+  });
+
+  it('says how the view moves while a zone is drawn, and lays the zone over the clip', () => {
+    const { body } = render(VideoPlayer, { props: props({ zonePicture: () => null, zoning: true }) });
+    expect(body).toContain('aria-pressed="true"');
+    expect(body).toContain('scroll zoom · middle-drag pans · Esc closes');
+    expect(body).toContain('class="zone-overlay ');
+  });
+
   it('keeps an unrotated control bar outside the transformed video canvas', () => {
     const { body } = render(VideoPlayer, { props: props({ transform: 'rotate(90deg)', quarterTurn: true }) });
 

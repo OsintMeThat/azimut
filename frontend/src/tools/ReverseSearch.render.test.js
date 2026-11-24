@@ -5,8 +5,7 @@ import { flushSync, mount, unmount } from 'svelte';
 /**
  * Reverse Search lands on Inspect's file list and leaves it for the picture that
  * was picked. Arriving with a picture another tool handed over, the tab has to
- * open on that picture rather than on the list, spend the handoff once, and say
- * when what it shows is not a file of the case.
+ * open on that picture rather than on the list, and spend the handoff once.
  */
 
 const MEDIA = [
@@ -54,11 +53,10 @@ const buttonNamed = (text) =>
 beforeEach(() => {
   uiState.tool = 'reverse';
   uiState.reverseTarget = null;
+  uiState.inspectPath = null;
   caseState.current = { id: 'case-a' };
   get.mockReset();
   get.mockResolvedValue([]);
-  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:frame');
-  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -70,47 +68,26 @@ afterEach(() => {
 
 describe('a picture handed over by another tool', () => {
   it('opens on a case image and spends the handoff', () => {
-    uiState.reverseTarget = { path: 'media/quai.jpg', blob: null, kind: 'image', label: 'Quai', time: null };
+    uiState.reverseTarget = { path: 'media/quai.jpg', kind: 'image', label: 'Quai', time: null };
     open();
 
     expect(target.querySelector('.preview img').getAttribute('src')).toBe('/files/case-a/media/quai.jpg');
     expect(target.querySelector('.tool-header .name').textContent).toBe('Quai');
     expect(uiState.reverseTarget).toBeNull();
-    expect(target.textContent).not.toContain('not saved in the case');
   });
 
-  it('shows a frame held only in memory, and says it is not in the case', () => {
-    const blob = new Blob(['png'], { type: 'image/png' });
-    uiState.reverseTarget = { path: null, blob, kind: 'image', label: 'clip.mp4 · t=12.40s', time: null };
+  it('sends a part of the picture to Inspect, where a zone is searched', () => {
+    uiState.reverseTarget = { path: 'media/quai.jpg', kind: 'image', label: 'Quai', time: null };
     open();
 
-    expect(URL.createObjectURL).toHaveBeenCalledWith(blob);
-    expect(target.querySelector('.preview img').getAttribute('src')).toBe('blob:frame');
-    expect(target.textContent).toContain('This image is not saved in the case.');
-    // Inspect is where it came from and has no path to reopen it by.
-    expect(target.textContent).not.toContain('Finer control in Inspect');
-  });
-
-  it('lets the address go when the picture is discarded', () => {
-    uiState.reverseTarget = {
-      path: null,
-      blob: new Blob(['png'], { type: 'image/png' }),
-      kind: 'image',
-      label: 'Frame',
-      time: null,
-    };
-    open();
-
-    buttonNamed('Files').click();
-    flushSync();
-
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:frame');
-    expect(target.querySelector('.preview')).toBeNull();
+    buttonNamed('Search a zone in Inspect').click();
+    expect(uiState.inspectPath).toBe('media/quai.jpg');
+    expect(uiState.tool).toBe('inspect');
   });
 
   it('waits for its own tab before spending a handoff', () => {
     uiState.tool = 'media';
-    uiState.reverseTarget = { path: 'media/quai.jpg', blob: null, kind: 'image', label: 'Quai', time: null };
+    uiState.reverseTarget = { path: 'media/quai.jpg', kind: 'image', label: 'Quai', time: null };
     open();
 
     expect(uiState.reverseTarget).not.toBeNull();

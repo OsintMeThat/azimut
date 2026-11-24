@@ -296,7 +296,7 @@ export const PAGES = {
     lead: 'One image or one video, read closely: frames, adjustments, metadata and error levels.',
     shot: 'inspect',
     marks: [
-      { anchor: 'inspect.player', title: 'The player', text: '← and → step one frame, J and L change the speed, M marks a moment.' },
+      { anchor: 'inspect.player', title: 'The player', text: '← and → step one frame, J and L change the speed, M marks a moment, R searches a part of the picture.' },
       { anchor: 'inspect.loop', title: 'A and B', text: 'Bound a loop between two moments, to watch a passage again.' },
       { anchor: 'inspect.capture', title: 'Capture frame', text: 'Keeps the frame on screen with this video (C).' },
       {

@@ -211,6 +211,8 @@
     tag: 'M3.5 11.6V4.5a1 1 0 0 1 1-1h7.1l8.9 8.9-8.1 8.1-8.9-8.9ZM8 6.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z',
     inspect: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm9 16-4.35-4.35M8 11h6m-3-3v6',
     crop: 'M6 2v14a2 2 0 0 0 2 2h14M2 6h14a2 2 0 0 1 2 2v14',
+    // three corners of a frame and a magnifier in the fourth: search a part of the picture
+    zoneSearch: 'M3 8V5a2 2 0 0 1 2-2h3m8 0h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m6.5-10a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm2.5 6 4 4',
     screen: 'M4 5h16a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm5 15h6m-3-4v4',
     reset: 'M4 9a8 8 0 1 1-1.6 4.7M4 9H1m3 0V6',
     undo: 'M8 5 4 9l4 4M4 9h10a6 6 0 0 1 0 12h-4',
