@@ -19,6 +19,7 @@ from ..engine import artifacts as artifact_engine
 from ..engine import geolocate
 from ..engine import inspect as inspect_engine
 from ..engine import inspectwork
+from ..engine import panorama as panorama_engine
 from ..engine import scenes as scenes_engine
 from ..workspace import CaseError
 from . import events
@@ -138,6 +139,21 @@ class StitchIn(BaseModel):
     def _one_entry_per_node(self) -> StitchIn:
         if self.exclude is not None and len(self.exclude) != len(self.nodes):
             raise ValueError("exclude needs one entry per node")
+        return self
+
+
+class PanoramaFramesIn(BaseModel):
+    path: str = Field(min_length=1, max_length=1024)
+    # the stretch the camera pans over, seconds into the video
+    start: float = Field(ge=0, allow_inf_nan=False)
+    end: float = Field(gt=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _a_stretch(self) -> PanoramaFramesIn:
+        if self.end <= self.start:
+            raise ValueError("a stretch ends after it starts")
+        if self.end - self.start > panorama_engine.MAX_STRETCH:
+            raise ValueError(f"a panorama is picked from {panorama_engine.MAX_STRETCH:g} seconds of video at most")
         return self
 
 
@@ -384,6 +400,23 @@ def auto_stitch(case_id: str, body: StitchIn) -> dict[str, Any]:
             case, srcs=srcs, width=body.width, height=body.height, mode=body.mode,
             exclude=body.exclude,
         )
+    except CaseError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (ValueError, RuntimeError, OSError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/cases/{case_id}/inspect/panorama-frames")
+def panorama_frames(case_id: str, body: PanoramaFramesIn) -> dict[str, Any]:
+    """Collage → Panorama: the moments to cut from a stretch of video, for auto-stitch.
+
+    Answers ``times``, ascending, each a frame's own timestamp as Inspect saves a frame
+    at, and ``note``: why there is no panorama when fewer than two times come back,
+    otherwise null or one thing worth knowing. Nothing is filed.
+    """
+    case = get_case(case_id)
+    try:
+        return panorama_engine.pick_frames(case, body.path, body.start, body.end)
     except CaseError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except (ValueError, RuntimeError, OSError) as exc:

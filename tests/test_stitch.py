@@ -277,6 +277,22 @@ def test_rotation_layout_orders_pieces_along_the_pan():
     assert xs[0] < xs[1] < xs[2]
 
 
+def test_a_frame_believed_only_with_a_real_lens():
+    # a phone's frame (about 65° across) and an action camera's widest (about 150°)
+    assert stitch._lens_plausible(780.0, 1000.0)
+    assert stitch._lens_plausible(140.0, 1000.0)
+    # the adjuster's broken answers on real pans: no lens, a negative one, a frame seeing half the turn
+    assert not stitch._lens_plausible(2.0, 1000.0)
+    assert not stitch._lens_plausible(-420.0, 547.0)
+    assert not stitch._lens_plausible(float("nan"), 1000.0)
+
+
+def test_a_solve_with_no_believable_lens_places_nothing_rather_than_a_full_turn(monkeypatch):
+    monkeypatch.setattr(stitch, "_lens_plausible", lambda focal, width: False)
+    with pytest.raises(RuntimeError, match="one lens"):
+        stitch.solve_rotation_layout(_pan([-20, 0, 20]), width=1000, height=800)
+
+
 def test_rotation_layout_places_pieces_inside_the_canvas():
     solved = stitch.solve_rotation_layout(_pan([-20, 0, 20]), width=1000, height=800)
     canvas = solved["canvas"]
@@ -577,6 +593,36 @@ def _stitched(heading, middle, warp="cylindrical", width=400):
     x0 = middle - width / 2
     return {"save": {"path": "media/clip.mp4", "time": 1.0, "ops": [remap]},
             "quad": [[x0, 10], [x0 + width, 10], [x0 + width, 300], [x0, 300]]}
+
+
+class _Camera:
+    """A camera turned ``heading`` degrees round the vertical, as the rotation model solves one."""
+
+    def __init__(self, heading: float, width: int = 520, height: int = 420, focal: float = 520.0):
+        import numpy as np
+
+        a = math.radians(heading)
+        self.R = np.array([[math.cos(a), 0, math.sin(a)], [0, 1, 0], [-math.sin(a), 0, math.cos(a)]])
+        self.ppy = height / 2
+        self._k = np.array([[focal, 0, width / 2], [0, focal, height / 2], [0, 0, 1.0]])
+
+    def K(self):
+        return self._k
+
+
+def test_the_span_across_is_the_turn_plus_one_view():
+    """A 520 px view at a 520 px focal is 53.1° across, so cameras turned over 90° reach 143.1°;
+    a turn across the back of the circle reads the same, and a full turn stops at 360."""
+    view = 2 * math.degrees(math.atan(0.5))
+    assert stitch.span_degrees([_Camera(h) for h in (0, 30, 60, 90)], [520] * 4) == pytest.approx(90 + view)
+    assert stitch.span_degrees([_Camera(h) for h in (160, 180, 200)], [520] * 3) == pytest.approx(40 + view)
+    assert stitch.span_degrees([_Camera(h) for h in range(0, 360, 40)], [520] * 9) == pytest.approx(360, abs=1e-6)
+    assert stitch.span_degrees([], []) is None
+
+
+def test_a_cylinder_stitch_reports_its_span():
+    solved = stitch.solve_rotation_layout(_pan([0, 30, 60, 90]), width=1600, height=800, warp="cylindrical")
+    assert solved["span_deg"] == pytest.approx(90 + 2 * math.degrees(math.atan(0.5)), abs=3)
 
 
 def test_a_stitched_strip_says_how_many_pixels_a_degree_spans():

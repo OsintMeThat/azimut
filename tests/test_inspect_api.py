@@ -810,6 +810,20 @@ def test_auto_stitch_defaults_to_planar_and_bakes_no_warp(client):
     # and stay hand-warpable.
     assert body["mode"] == "planar"
     assert [n["op"] for n in body["nodes"]] == [None, None]
+    # a plane has no angle across
+    assert body["span_deg"] is None
+
+
+@pytest.mark.parametrize("mode", ["cylindrical", "spherical"])
+def test_auto_stitch_says_how_far_across_a_panorama_reaches(client, mode):
+    """Three views 520 px wide at a 520 px focal, 53.1° each, turned 20° apart: 93.1° across."""
+    cid = client.post("/api/cases", json={"name": f"Span{mode}"}).json()["id"]
+    paths = [_upload(client, cid, f"v{i}.png", png)["path"] for i, png in enumerate(_pan_pngs())]
+    body = client.post(
+        f"/api/cases/{cid}/inspect/auto-stitch",
+        json={"width": 1600, "height": 800, "mode": mode, "nodes": [{"path": p} for p in paths]},
+    ).json()
+    assert body["span_deg"] == pytest.approx(93.1, abs=3)
 
 
 @pytest.mark.parametrize("mode", ["cylindrical", "spherical"])

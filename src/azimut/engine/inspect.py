@@ -570,11 +570,7 @@ def frame_time_at(video_path: Path, time_s: float) -> float | None:
         return None
     exe = ffmpeg_engine.ffprobe_exe()
     try:
-        head = subprocess.run(
-            [exe, "-v", "error", "-show_entries", "format=start_time", "-of", "csv=p=0", str(video_path)],
-            capture_output=True, timeout=30,
-        )
-        start = float(head.stdout.decode().strip() or 0) if head.returncode == 0 else 0.0
+        start = _start_offset(video_path)
         window = f"{max(time_s - 3, 0) + start:.6f}%{time_s + 1 + start:.6f}"
         proc = subprocess.run(
             [exe, "-v", "error", "-select_streams", "v:0", "-read_intervals", window,
@@ -633,16 +629,19 @@ def _focus_score(gray) -> float:
     subject (headlights at night, a bright sky) outscores a sharp frame of a flat
     one, and the "sharpest frames" come back soft. Contrast enters both variances
     quadratically, so dividing it out leaves a measure of focus alone.
+
+    Both variances come from OpenCV's one-pass ``meanStdDev`` on the frame as it
+    is: the same numbers as numpy's ``var`` on a float copy, to the last digits,
+    at a fifth of the time, which every frame of a scan pays.
     """
     import cv2
-    import numpy as np
 
-    arr = gray.astype(np.float64)
-    spread = float(arr.var())
+    _, deviation = cv2.meanStdDev(gray)
+    spread = float(deviation[0, 0]) ** 2
     if spread < 1e-6:  # a blank frame has no focus to speak of
         return 0.0
-    lap = cv2.Laplacian(arr, cv2.CV_64F)
-    return float(lap.var() / spread)
+    _, edges = cv2.meanStdDev(cv2.Laplacian(gray, cv2.CV_64F))
+    return float(edges[0, 0]) ** 2 / spread
 
 
 def _scan_size(width: int, height: int) -> tuple[int, int]:
@@ -721,80 +720,94 @@ def _apply_meta(
         result["item"] = media_engine.update_media(case, result["item"]["path"], patch)
 
 
-def scan_video(
-    case: Case, video_rel: str, set_progress: Callable[[dict], None] | None = None
-) -> dict[str, Any]:
-    """Score *every* frame for focus and find the shot cuts — one ffmpeg pass, streamed.
+# A frame's own timestamp, out of ffmpeg's `showinfo` report on it: its `pts`, counted
+# in the time base the filter's config line names.
+_SHOWINFO_PTS = re.compile(rb"\bn:\s*\d+\s+pts:\s*(-?\d+)")
+_SHOWINFO_BASE = re.compile(rb"config in time_base:\s*(\d+)/(\d+)")
 
-    Returns ``{"frames": [{time, score}, ...], "cuts": [{time, score}, ...]}`` in
-    playback order. Decoding the whole clip once and piping raw greyscale is what
-    makes an exhaustive scan affordable: seeking to each frame with its own ffmpeg
-    process (the old approach) costs a process spawn and a decode-from-keyframe
-    *per frame*, which is why it could only ever afford to sample a handful. The
-    cuts come from the same grey frames at no extra decode.
 
-    A cut is measured the way ffmpeg's ``scdet`` does: the mean absolute difference
-    to the previous frame, as a percentage of full scale, then the smaller of that
-    and its change since the frame before. A hard cut spikes both; a fast pan or a
-    flash spikes only one of them.
+def _start_offset(video_path: Path) -> float:
+    """The container's start time in seconds, which `-ss` and a frame's time are counted after.
+
+    Most files start at 0; an MPEG-TS cut from a broadcast can start seconds in. 0 when
+    ffprobe says nothing usable."""
+    proc = subprocess.run(
+        [ffmpeg_engine.ffprobe_exe(), "-v", "error", "-show_entries", "format=start_time",
+         "-of", "csv=p=0", str(video_path)],
+        capture_output=True, timeout=30,
+    )
+    try:
+        start = float(proc.stdout.decode().strip() or 0) if proc.returncode == 0 else 0.0
+    except ValueError:
+        return 0.0
+    return start if math.isfinite(start) else 0.0
+
+
+def grey_stream(
+    video_path: Path,
+    size: tuple[int, int],
+    on_frame: Callable[[Any], None],
+    *,
+    timeout: float,
+    what: str = "scan",
+    start: float | None = None,
+    length: float | None = None,
+    every: int = 1,
+    stamps: bool = False,
+) -> list[float] | None:
+    """Decode a video to grey frames of ``size`` in one plain ffmpeg pass, streamed.
+
+    Each frame goes to ``on_frame`` as an ``(h, w)`` uint8 array the moment it
+    arrives, so a long clip never sits in memory. ``start`` and ``length``, seconds,
+    read that stretch alone, seeking rather than decoding from the top; ``every``
+    keeps one frame in so many. With ``stamps`` the answer is each frame's own
+    timestamp, on the timeline :func:`extract_frame` seeks on: read off ffmpeg's
+    report on the frame rather than counted from the rate, so it names that very
+    frame on a variable rate too. ``what`` is how a failure reads ("ffmpeg could not
+    scan this video"). Raises when ffmpeg fails, times out or decodes nothing.
     """
-    import cv2
     import numpy as np
 
-    if not media_engine.ffmpeg_available():
-        raise RuntimeError("ffmpeg is required to scan video frames")
-    video_path = case.resolve_inside(video_rel)
-    meta = probe(case, video_rel)
-    fps = meta.get("fps") or 0
-    duration = meta.get("duration") or 0
-    if fps <= 0 or duration <= 0:
-        raise RuntimeError("could not read video duration/fps (ffprobe needed)")
-
-    w, h = _scan_size(int(meta.get("width") or 0), int(meta.get("height") or 0))
-    expected = max(1, int(duration * fps))
+    w, h = size
+    chain = [f"select=not(mod(n\\,{every}))"] if every > 1 else []
+    chain.append(f"scale={w}:{h}")
+    head = [ffmpeg_engine.ffmpeg_exe(), "-v", "error"]
+    tail: list[str] = []
+    if stamps:
+        # showinfo speaks at info level, and copyts keeps each frame's own pts through
+        # it. Raw video out is held to a constant rate unless told otherwise, which
+        # repeats or drops frames, so the frames pass through as they are: `-vsync`,
+        # the spelling ffmpeg 4 knows and 8.1 still takes.
+        chain += ["format=gray", "showinfo"]
+        head = [ffmpeg_engine.ffmpeg_exe(), "-hide_banner", "-nostats", "-v", "info", "-copyts"]
+        tail = ["-vsync", "passthrough"]
+    seek = ["-ss", f"{start:.6f}"] if start is not None else []
+    span = ["-t", f"{length:.6f}"] if length is not None else []
     frame_bytes = w * h
-
-    out: list[dict[str, Any]] = []
-    cuts: list[dict[str, Any]] = []
+    count = 0
     timed_out = threading.Event()
     with tempfile.TemporaryFile() as stderr_file:
         proc = subprocess.Popen(
-            [ffmpeg_engine.ffmpeg_exe(), "-v", "error", "-i", str(video_path),
-             "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
-            stdout=subprocess.PIPE, stderr=stderr_file,
+            [*head, *seek, *span, "-i", str(video_path), "-an",
+             "-vf", ",".join(chain), *tail, "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=stderr_file,
         )
 
         def expire() -> None:
             timed_out.set()
             _stop_process(proc)
 
-        timer = threading.Timer(_scan_timeout(duration), expire)
+        timer = threading.Timer(timeout, expire)
         timer.daemon = True
         timer.start()
         try:
             assert proc.stdout is not None
-            index = 0
-            prev: Any = None
-            prev_mafd = 0.0
-            last_cut = 0.0
             while True:
                 buf = proc.stdout.read(frame_bytes)
                 if not buf or len(buf) < frame_bytes:
                     break
-                gray = np.frombuffer(buf, dtype=np.uint8).reshape(h, w)
-                time_s = round(index / fps, 3)
-                out.append({"time": time_s, "score": round(_focus_score(gray), 4)})
-                if prev is not None:
-                    mafd = float(cv2.absdiff(gray, prev).mean(dtype=np.float64)) * 100 / 255
-                    score = min(max(min(mafd, abs(mafd - prev_mafd)), 0.0), 100.0)
-                    if score > SHOT_THRESHOLD and time_s - last_cut >= MIN_SHOT_GAP:
-                        cuts.append({"time": time_s, "score": round(score, 2)})
-                        last_cut = time_s
-                    prev_mafd = mafd
-                prev = gray
-                index += 1
-                if set_progress and index % 25 == 0:
-                    set_progress({"percent": round(min(99.0, index * 100 / expected), 1)})
+                on_frame(np.frombuffer(buf, dtype=np.uint8).reshape(h, w))
+                count += 1
         except BaseException:
             _stop_process(proc)
             raise
@@ -807,14 +820,88 @@ def scan_video(
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     _stop_process(proc)
+        stderr_file.seek(0)
+        pts: list[int] = []
+        base: tuple[int, int] | None = None
+        if stamps and proc.returncode in (0, None) and not timed_out.is_set():
+            for line in stderr_file:
+                if (found := _SHOWINFO_PTS.search(line)) is not None:
+                    pts.append(int(found.group(1)))
+                elif base is None and (config := _SHOWINFO_BASE.search(line)) is not None:
+                    base = (int(config.group(1)), int(config.group(2)))
             stderr_file.seek(0)
-            err = stderr_file.read()
+        err = stderr_file.read() if proc.returncode not in (0, None) or not count else b""
     if timed_out.is_set():
         raise RuntimeError("frame scan timed out")
     if proc.returncode not in (0, None):
-        raise ffmpeg_failed("scan", err)
-    if not out:
+        raise ffmpeg_failed(what, err)
+    if not count:
         raise ffmpeg_failed("decode any frame of", err)
+    if not stamps:
+        return None
+    if base is None or not base[1] or len(pts) != count:
+        raise RuntimeError("ffmpeg could not tell the frame times of this video")
+    origin = _start_offset(video_path)
+    return [round(p * base[0] / base[1] - origin, 6) for p in pts]
+
+
+def _cut_score(gray, prev, prev_mafd: float) -> tuple[float, float]:
+    """ffmpeg ``scdet``'s measure of a cut between two grey frames: ``(score, mafd)``.
+
+    The mean absolute difference to the previous frame, as a percentage of full scale,
+    then the smaller of that and its change since the frame before. A hard cut spikes
+    both; a fast pan or a flash spikes only one of them.
+    """
+    import cv2
+    import numpy as np
+
+    mafd = float(cv2.absdiff(gray, prev).mean(dtype=np.float64)) * 100 / 255
+    return min(max(min(mafd, abs(mafd - prev_mafd)), 0.0), 100.0), mafd
+
+
+def scan_video(
+    case: Case, video_rel: str, set_progress: Callable[[dict], None] | None = None
+) -> dict[str, Any]:
+    """Score *every* frame for focus and find the shot cuts — one ffmpeg pass, streamed.
+
+    Returns ``{"frames": [{time, score}, ...], "cuts": [{time, score}, ...]}`` in
+    playback order. Decoding the whole clip once and piping raw greyscale
+    (:func:`grey_stream`) is what makes an exhaustive scan affordable: seeking to
+    each frame with its own ffmpeg process (the old approach) costs a process
+    spawn and a decode-from-keyframe *per frame*, which is why it could only ever
+    afford to sample a handful. The cuts come from the same grey frames at no
+    extra decode (:func:`_cut_score`).
+    """
+    if not media_engine.ffmpeg_available():
+        raise RuntimeError("ffmpeg is required to scan video frames")
+    video_path = case.resolve_inside(video_rel)
+    meta = probe(case, video_rel)
+    fps = meta.get("fps") or 0
+    duration = meta.get("duration") or 0
+    if fps <= 0 or duration <= 0:
+        raise RuntimeError("could not read video duration/fps (ffprobe needed)")
+
+    w, h = _scan_size(int(meta.get("width") or 0), int(meta.get("height") or 0))
+    expected = max(1, int(duration * fps))
+
+    out: list[dict[str, Any]] = []
+    cuts: list[dict[str, Any]] = []
+    state: dict[str, Any] = {"prev": None, "mafd": 0.0, "last_cut": 0.0}
+
+    def take(gray: Any) -> None:
+        index = len(out)
+        time_s = round(index / fps, 3)
+        out.append({"time": time_s, "score": round(_focus_score(gray), 4)})
+        if state["prev"] is not None:
+            score, state["mafd"] = _cut_score(gray, state["prev"], state["mafd"])
+            if score > SHOT_THRESHOLD and time_s - state["last_cut"] >= MIN_SHOT_GAP:
+                cuts.append({"time": time_s, "score": round(score, 2)})
+                state["last_cut"] = time_s
+        state["prev"] = gray
+        if set_progress and (index + 1) % 25 == 0:
+            set_progress({"percent": round(min(99.0, (index + 1) * 100 / expected), 1)})
+
+    grey_stream(video_path, (w, h), take, timeout=_scan_timeout(duration))
     if set_progress:
         set_progress({"percent": 100.0})
     return {"frames": out, "cuts": cuts}
@@ -1535,6 +1622,8 @@ def solve_collage_layout(
     answers with that picture's ``size``, ``[w, h]``. ``why`` says, for each piece in
     ``dropped``, why it was left out: ``no-overlap``, ``no-detail`` or ``off-canvas``
     (:data:`azimut.engine.stitch.LEFT_NO_OVERLAP` and the two beside it).
+    ``span_deg`` is the angle across the placed pieces in the panorama modes, None
+    in planar.
     """
     if mode not in STITCH_MODES:
         raise ValueError(f"unknown panorama mode {mode!r}")
@@ -1571,6 +1660,8 @@ def solve_collage_layout(
         "dropped": solved["dropped"],
         "why": solved["why"],
         "canvas": solved["canvas"],
+        # how far across the stitch reaches, degrees of the camera's turn; a plane has none
+        "span_deg": solved.get("span_deg"),
     }
 
 
