@@ -119,7 +119,6 @@
     {:else if fresh.text}
       <p class="fresh" class:stale={fresh.stale}>
         <Icon name="clock" size={12} /> Last pass read {fresh.text}
-        {#if fresh.stale}<button class="link" disabled={busy || !detail} onclick={oncatchup}>Catch up</button>{/if}
       </p>
     {:else}
       <p class={`state ${state.tone}`}>{state.text}</p>
@@ -177,7 +176,7 @@
       </button>
       <div class="fm-sep"></div>
       <button class="fm-item" role="menuitem" onclick={() => { exporting = false; onexport(); }}>
-        <Icon name="layers" size={13} /><span class="fm-grow">Snapshot what it kept as a SAT layer</span>
+        <Icon name="layers" size={13} /><span class="fm-grow">Snapshot as a SAT layer</span>
       </button>
     </FloatingMenu>
   {/if}
@@ -328,13 +327,13 @@
   .state.warn { color: var(--warn); }
   .fresh { display: flex; align-items: center; gap: 5px; color: var(--text-2); }
   .fresh.stale { color: var(--warn); }
-  .link { margin-left: auto; color: var(--accent); font-size: var(--fs-xs); font-weight: 600; }
   progress { width: 100%; height: 6px; accent-color: var(--accent); }
   .actions { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
   .actions .grow { flex: 1; min-width: 0; }
   .actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
   .tabs { margin-top: 2px; }
-  .areas { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
+  /* a scroll container's least height is nothing, and a dock taller than its room would take it */
+  .areas { display: flex; gap: 4px; min-height: 28px; overflow-x: auto; scrollbar-width: thin; padding-bottom: 2px; }
   .area {
     display: inline-flex;
     flex: none;

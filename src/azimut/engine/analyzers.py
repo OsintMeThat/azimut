@@ -516,9 +516,19 @@ KEPT = ("kept", "noted")
 
 
 #: What the series of a routine says of each candidate: enough to place, count and
-#: judge it. The crop's frames and the outline stay in the run, read when it opens.
-SERIES_FIELDS = ("id", "area_id", "coordinates", "review", "strength", "phenomenon", "measure",
-                 "area", "origin", "entity_id")
+#: judge it. The crop's frames, the outline and the reading stay in the run, read
+#: when it opens: a routine of a hundred busy passes is a few hundred thousand of these.
+SERIES_FIELDS = ("id", "area_id", "coordinates", "review", "strength", "area")
+
+
+def _series_result(result: dict[str, Any]) -> dict[str, Any]:
+    row = {key: result.get(key) for key in SERIES_FIELDS}
+    # a micro-degree is about ten centimetres, far under a Sentinel pixel
+    coordinates = result.get("coordinates") or []
+    row["coordinates"] = [round(float(value), 6) for value in coordinates[:2]]
+    if isinstance(row["area"], (int, float)):
+        row["area"] = round(row["area"])
+    return row
 
 
 def _read_areas(run: dict[str, Any]) -> list[dict[str, Any]]:
@@ -555,8 +565,7 @@ def series(case: Case, followup_id: str) -> list[dict[str, Any]]:
             "id": run["id"], "title": run.get("title", ""), "created_at": run.get("created_at", ""),
             "dates": [(body.get(side) or {}).get("date", "") for side in ("a", "b")],
             "areas": _read_areas(run),
-            "results": [{key: result.get(key) for key in SERIES_FIELDS}
-                        for result in run.get("results", [])],
+            "results": [_series_result(result) for result in run.get("results", [])],
         })
     return sorted(rows, key=lambda row: (row["dates"][1], row["created_at"]))
 

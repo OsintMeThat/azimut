@@ -61,6 +61,12 @@ describe('blocks for a note', () => {
     expect(text).toContain('| S1 | Apron west | 24.25000, 54.55002 | 27 Sep | 29 Sep | 2 of 2 | Regular | ●● |');
   });
 
+  it('cuts a long spots table as every table put in a note is, the CSV holding the rest', () => {
+    const text = spotsTable(series, { areas: AREAS, limit: 2 });
+    expect(text).toContain('> Only the first 2 of 3 spots. The spots CSV holds every one.');
+    expect(text).not.toContain('| S3 |');
+  });
+
   it('puts the whole dashboard under one heading', () => {
     const text = wholeSection(series, { title: 'Al Dhafra', areas: AREAS, source });
     expect(text.startsWith('## Al Dhafra, 27 Sep to 29 Sep 2026')).toBe(true);

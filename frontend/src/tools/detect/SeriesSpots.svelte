@@ -25,19 +25,24 @@
     onverdict = () => {},
   } = $props();
 
-  /** Rows drawn before "Show all": enough for a busy base, light on a big one. */
-  const FIRST = 60;
-  let all = $state(false);
+  /** Rows drawn at a time: enough for a busy base, light on a big one. */
+  const PAGE = 60;
+  let limit = $state(PAGE);
 
   const counts = $derived(categoryCounts(series.spots));
   const chips = $derived([{ id: 'all', label: 'All', rule: '' }, ...CATEGORIES].filter((chip) => chip.id === 'all' || counts[chip.id]));
   const listed = $derived(filter === 'all' ? series.spots : series.spots.filter((spot) => spot.category === filter));
-  const shown = $derived(all ? listed : listed.slice(0, FIRST));
+  const shown = $derived(listed.slice(0, limit));
   const rule = $derived(CATEGORIES.find((entry) => entry.id === filter)?.rule ?? '');
   const year = $derived(spansYears(series.passes.map((pass) => pass.date)));
   const label = Object.fromEntries(CATEGORIES.map((entry) => [entry.id, entry.label]));
   const open = (spot) => spot.verdicts.toReview;
 
+  // a spot picked on the map past the rows drawn brings its page in
+  $effect(() => {
+    const at = selected ? listed.findIndex((spot) => spot.id === selected) : -1;
+    if (at >= limit) limit = Math.ceil((at + 1) / PAGE) * PAGE;
+  });
   // a filter that empties falls back to every spot rather than an empty list
   $effect(() => { if (filter !== 'all' && !counts[filter]) filter = 'all'; });
 
@@ -74,7 +79,7 @@
   <div class="chips" role="group" aria-label="Show spots">
     {#each chips as chip (chip.id)}
       <button class="chip" class:on={filter === chip.id} aria-pressed={filter === chip.id} title={chip.rule || 'Every spot'}
-        onclick={() => { filter = chip.id; all = false; }}>
+        onclick={() => { filter = chip.id; limit = PAGE; }}>
         <span class={`dot ${chip.id}`} aria-hidden="true"></span>{chip.label}<small>{counts[chip.id]}</small>
       </button>
     {/each}
@@ -100,7 +105,7 @@
               <span class={`kind ${spot.category}`}>{label[spot.category]}</span>
               <span class="seen">{spot.seen}/{spot.read}</span>
             </span>
-            <span class="strip" style:--n={series.passes.length} title={presenceLine(spot.presence)}>
+            <span class="strip" class:dense={series.passes.length > 40} style:--n={series.passes.length} title={presenceLine(spot.presence)}>
               {#each spot.presence as state, at (at)}
                 <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
                 <span class={`cell ${state}`} title={cellTitle(spot, at)} onclick={(event) => cell(event, spot, at)}></span>
@@ -123,7 +128,9 @@
       {/each}
     </ul>
     {#if listed.length > shown.length}
-      <button class="btn btn-sm more" onclick={() => (all = true)}>Show all {listed.length}</button>
+      <button class="btn btn-sm more" onclick={() => (limit += PAGE)}>
+        Show {Math.min(PAGE, listed.length - shown.length)} more of {listed.length - shown.length}
+      </button>
     {/if}
     {#if listed.length > 1}
       <div class="bulk">
@@ -189,7 +196,10 @@
   .name strong { color: var(--text-1); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
   .kind { color: var(--c); font-weight: 600; }
   .seen { margin-left: auto; color: var(--text-3); font-variant-numeric: tabular-nums; }
-  .strip { display: grid; grid-template-columns: repeat(var(--n), minmax(3px, 1fr)); gap: 2px; height: 12px; }
+  /* the strip always fits its row: past forty passes the cells close up into a barcode */
+  .strip { display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 2px; height: 12px; }
+  .strip.dense { gap: 0; }
+  .strip.dense .cell { border-radius: 0; }
   .cell { border-radius: 2px; background: color-mix(in srgb, var(--text-3) 18%, transparent); }
   .cell.present { background: var(--tint); cursor: pointer; }
   .cell.present:hover { outline: 1px solid var(--text-1); outline-offset: 1px; }

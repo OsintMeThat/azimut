@@ -34,7 +34,8 @@ export function shortDay(iso, year = false) {
 export const spansYears = (days) => new Set(days.filter(Boolean).map((day) => day.slice(0, 4))).size > 1;
 
 /** Colours told apart on the dark and the light theme, for areas that share one. */
-export const AREA_PALETTE = Object.freeze(['#4e9bd8', '#e8a33d', '#66b578', '#c46fd0', '#d97070', '#4fb8b0', '#b9a44c', '#8f9aa8']);
+// Amber is left out: it is what waits for review, and the app's own accent.
+export const AREA_PALETTE = Object.freeze(['#4e9bd8', '#4fb8b0', '#a98ad8', '#d87fae', '#b9a44c', '#8fa3b8', '#c9925f', '#6fbf73']);
 
 /**
  * A colour per area, for a chart stacked by area: each area's own when they all
@@ -142,23 +143,60 @@ export function buildSeries(rows, { radius = SPOT_RADIUS, only = null } = {}) {
   const passes = seriesPasses(rows);
   const keep = (areaId) => !only || areaId === only;
   const spots = [];
-  const open = new Map(); // area id → its spots so far
+  // Spots sit in a grid of cells one radius wide, per area, so a candidate is only
+  // measured against the spots of the nine cells around it: a busy base over a
+  // hundred passes stays a fraction of a second rather than a minute.
+  const grid = new Map();
+  const xScale = new Map(); // area id → metres per degree of longitude there
+  const cellOf = (areaId, [lon, lat]) => {
+    if (!xScale.has(areaId)) xScale.set(areaId, 111320 * Math.cos((lat * Math.PI) / 180));
+    return [Math.floor((lon * xScale.get(areaId)) / radius), Math.floor((lat * 110540) / radius)];
+  };
+  // a cell as one number: whole cells of a few metres stay far inside a double's exact range
+  const KEY = 1_000_003;
+  const cellsOf = (areaId) => {
+    if (!grid.has(areaId)) grid.set(areaId, new Map());
+    return grid.get(areaId);
+  };
+  const place = (spot) => {
+    const [cx, cy] = cellOf(spot.areaId, spot.centre);
+    const key = cx * KEY + cy;
+    if (spot.cell === key) return;
+    const cells = cellsOf(spot.areaId);
+    if (spot.cell !== null) cells.get(spot.cell)?.delete(spot);
+    if (!cells.has(key)) cells.set(key, new Set());
+    cells.get(key).add(spot);
+    spot.cell = key;
+  };
+  const near = (areaId, point) => {
+    const [cx, cy] = cellOf(areaId, point);
+    const cells = cellsOf(areaId);
+    const found = [];
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        const cell = cells.get((cx + dx) * KEY + cy + dy);
+        if (cell) for (const spot of cell) found.push(spot);
+      }
+    }
+    return found;
+  };
 
   passes.forEach((pass, at) => {
-    const found = pass.results.filter((result) => keep(result.area_id));
     const byArea = new Map();
-    for (const result of found) {
+    for (const result of pass.results) {
+      if (!keep(result.area_id)) continue;
       if (!byArea.has(result.area_id)) byArea.set(result.area_id, []);
       byArea.get(result.area_id).push(result);
     }
     for (const [areaId, results] of byArea) {
-      const known = open.get(areaId) ?? [];
       // every pairing near enough, nearest first, each candidate and spot taken once
       const pairs = [];
-      results.forEach((result, index) => known.forEach((spot) => {
-        const distance = metres(spot.centre, result.coordinates);
-        if (distance <= radius) pairs.push({ index, spot, distance });
-      }));
+      results.forEach((result, index) => {
+        for (const spot of near(areaId, result.coordinates)) {
+          const distance = metres(spot.centre, result.coordinates);
+          if (distance <= radius) pairs.push({ index, spot, distance });
+        }
+      });
       pairs.sort((one, two) => one.distance - two.distance);
       const taken = new Set();
       const filled = new Set();
@@ -166,18 +204,20 @@ export function buildSeries(rows, { radius = SPOT_RADIUS, only = null } = {}) {
         if (taken.has(index) || filled.has(spot)) continue;
         taken.add(index); filled.add(spot);
         spot.members.push({ at, runId: pass.id, date: pass.date, result: results[index], distance });
+        const [lon, lat] = results[index].coordinates;
+        spot.sum[0] += lon; spot.sum[1] += lat;
+      }
+      for (const spot of filled) {
+        spot.centre = [spot.sum[0] / spot.members.length, spot.sum[1] / spot.members.length];
+        place(spot);
       }
       results.forEach((result, index) => {
         if (taken.has(index)) return;
-        const spot = { areaId, centre: result.coordinates, members: [{ at, runId: pass.id, date: pass.date, result, distance: 0 }] };
-        known.push(spot);
+        const spot = { areaId, centre: result.coordinates, sum: [...result.coordinates], cell: null,
+          members: [{ at, runId: pass.id, date: pass.date, result, distance: 0 }] };
+        place(spot);
         spots.push(spot);
       });
-      for (const spot of known) {
-        const points = spot.members.map((member) => member.result.coordinates);
-        spot.centre = [points.reduce((sum, p) => sum + p[0], 0) / points.length, points.reduce((sum, p) => sum + p[1], 0) / points.length];
-      }
-      open.set(areaId, known);
     }
   });
 
@@ -185,6 +225,15 @@ export function buildSeries(rows, { radius = SPOT_RADIUS, only = null } = {}) {
   const readAt = (areaId) => {
     if (!readAtOf.has(areaId)) readAtOf.set(areaId, passes.flatMap((pass, at) => (pass.read.has(areaId) ? [at] : [])));
     return readAtOf.get(areaId);
+  };
+  // each pass that read an area → the pass that read it before
+  const previousOf = new Map();
+  const previousRead = (areaId) => {
+    if (!previousOf.has(areaId)) {
+      const reading = readAt(areaId);
+      previousOf.set(areaId, new Map(reading.slice(1).map((at, index) => [at, reading[index]])));
+    }
+    return previousOf.get(areaId);
   };
 
   // first seen first, then north to south, so the numbers read down the list
@@ -218,8 +267,7 @@ export function buildSeries(rows, { radius = SPOT_RADIUS, only = null } = {}) {
     const left = [];
     for (const spot of finished) {
       if (!pass.read.has(spot.areaId)) continue;
-      const reading = readAt(spot.areaId);
-      const before = reading[reading.indexOf(at) - 1];
+      const before = previousRead(spot.areaId).get(at);
       if (before === undefined) continue;
       const now = spot.presence[at] === 'present';
       const then = spot.presence[before] === 'present';
@@ -276,6 +324,16 @@ export function presenceLine(presence) {
 
 /** The candidate a spot is seen with on its newest pass, which is the one worth opening. */
 export const newestMember = (spot) => spot?.members?.at(-1) ?? null;
+
+/** The most candidates one verdict request carries, as the server holds it (`ReviewMany`). */
+export const REVIEW_BATCH = 2000;
+
+/** A list cut into runs of `size`, for requests that each carry a bounded part. */
+export function inBatches(list, size = REVIEW_BATCH) {
+  const parts = [];
+  for (let at = 0; at < list.length; at += size) parts.push(list.slice(at, at + size));
+  return parts;
+}
 
 /** The candidates a verdict on a spot reaches: every one of its members not pinned in the case. */
 export function spotPicks(spot) {

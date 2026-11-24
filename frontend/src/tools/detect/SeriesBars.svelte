@@ -37,7 +37,7 @@
   const year = $derived(spansYears(passes.map((pass) => pass.date)));
   const plotW = $derived(Math.max(40, width - LEFT - RIGHT));
   const band = $derived(passes.length ? plotW / passes.length : plotW);
-  const barW = $derived(Math.max(3, Math.min(28, band * 0.66)));
+  const barW = $derived(Math.max(1, Math.min(28, band * 0.66)));
   const xOf = (index) => LEFT + index * band + band / 2;
 
   /** A rounded top for the axis, and its ticks. */
@@ -45,7 +45,8 @@
     if (value <= 4) return { top: Math.max(1, value), step: 1 };
     const raw = value / 4;
     const power = 10 ** Math.floor(Math.log10(raw));
-    const step = [1, 2, 2.5, 5, 10].map((f) => f * power).find((s) => s >= raw) ?? power * 10;
+    // counts are whole: a tick at 2.5 candidates would say nothing
+    const step = Math.max(1, [1, 2, 5, 10].map((f) => f * power).find((s) => s >= raw) ?? power * 10);
     return { top: Math.ceil(value / step) * step, step };
   }
 

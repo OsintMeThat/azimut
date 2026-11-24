@@ -21,7 +21,7 @@
   import { recipeCapability } from '../../lib/map/analyzerRules.js';
   import { containsPoint } from '../../lib/measure.js';
   import { detectionsWithRuns, isActive, passCount, plural } from '../../lib/map/detections.js';
-  import { SPOT_RADIUS, buildSeries, spotPicks } from '../../lib/map/detectSeries.js';
+  import { SPOT_RADIUS, buildSeries, inBatches, spotPicks } from '../../lib/map/detectSeries.js';
   import CatchUp from './CatchUp.svelte';
   import AnalyzerLibrary from './AnalyzerLibrary.svelte';
   import DetectDetection from './DetectDetection.svelte';
@@ -689,7 +689,12 @@
   async function applyVerdict(list, review) {
     const results = list.flatMap(spotPicks);
     if (!results.length || !detectionId) return;
-    const answer = await api.post(`${base()}/followups/${detectionId}/review`, { review, results });
+    // the server takes so many candidates a request, so a whole filter goes in a few
+    const answer = { changed: 0, pinned: 0 };
+    for (const part of inBatches(results)) {
+      const done = await api.post(`${base()}/followups/${detectionId}/review`, { review, results: part });
+      answer.changed += done.changed ?? 0; answer.pinned += done.pinned ?? 0;
+    }
     await Promise.all([reloadSeries(), refreshRuns(caseId)]);
     const said = review === 'dismissed' ? 'dismissed' : 'kept here';
     toast(`${plural(answer.changed, 'candidate')} ${said}${answer.pinned ? `; ${answer.pinned} pinned left as they are` : ''}`, 'ok');

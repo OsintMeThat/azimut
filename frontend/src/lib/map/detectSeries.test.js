@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AREA_PALETTE, CATEGORIES, areaColours, buildSeries, categoryCounts, daysBetween, metres, presenceLine, seriesFigures, seriesPasses, shortDay,
+  AREA_PALETTE, CATEGORIES, areaColours, buildSeries, inBatches, categoryCounts, daysBetween, metres, presenceLine, seriesFigures, seriesPasses, shortDay,
   spansYears, spotPicks,
 } from './detectSeries.js';
 
@@ -151,5 +151,52 @@ describe('figures', () => {
 
   it('answers an empty series', () => {
     expect(seriesFigures(buildSeries([]))).toMatchObject({ passes: 0, candidates: 0, spots: 0, peak: null });
+  });
+});
+
+describe('a busy routine', () => {
+  /** The grouping written plainly, every candidate against every spot, for the grid to match. */
+  function plainly(passes, radius) {
+    const spots = [];
+    passes.forEach((pass, at) => {
+      const pairs = [];
+      pass.results.forEach((result, index) => spots.forEach((spot) => {
+        if (spot.areaId !== result.area_id) return;
+        const distance = metres(spot.centre, result.coordinates);
+        if (distance <= radius) pairs.push({ index, spot, distance });
+      }));
+      pairs.sort((one, two) => one.distance - two.distance);
+      const taken = new Set();
+      const filled = new Set();
+      for (const { index, spot } of pairs) {
+        if (taken.has(index) || filled.has(spot)) continue;
+        taken.add(index); filled.add(spot); spot.points.push(pass.results[index].coordinates); spot.ids.push(`${at}:${pass.results[index].id}`);
+      }
+      for (const spot of filled) spot.centre = [0, 1].map((k) => spot.points.reduce((sum, point) => sum + point[k], 0) / spot.points.length);
+      pass.results.forEach((result, index) => {
+        if (!taken.has(index)) spots.push({ areaId: result.area_id, centre: result.coordinates, points: [result.coordinates], ids: [`${at}:${result.id}`] });
+      });
+    });
+    return spots.map((spot) => spot.ids.join(',')).sort();
+  }
+
+  it('groups as every candidate against every spot would, cell edges included', () => {
+    let seed = 7;
+    const random = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const parked = Array.from({ length: 60 }, () => east(random() * 2000));
+    const rows = Array.from({ length: 20 }, (_, p) => run(`r${p}`, `2026-10-${String(p + 1).padStart(2, '0')}`,
+      parked.map((point, i) => result(`c${i}`, random() < 0.6 ? [point[0] + (random() - 0.5) * 0.0006, point[1] + (random() - 0.5) * 0.0004]
+        : east(random() * 2000), { area: i % 2 ? 'apron' : 'north' })), { areas: ['apron', 'north'] }));
+    for (const radius of [20, 40, 150]) {
+      const series = buildSeries(rows, { radius });
+      const grouped = series.spots.map((spot) => spot.members.map((m) => `${m.at}:${m.result.id}`).join(',')).sort();
+      expect(grouped).toEqual(plainly(seriesPasses(rows), radius));
+    }
+  });
+
+  it('sends a verdict on many candidates in requests the server takes', () => {
+    const many = Array.from({ length: 4500 }, (_, i) => i);
+    expect(inBatches(many).map((part) => part.length)).toEqual([2000, 2000, 500]);
+    expect(inBatches([])).toEqual([]);
   });
 });

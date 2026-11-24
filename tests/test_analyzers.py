@@ -484,7 +484,7 @@ def test_a_candidate_can_be_kept_in_the_detections_view_without_touching_the_cas
     client.post(endpoint + "/promote", json={"title": "Kept change"})
     [pinned] = next(row for row in client.get(f"{base}/followups/{watch['id']}/series").json()
                     if row["id"] == saved["id"])["results"]
-    assert pinned["review"] == "kept" and pinned["entity_id"]
+    assert pinned["review"] == "kept"
     assert next(r for r in client.get(f"{base}/runs").json() if r["id"] == saved["id"])["marked"] == 1
 
 
@@ -630,6 +630,9 @@ def test_a_routine_s_series_says_what_each_pass_read_and_found_without_the_pictu
     [found] = ran["results"]
     assert set(found) == set(analyzers.SERIES_FIELDS)
     assert found["review"] == "new" and len(found["coordinates"]) == 2
+    # light enough for a hundred busy passes: rounded, and nothing of the crop or the outline
+    assert all(len(str(value).split(".")[-1]) <= 6 for value in found["coordinates"])
+    assert isinstance(found["area"], int)
     # a run still working, or another routine's, is not in it
     client.post(f"{base}/followups/{watch['id']}/run", json={"date": "2026-05-18"})
     assert len(client.get(f"{base}/followups/{watch['id']}/series").json()) == 1

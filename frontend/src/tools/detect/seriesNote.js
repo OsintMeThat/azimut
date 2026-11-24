@@ -7,7 +7,7 @@
  * nobody dismissed, spots grouped by the rule it states. A count of candidates is
  * not a count of aircraft or vehicles, so the words say candidates.
  */
-import { toMarkdown } from '../../lib/sheetExport.js';
+import { NOTE_ROWS, cutLine, toMarkdown } from '../../lib/sheetExport.js';
 import { CATEGORIES, areaColours, presenceLine, seriesFigures, shortDay, spansYears } from '../../lib/map/detectSeries.js';
 
 /** A name as a chart setting can hold it: no comma, no pipe, one line. */
@@ -89,16 +89,18 @@ export function changesBlock(series, { title = '', source = '' } = {}) {
 }
 
 /** The spots as a table: where each is, when it was seen and its passes as ● ○ ·. */
-export function spotsTable(series, { areas = [], spots = series.spots } = {}) {
+export function spotsTable(series, { areas = [], spots = series.spots, limit = NOTE_ROWS } = {}) {
   if (!spots.length) return '';
   const { dayOf, areaName } = labels(series, areas);
   const category = new Map(CATEGORIES.map((entry) => [entry.id, entry.label]));
-  const rows = spots.map((spot) => [
+  const rows = spots.slice(0, limit).map((spot) => [
     spot.id, areaName(spot.areaId), `${spot.centre[1].toFixed(5)}, ${spot.centre[0].toFixed(5)}`,
     dayOf(spot.first), dayOf(spot.last), `${spot.seen} of ${spot.read}`, category.get(spot.category) ?? '',
     presenceLine(spot.presence),
   ]);
   const said = [`Spots: candidates within ${series.radius} m on two passes count as one. Passes: ● seen, ○ looked at and empty, · not read.`];
+  const cut = cutLine({ kept: rows.length, total: spots.length, noun: 'spots', narrow: 'The spots CSV holds every one.' });
+  if (cut) said.push(cut);
   return toMarkdown({ columns: ['Spot', 'Area', 'Coordinates', 'First seen', 'Last seen', 'Passes', 'Kind', 'Each pass'], rows }, said);
 }
 

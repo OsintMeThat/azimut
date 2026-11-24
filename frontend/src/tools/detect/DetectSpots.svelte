@@ -28,7 +28,17 @@
     const here = project([lon, lat]);
     const east = project([lon + (radius / 2) / (111320 * Math.cos((lat * Math.PI) / 180)), lat]);
     const r = Math.max(4.5, Math.min(40, Math.abs(east.x - here.x)));
-    return spots.map((spot) => ({ ...project(spot.centre), id: spot.id, kind: spot.category, r }));
+    // only what is on screen is drawn, so a routine of thousands of spots pans as lightly as one of ten
+    const width = svg?.clientWidth || Infinity;
+    const height = svg?.clientHeight || Infinity;
+    const margin = r + 40;
+    const shown = [];
+    for (const spot of spots) {
+      const point = project(spot.centre);
+      if (point.x < -margin || point.y < -margin || point.x > width + margin || point.y > height + margin) continue;
+      shown.push({ ...point, id: spot.id, kind: spot.category, r });
+    }
+    return shown;
   });
 
   function press(event, id) {
