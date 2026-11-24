@@ -3189,6 +3189,12 @@ their switch rests while 3D is on, and comes back with it. The globe is the only
 3D view: a browser without WebGL2, or one that loses it, has none, and the 3D
 switch greys and says why.
 
+Past 85.05° the imagery stops, and through the hole at each pole the globe shows
+its own inside. The northern one holds a small surprise for whoever dives into it
+(`tools/satellite/NorthPole.svelte`, read by `lib/globe/northPole.js`): it only lays
+things over the globe, writes nothing, sends nothing, never shows in a capture, and
+hands the camera back over the Arctic.
+
 **How much the 3D draws is this computer's.** Settings → General → 3D views offers
 Full, as the 3D always drew, then Balanced and Light for a slow graphics card or
 little memory (`lib/quality3d.js`). They split the globe's tiles later, draw fewer
