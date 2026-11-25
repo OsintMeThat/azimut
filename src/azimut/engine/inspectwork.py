@@ -527,9 +527,11 @@ def save_work(case: "Case", subject: str, spec: dict[str, Any], guard: SceneGuar
         if kept:
             scenes.sort(key=_scene_order)
         # what the scenes show moved too: a frame added to the strip or taken off counts
-        # in them (`scenes.Footage`), so the pill and the To-do read their counts again
+        # in them (`scenes.Footage`), so the pill and the To-do read their counts again,
+        # and one saved to the case is a picture a proof of its scene can take in
+        before = previous.get("frames") if found else None
         moved = _scene_lines(previous.get("scenes") if found else None) != _scene_lines(scenes) or bool(
-            scenes and _instants(previous.get("frames") if found else None) != _instants(frames)
+            scenes and (_instants(before) != _instants(frames) or _filed(before) != _filed(frames))
         )
         if found:
             _keep_scene_state(scenes, previous.get("scenes"))
@@ -564,6 +566,15 @@ def _scene_lines(scenes: Any) -> list[tuple[Any, ...]]:
     """What a save can change about a file's scenes, to tell one that did from the many
     autosaves that did not. The server's own fields (`SCENE_STATE`) are not among it."""
     return [tuple(s.get(key) for key in _SCENE_KEYS) for s in scenes or [] if isinstance(s, dict)]
+
+
+def _filed(frames: Any) -> list[tuple[str, str]]:
+    """The strip's frames saved to the case and the picture each was saved as, sorted."""
+    return sorted(
+        (str(frame.get("id")), str(filed.get("path")))
+        for frame in frames or []
+        if isinstance(frame, dict) and isinstance(filed := frame.get("filed"), dict) and filed.get("path")
+    )
 
 
 def _instants(frames: Any) -> list[float]:

@@ -6,6 +6,7 @@ export const GEOLOCATING_HELP = {
   back: (file) => `Open the scene in Inspect, on ${file}`,
   make: 'Make the proof from its frames and captures',
   open: 'Open its proof, with the map captures it does not hold yet',
+  openHere: 'Back to its proof in Geo Proof, where new map captures join it',
   makePicture: 'Make the proof from the picture and its captures',
   stop: 'Stop geolocating it, its captures stay with it',
   gathered: 'What this scene gathered',

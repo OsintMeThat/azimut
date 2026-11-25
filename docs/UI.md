@@ -49,6 +49,15 @@ proof** opens Inspect's chooser on it, and ✕ stops; the captures stay with the
 map captures meanwhile is still gathered, and **Make the proof** reads **Open the proof**,
 which opens that proof and lays out the map captures it does not hold yet, never a second
 proof (`scene.proof`, `engine/geolocate.py`). Geo Proof says so once, at that first save.
+**A proof open in Geo Proof that holds the scene counts too, saved or not**: one made by
+Make the proof or a map tab's Send to Geo Proof reads **Open the proof** before its first
+save, the press going back to it. While it is open, each map capture the scene gathers
+joins it once Geo Proof is in front, and so does each frame saved in Inspect and each
+collage exported inside a passage of the scene, or anywhere for the whole video; an
+instant gives none, its frame being the proof's already (`joins`, `GET
+/geolocating/gathered`). One taken off stays off (`tools/proof/gatheredJoin.js`). The
+extension reads the server, so it learns of that proof at its first save; its Make the
+proof still opens it.
 The geolocating ends when the proof states a place somebody checked.
 Three small links beside the counts go to Inspect on the scene, to Satellite with its
 reference window open again, and to Horizon. **Pressing the counts lists what the scene

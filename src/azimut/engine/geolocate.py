@@ -413,6 +413,7 @@ def gathered(case: Case) -> dict[str, Any]:
     video, draft_id = held["video"], held["id"]
     draft = _draft(case, video, draft_id) or {}
     answer: dict[str, Any] = {"geolocating": held, "leads": inspectwork.clean_leads(draft.get("leads"))}
+    joins: list[str] = []
     if held.get("file_kind") == "image":
         frames: list[dict[str, Any]] = []
         collages: list[dict[str, Any]] = []
@@ -424,22 +425,52 @@ def gathered(case: Case) -> dict[str, Any]:
         ]
         moments = inspectwork.scene_moments(draft)
         # every one the count holds, one never exported included: it has no picture yet
+        rows = [row for row in scenes_engine.video_collages(case, video) if _in_moments(row["times"], moments)]
         collages = [
             {"name": row["collage"], "title": row["title"], "path": row.get("export") or None}
-            for row in scenes_engine.video_collages(case, video)
-            if _in_moments(row["times"], moments)
+            for row in rows
         ]
+        joins = _joining(case, video, moments, frames, rows)
     captures = list(held.get("captures") or [])
-    present = _present(case, [*captures, *(c["path"] for c in collages if c["path"]), video])
+    present = _present(case, [*captures, *(c["path"] for c in collages if c["path"]), *joins, video])
     answer["captures"] = [
         {"path": p, "title": scenes_engine.file_title(present.get(p), p), "thumb": _thumb(case, present.get(p))}
         for p in captures if p in present
     ]
     answer["frames"] = frames
     answer["collages"] = [{**c, "thumb": _thumb(case, present.get(c["path"]))} for c in collages]
+    answer["joins"] = [path for path in joins if path in present]
     if held.get("file_kind") == "image":
         answer["picture"] = {"path": video, "title": held.get("file_title") or video, "thumb": _thumb(case, present.get(video))}
     return answer
+
+
+def _joining(
+    case: Case, video: str, moments: Sequence[Mapping[str, Any]], frames: list[dict[str, Any]], collages: list[dict[str, Any]]
+) -> list[str]:
+    """The case files a proof open on the scene takes in as they come
+    (`tools/proof/gatheredJoin.js`): its frames saved and its collages exported inside a
+    passage of it, or anywhere in a scene about the whole video, in clip order. An instant
+    gives none, its one frame being the proof's already."""
+    passages = [m for m in moments if m.get("end") is not None]
+    if moments and not passages:
+        return []
+    length = scenes_engine.frame_length(case, video) if passages else 0.0
+
+    def inside(time: Any, step: float) -> bool:
+        if not moments:
+            return True
+        if not isinstance(time, (int, float)) or isinstance(time, bool):
+            return False
+        return any(scenes_engine.frame_in_moment(float(time), m["start"], m["end"], step) for m in passages)
+
+    paths = [f["path"] for f in frames if f.get("path") and inside(f.get("time"), length)]
+    step = 1 / scenes_engine.DEFAULT_FPS
+    paths += [
+        row["export"] for row in collages
+        if row.get("export") and (not moments or any(inside(t, step) for t in row.get("times") or []))
+    ]
+    return list(dict.fromkeys(paths))
 
 
 def gathered_capture(case: Case, path: str) -> str:

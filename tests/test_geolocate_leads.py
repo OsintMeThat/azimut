@@ -17,9 +17,11 @@ from test_geolocate import (
     _capture,
     _case,
     _collage,
+    _export,
     _geolocate,
     _mark,
     _queue,
+    _record_export,
     _save_work,
     _stored,
     _upload,
@@ -260,6 +262,83 @@ def test_the_pill_lists_what_the_scene_gathered_and_only_what_falls_in_it(client
     assert "picture" not in got
     # the list says as many as the counts on the pill
     assert len(got["frames"]) + len(got["collages"]) == got["geolocating"]["footage"]
+
+
+def _filed_frames(client, cid, video, times):
+    """Frames of the strip at these times, each saved to the case as Inspect saves it."""
+    cut = client.post(f"/api/cases/{cid}/inspect/save-frames", json={"items": [{"path": video, "time": t} for t in times]})
+    assert cut.status_code == 200, cut.text
+    paths = [one["item"]["path"] for one in cut.json()["saved"]]
+    return paths, [{"id": f"f{i}", "path": video, "time": t, "filed": {"path": p}} for i, (t, p) in enumerate(zip(times, paths))]
+
+
+@needs_ffmpeg
+def test_a_proof_open_on_the_scene_takes_in_what_is_saved_inside_a_passage_and_nothing_from_an_instant(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    # 1.5 in the passage, 3.0 on the instant, 3.5 in neither
+    (in_passage, on_instant, outside), frames = _filed_frames(client, cid, video, [1.5, 3.0, 3.5])
+    frames.append({"id": "loose", "path": video, "time": 1.6})
+    res = client.put(f"/api/cases/{cid}/inspect/work", json={"path": video, "spec": {"frames": frames, "scenes": [
+        {"id": "two", "start": 1.0, "end": 2.0, "more": [{"start": 3.0, "end": None}], "label": "Bridge"},
+    ]}})
+    assert res.status_code == 200, res.text
+    exported = {}
+    for title, pieces in (("Quay", [(video, 1.4), (video, 1.7)]), ("Gate", [(video, 2.95), (video, 3.0)])):
+        name = _collage(client, cid, title, pieces)
+        exported[title] = _export(client, cid, name, pieces)
+        _record_export(client, cid, name, title, pieces, exported[title])
+    _collage(client, cid, "Never exported", [(video, 1.2), (video, 1.3)])
+    _geolocate(client, cid, video, "two")
+
+    got = client.get(f"/api/cases/{cid}/geolocating/gathered").json()
+    # the pill lists the frame on the instant; a proof takes in the passage's alone
+    assert [f["path"] for f in got["frames"]] == [in_passage, None, on_instant]
+    assert {c["title"]: c["path"] for c in got["collages"]} == {**exported, "Never exported": None}
+    assert got["joins"] == [in_passage, exported["Quay"]]
+    assert outside not in got["joins"]
+
+
+@needs_ffmpeg
+def test_an_instant_gives_a_proof_nothing_and_the_whole_video_gives_it_every_saved_frame(client, tmp_path):
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    paths, frames = _filed_frames(client, cid, video, [1.0, 2.5])
+    res = client.put(f"/api/cases/{cid}/inspect/work", json={"path": video, "spec": {"frames": frames, "scenes": [
+        {"id": "instant", "start": 1.0, "end": None, "label": "Gate"},
+    ]}})
+    assert res.status_code == 200, res.text
+    _geolocate(client, cid, video, "instant")
+    got = client.get(f"/api/cases/{cid}/geolocating/gathered").json()
+    assert [f["path"] for f in got["frames"]] == [paths[0]]
+    assert got["joins"] == []
+
+    res = client.put(f"/api/cases/{cid}/inspect/work", json={"path": video, "spec": {"frames": frames, "scenes": [
+        {"id": "whole", "start": None, "end": None, "label": "Town"},
+    ]}})
+    assert res.status_code == 200, res.text
+    _geolocate(client, cid, video, "whole")
+    assert client.get(f"/api/cases/{cid}/geolocating/gathered").json()["joins"] == paths
+
+
+@needs_ffmpeg
+def test_a_frame_saved_to_the_case_says_its_scenes_moved(client, tmp_path, monkeypatch):
+    from azimut.api import events
+
+    cid = _case(client)
+    video = _video(client, cid, tmp_path)
+    scenes = [{"id": "pass", "start": 1.0, "end": 2.0, "label": ""}]
+    loose = [{"id": "f0", "path": video, "time": 1.5}]
+    assert client.put(f"/api/cases/{cid}/inspect/work", json={"path": video, "spec": {"frames": loose, "scenes": scenes}}).status_code == 200
+    _paths, filed = _filed_frames(client, cid, video, [1.5])
+
+    heard: list[dict] = []
+    monkeypatch.setattr(events, "publish", heard.append)
+    client.put(f"/api/cases/{cid}/inspect/work", json={"path": video, "spec": {"frames": loose, "scenes": scenes}})
+    assert heard == []
+    # the same frame, now saved: a proof open on its scene takes it in, the pill lists its picture
+    client.put(f"/api/cases/{cid}/inspect/work", json={"path": video, "spec": {"frames": filed, "scenes": scenes}})
+    assert {"type": "scenes", "case_id": cid, "video": video} in heard
 
 
 def test_a_picture_s_pill_lists_the_picture_and_no_frames(client):
