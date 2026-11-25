@@ -170,9 +170,10 @@
   import MarkShowChoice from '../components/MarkShowChoice.svelte';
   import { onEvent } from '../lib/events.js';
   import {
-    abandonProof, abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneQueue, mapWithScene, readGeolocating, readSceneQueue,
-    restoreProof, restoreScene, sceneQueue, warnNoMapCapture,
+    abandonProof, abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdInGeoProof, holdSceneQueue, mapWithScene, readGathered,
+    readGeolocating, readSceneQueue, restoreProof, restoreScene, sceneQueue, warnNoMapCapture,
   } from '../lib/geolocating.svelte.js';
+  import { GatheredJoin, addedWords, holdsScene } from './proof/gatheredJoin.js';
   import { sceneMaterial, scenesToProve } from '../lib/newProof.js';
   import { openScenes, queueColor } from '../lib/sceneQueue.js';
   import { NO_VIDEO, inVideo, proofLabel, proofVideos, slideTag } from '../lib/proofList.js';
@@ -333,6 +334,13 @@
   // A named proof can exist before it has content. This distinguishes the
   // initial composer shell from a template-only proof the user just created.
   let proofStarted = $state(false);
+  // what the scene being geolocated gathered the proof open has had (`proof/gatheredJoin.js`),
+  // the scene it holds, and the pictures of the video read for that scene with whether a
+  // read is out: Geo Proof coming to the front waits for it, so it lays all of it at once
+  const gathered = new GatheredJoin();
+  let gatheredKey = '';
+  let footage = $state({ key: null, paths: [], reading: false });
+  let footageRun = 0;
 
   // Drop the saved binding when another surface deletes the proof.
   // Keep the canvas so a later Save creates a new proof.
@@ -1147,6 +1155,8 @@
   async function makeSceneProof(handoff, { look = null, navigate = true, template = undefined } = {}) {
     const made = readHandoff(handoff);
     if (!made) return false;
+    // what it lays out is never laid again as a capture the scene gathered
+    gathered.hand(made.panels);
     // The frames were filed a moment ago, so the case's media is read again, once.
     let read = false;
     const readOnce = async () => {
@@ -1708,7 +1718,86 @@
     const missing = [...new Set(add)].filter((path) => !held.has(path));
     if (!missing.length) return;
     await addPanelsFromPaths(missing);
-    toast(missing.length === 1 ? '1 map capture added' : `${missing.length} map captures added`, 'ok', 2600);
+    toast(addedWords(missing.length, 0), 'ok', 2600);
+  }
+
+  // What the scene being geolocated gathers joins the proof open that holds it, saved or
+  // not, once Geo Proof is in front, each once (`proof/gatheredJoin.js`): its map captures,
+  // and the frames saved and collages exported inside a passage of it, read from the server
+  // (`joins`, GET /geolocating/gathered). The pill hears which scene the proof holds, and
+  // opens this proof rather than making a second one.
+  async function readFootage(key) {
+    const caseId = caseState.current?.id;
+    if (!key || !caseId) return;
+    const mine = ++footageRun;
+    footage.reading = true;
+    try {
+      const answer = await readGathered(caseId);
+      const held = answer?.geolocating;
+      // the scene or the proof moved on meanwhile: the next read says
+      if (mine !== footageRun || !held || `${caseId}\n${held.video}\n${held.id}` !== key) return;
+      footage.key = key;
+      footage.paths = answer.joins ?? [];
+    } catch {
+      // nothing laid from a read that failed: the next one says
+    } finally {
+      if (mine === footageRun) footage.reading = false;
+    }
+  }
+
+  // Geo Proof back in front: what Inspect saved or the collage exported meanwhile is read
+  // again before anything is laid, so it all comes at once. While it is in front, a word
+  // that the video's scenes moved reads it too.
+  let wasFront = false;
+  $effect(() => {
+    const front = uiState.tool === 'proof';
+    untrack(() => {
+      if (front && !wasFront && gatheredKey) void readFootage(gatheredKey);
+      wasFront = front;
+    });
+  });
+
+  $effect(() => {
+    const c = caseState.current;
+    const held = c && geolocating.caseId === c.id ? geolocating.scene : null;
+    const panels = proof.panels.map((p) => p.src);
+    const holds = proofStarted && holdsScene(held, { draft: scene.draft, panels });
+    const key = holds ? `${c.id}\n${held.video}\n${held.id}` : '';
+    // a handoff on its way lays its own pictures first
+    const front = uiState.tool === 'proof' && !uiState.proofScene && !uiState.openProof && !footage.reading;
+    const captures = held?.captures ?? [];
+    const pictures = key && footage.key === key ? footage.paths : null;
+    untrack(() => {
+      holdInGeoProof(c?.id, holds ? held : null);
+      const asked = key !== gatheredKey;
+      gatheredKey = key;
+      if (asked && key) void readFootage(key);
+      const fresh = gathered.take({ key, sources: { footage: pictures, captures }, panels, front });
+      if (fresh.length) void layGathered(fresh, new Set(captures));
+    });
+  });
+  onDestroy(() => holdInGeoProof(null, null));
+
+  let footageTimer = 0;
+  onDestroy(onEvent('scenes', (event) => {
+    if (!gatheredKey || uiState.tool !== 'proof' || event.case_id !== caseState.current?.id) return;
+    if (event.video !== geolocating.scene?.video) return;
+    clearTimeout(footageTimer);
+    footageTimer = setTimeout(() => readFootage(gatheredKey), 400);
+  }));
+  onDestroy(() => clearTimeout(footageTimer));
+
+  async function layGathered(paths, captures) {
+    try {
+      await addPanelsFromPaths(paths);
+    } catch (e) {
+      toast(`Could not add what the scene gathered: ${e.message}`, 'warn');
+      return;
+    }
+    const laid = new Set(proof.panels.map((p) => p.src));
+    const kept = paths.filter((path) => laid.has(path));
+    const words = addedWords(kept.filter((path) => captures.has(path)).length, kept.filter((path) => !captures.has(path)).length);
+    if (words) toast(words, 'ok', 2600);
   }
 
   // consume a "make the proof" handoff from a scene of Inspect or a map tab
@@ -2019,6 +2108,11 @@
     imgCache.clear();
     pasteAssets.clear();
     scene.reset();
+    gathered.reset();
+    footage.key = null;
+    footage.reading = false;
+    footageRun += 1;
+    gatheredKey = '';
     draftShown = null;
     anchorHistory();
   }
@@ -2568,23 +2662,34 @@
     }
   }
 
+  // The pictures on their way in: a capture gathered and a handoff laying the same one
+  // at once lay it once.
+  const arriving = new Set();
+
   /** These case files as panels, in order. `media` is the media list when it was just read. */
   async function addPanelsFromPaths(paths, { media: read = null } = {}) {
-    // a list that misses one of them was read before it was filed
-    const fresh = read && paths.every((path) => read.some((one) => one.path === path)) ? read : null;
-    const [media, sats] = await Promise.all([
-      fresh ?? api.get(`/api/cases/${caseState.current.id}/media`),
-      api.get(`/api/cases/${caseState.current.id}/satellite`),
-    ]);
-    for (const path of paths) {
-      if (proof.panels.some((p) => p.src === path)) continue;
-      const sat = sats.find((s) => s.path === path);
-      if (sat) {
-        await addPanel(satPanelInput(sat, prefs.coordFormat));
-        continue;
+    const mine = [...new Set(paths)].filter((path) => !arriving.has(path) && !proof.panels.some((p) => p.src === path));
+    if (!mine.length) return;
+    for (const path of mine) arriving.add(path);
+    try {
+      // a list that misses one of them was read before it was filed
+      const fresh = read && mine.every((path) => read.some((one) => one.path === path)) ? read : null;
+      const [media, sats] = await Promise.all([
+        fresh ?? api.get(`/api/cases/${caseState.current.id}/media`),
+        api.get(`/api/cases/${caseState.current.id}/satellite`),
+      ]);
+      for (const path of mine) {
+        if (proof.panels.some((p) => p.src === path)) continue;
+        const sat = sats.find((s) => s.path === path);
+        if (sat) {
+          await addPanel(satPanelInput(sat, prefs.coordFormat));
+          continue;
+        }
+        const m = media.find((x) => x.path === path);
+        if (m) await addPanel(mediaPanelInput(m, media));
       }
-      const m = media.find((x) => x.path === path);
-      if (m) await addPanel(mediaPanelInput(m, media));
+    } finally {
+      for (const path of mine) arriving.delete(path);
     }
   }
 

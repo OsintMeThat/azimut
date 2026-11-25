@@ -1174,7 +1174,7 @@ def frame_in_moment(time: float, start: float, end: float | None, frame: float) 
     return time - half <= start < time + half
 
 
-def _frame_length(case: Case, video: str) -> float:
+def frame_length(case: Case, video: str) -> float:
     """One frame of the clip in seconds, as Inspect's player counts it."""
     try:
         fps = inspect_engine.probe(case, video).get("fps")
@@ -1216,7 +1216,7 @@ def draft_frames(case: Case, video: str, draft: str) -> list[dict[str, Any]]:
         and (time := _seconds(frame.get("time"))) is not None
     ]
     if moments:
-        length = _frame_length(case, video)
+        length = frame_length(case, video)
         frames = [
             (frame, time) for frame, time in frames
             if any(frame_in_moment(time, m["start"], m["end"], length) for m in moments)

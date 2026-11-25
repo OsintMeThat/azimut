@@ -17,9 +17,9 @@ vi.mock('./state.svelte.js', () => ({ uiState: { tool: 'inspect', geolocateRef: 
 const { dispatch } = await import('./events.js');
 const { caseState, toast, uiState } = await import('./state.svelte.js');
 const {
-  abandonScene, ensureSceneQueue, geolocateScene, geolocating, holdSceneCount, holdSceneQueue, joinScenes, mapWithScene, markToGeolocate, sceneEdit,
-  readGeolocating, readSceneQueue, restoreScene, sceneQueue, scenesWaiting, startGeolocating, stopGeolocating, unjoinScenes,
-  warnNoMapCapture,
+  abandonScene, ensureSceneQueue, geolocateScene, geolocating, heldInGeoProof, holdInGeoProof, holdSceneCount, holdSceneQueue, joinScenes,
+  mapWithScene, markToGeolocate, openHeldProof, sceneEdit, readGeolocating, readSceneQueue, restoreScene, sceneQueue, scenesWaiting,
+  startGeolocating, stopGeolocating, unjoinScenes, warnNoMapCapture,
 } = await import('./geolocating.svelte.js');
 
 const SCENE = { video: 'media/clip.mp4', id: 's1', label: 'Bridge', state: 'todo', captures: [] };
@@ -125,6 +125,40 @@ describe('Go to the map, from Make the proof', () => {
     await toast.mock.calls[0][3].onClick();
     expect(uiState.tool).toBe('satellite');
     expect(uiState.geolocateRef).toMatchObject({ video: 'media/photo.png', kind: 'image' });
+  });
+});
+
+describe('Open the proof', () => {
+  afterEach(() => holdInGeoProof(null, null));
+
+  it('goes back to the proof open in Geo Proof that holds the scene, saved or not, rather than making a second', () => {
+    Object.assign(geolocating, { caseId: 'c1', scene: { ...SCENE, captures: ['media/cap.png'] } });
+    uiState.tool = 'satellite';
+    uiState.openProof = null;
+    expect(heldInGeoProof(geolocating.scene)).toBe(false);
+    holdInGeoProof('c1', geolocating.scene);
+    expect(heldInGeoProof(geolocating.scene)).toBe(true);
+    expect(openHeldProof()).toBe(true);
+    // the open proof is not opened again from disk: its changes stay, the captures join it there
+    expect(uiState.openProof).toBeNull();
+    expect(uiState.tool).toBe('proof');
+  });
+
+  it('opens the saved proof that took the scene up when Geo Proof holds another, or none', () => {
+    Object.assign(geolocating, { caseId: 'c1', scene: { ...SCENE, proof: 'road-bridge', captures: ['media/cap.png'] } });
+    uiState.tool = 'satellite';
+    holdInGeoProof('c1', { video: 'media/clip.mp4', id: 's2' });
+    expect(openHeldProof()).toBe(true);
+    expect(uiState.openProof).toEqual({ name: 'road-bridge', add: ['media/cap.png'] });
+    expect(uiState.tool).toBe('proof');
+  });
+
+  it('opens nothing for a scene no proof holds, nor for the same scene of another case', () => {
+    Object.assign(geolocating, { caseId: 'c1', scene: { ...SCENE } });
+    holdInGeoProof('c2', SCENE);
+    uiState.tool = 'satellite';
+    expect(openHeldProof()).toBe(false);
+    expect(uiState.tool).toBe('satellite');
   });
 });
 

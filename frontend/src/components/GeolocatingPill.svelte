@@ -8,7 +8,8 @@
    * server's word and before it is read again (`lib/geolocating.svelte.js`). A dot in the
    * scene's colour, the one Inspect's bar and the reference window draw it in, ties
    * the three together (`order`, `lib/scenes.sceneColorAt`). Its label goes
-   * back to the scene in Inspect, Make the proof opens Inspect's chooser on it, and ✕
+   * back to the scene in Inspect, Make the proof opens Inspect's chooser on it, Open the
+   * proof the proof that holds it, open in Geo Proof or saved (`openHeldProof`), and ✕
    * stops. Its counts open the list of what the scene gathered, leads included
    * (`components/GatheredPanel.svelte`), and three small links go to Inspect on the
    * scene, Satellite and Horizon. It sits in the top bar, clear of every map control
@@ -21,7 +22,9 @@
   import { onEvent } from '../lib/events.js';
   import { fileStem } from '../lib/proofScene.js';
   import { caseState, toast, uiState } from '../lib/state.svelte.js';
-  import { geolocating, goWithScene, openHeldProof, readGeolocating, stopGeolocating } from '../lib/geolocating.svelte.js';
+  import {
+    geolocating, goWithScene, heldInGeoProof, openHeldProof, readGeolocating, stopGeolocating,
+  } from '../lib/geolocating.svelte.js';
   import { GEOLOCATING_HELP as HELP } from '../lib/geolocatingHelp.js';
   import { sceneColorAt } from '../lib/scenes.js';
   import { captureCount, isPicture, queueShortTime, queueTime } from '../lib/sceneQueue.js';
@@ -34,6 +37,8 @@
   const said = $derived(held ? { kind: 'draft', start: held.start, end: held.end, more: held.more, file_kind: held.file_kind } : null);
   const time = $derived(said ? queueShortTime(said) : '');
   const picture = $derived(isPicture(held));
+  // the proof open in Geo Proof holds it, saved or not: the press goes back to it
+  const inGeoProof = $derived(heldInGeoProof(held));
   const count = $derived(captureCount(held));
   // what the case calls its file: its title in Media, else its name with no extension
   const file = $derived(held ? held.file_title || fileStem(held.video) : '');
@@ -136,9 +141,9 @@
       </button>
     </span>
     <span class="geo-rule" aria-hidden="true"></span>
-    <!-- once a proof took the scene up with no place yet, the press opens it: never a second one -->
-    {#if held.proof}
-      <button class="geo-make" onclick={() => openHeldProof(held)} title={HELP.open}>
+    <!-- once a proof holds the scene, open in Geo Proof or saved with no place yet, the press opens it: never a second one -->
+    {#if inGeoProof || held.proof}
+      <button class="geo-make" onclick={() => openHeldProof(held)} title={inGeoProof ? HELP.openHere : HELP.open}>
         <Icon name="proof" size={12} />
         <span class="geo-make-words">Open the proof</span>
       </button>

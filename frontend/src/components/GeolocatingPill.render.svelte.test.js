@@ -28,7 +28,7 @@ vi.mock('../lib/state.svelte.js', () => ({ caseState, uiState, toast, fmtCoords:
 const { default: GeolocatingPill } = await import('./GeolocatingPill.svelte');
 const { paths } = await import('./Icon.svelte');
 const cameraPath = paths.camera;
-const { geolocating } = await import('../lib/geolocating.svelte.js');
+const { geolocating, holdInGeoProof } = await import('../lib/geolocating.svelte.js');
 const { sceneColorAt } = await import('../lib/scenes.js');
 const { dispatch } = await import('../lib/events.js');
 
@@ -403,6 +403,31 @@ describe('what the scene gathered, and the links', () => {
     button('Open the proof').click();
     expect(uiState.openProof).toEqual({ name: 'road-bridge', add: ['media/cap-1.png'] });
     expect(uiState.tool).toBe('proof');
+  });
+
+  it('goes back to a proof open in Geo Proof that holds the scene, never saved yet, rather than making a second', async () => {
+    answers.set('GET /api/cases/c1/geolocating', { geolocating: SCENE });
+    await show();
+    expect(button('Make the proof')).toBeDefined();
+    // Send to Geo Proof from Horizon made it: the server knows nothing of it before its first save
+    holdInGeoProof('c1', SCENE);
+    flushSync();
+    try {
+      expect(button('Make the proof')).toBeUndefined();
+      const open = button('Open the proof');
+      expect(open.title).toBe('Back to its proof in Geo Proof, where new map captures join it');
+      uiState.openProof = null;
+      open.click();
+      expect(uiState.tool).toBe('proof');
+      expect(uiState.openProof).toBeNull();
+      expect(uiState.inspectScene).toBeNull();
+      // the proof closed, or holding another scene: Make the proof again
+      holdInGeoProof('c1', null);
+      flushSync();
+      expect(button('Make the proof')).toBeDefined();
+    } finally {
+      holdInGeoProof(null, null);
+    }
   });
 
   it('links to Inspect on the scene, to Satellite with its reference window, and to Horizon', async () => {

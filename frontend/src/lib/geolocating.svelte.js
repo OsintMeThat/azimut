@@ -142,12 +142,37 @@ export function warnNoMapCapture(caseId, scene) {
 }
 
 /**
- * Open the proof that took the scene being geolocated up, while it states no place yet
+ * The scene being geolocated while the proof open in Geo Proof holds it, saved or not:
+ * `{ caseId, video, id }`, nulls otherwise. Geo Proof says it (`tools/ProofComposer`). A
+ * proof never saved is known to this tab alone, the server reading only saved ones.
+ */
+export const geoProofHolds = $state({ caseId: null, video: null, id: null });
+
+/** Say which scene the proof open in Geo Proof holds, or null for none. */
+export function holdInGeoProof(caseId, scene) {
+  geoProofHolds.caseId = scene ? caseId : null;
+  geoProofHolds.video = scene?.video ?? null;
+  geoProofHolds.id = scene?.id ?? null;
+}
+
+/** Whether the proof open in Geo Proof holds this scene of the case geolocated. */
+export function heldInGeoProof(scene, caseId = geolocating.caseId) {
+  return Boolean(scene?.id && caseId && geoProofHolds.caseId === caseId
+    && geoProofHolds.video === scene.video && geoProofHolds.id === scene.id);
+}
+
+/**
+ * Open the proof of the scene being geolocated rather than making a second one: the one
+ * open in Geo Proof when it holds the scene, saved or not, the captures gathered since
+ * joining it there; else the one that took the scene up while it states no place yet
  * (`scene.proof`, `engine/geolocate.py`), with the map captures the scene gathered: Geo
- * Proof lays out the ones it does not hold yet. The pill's press once a proof exists,
- * rather than making a second one. False when the scene has no proof.
+ * Proof lays out the ones it does not hold yet. False when the scene has no proof.
  */
 export function openHeldProof(scene = geolocating.scene) {
+  if (heldInGeoProof(scene)) {
+    uiState.tool = 'proof';
+    return true;
+  }
   if (!scene?.proof) return false;
   uiState.openProof = { name: scene.proof, add: [...(scene.captures ?? [])] };
   uiState.tool = 'proof';
