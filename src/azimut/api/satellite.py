@@ -1559,7 +1559,8 @@ def shadow_for_point(
     Its direction gives the sun's azimuth, so the hour of the picture, and the
     sun's height then turns the shadow's length into the object's:
     ``length × tan(altitude)``. Exact for level ground and a picture taken
-    straight down. Pure computation, like ``/geo/sky``.
+    straight down. ``falls`` is the arc that day's shadows sweep, so a shadow no
+    hour casts can say which way they fall. Pure computation, like ``/geo/sky``.
     """
     if zone and not localtime.known_zone(zone):
         raise HTTPException(status_code=422, detail="zone must be an IANA zone name")
@@ -1576,6 +1577,7 @@ def shadow_for_point(
         "date": target.isoformat(),
         "zone": zone_name,
         "sun_azimuth": round((bearing + 180.0) % 360.0, 1),
+        "falls": sky.shadow_falls(lat, lon, start, end),
         "moments": [
             {
                 **(_dated(found["moment"], zone_name) or {}),

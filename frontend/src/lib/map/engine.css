@@ -375,6 +375,21 @@
 .maplibregl-marker-dragging.path-handle {
   cursor: grabbing;
 }
+/* the tip of a shadow read in Sun and moon: an arrow pointing away from its
+   foot, its point at the centre of the mark */
+.path-handle.shadow-tip svg {
+  display: block;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.55));
+  transition: transform 120ms var(--ease);
+}
+.path-handle.shadow-tip:hover svg,
+.maplibregl-marker-dragging.path-handle.shadow-tip svg {
+  transform: scale(1.2);
+}
+/* the arrow following the hand while the tip is aimed takes no click from the map */
+.path-handle.shadow-tip.live {
+  pointer-events: none;
+}
 
 /* The words a measure writes beside itself: a leg's length and bearing, a
    line's whole length, the angle at a corner, an area's size. They read the
@@ -418,6 +433,11 @@
 /* the words of a measure not in hand step back */
 .measure-word:not(.mine) span {
   opacity: 0.8;
+}
+/* what a shadow aimed or dragged reads beside the hand, grey when no hour casts it */
+.measure-word.shadow-aim.none span {
+  color: #cfcfcf;
+  box-shadow: 0 0 0 1px rgba(200, 200, 200, 0.55);
 }
 /* where two measured lines cross: what two bearings point at */
 .measure-crossing {

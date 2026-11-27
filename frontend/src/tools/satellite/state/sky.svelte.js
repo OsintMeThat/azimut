@@ -17,9 +17,12 @@
  *
  * A shadow can be read too, when asked for and never otherwise: two clicks, the
  * foot of something and the tip of its shadow, and the sun of the panel's day
- * says the hour it stood opposite and how tall the thing is. The slider goes to
- * that hour, so the ray drawn from the anchor lines up with the shadow. The day
- * is the imagery's when it has one, since that is the day the shadow was cast.
+ * says the hour it stood opposite and how tall the thing is. The anchor moves to
+ * the foot and the slider to that hour, so the sun's ray and the shadow make one
+ * line through the foot, the sun on one side and the shadow on the other. While
+ * the tip is aimed or an end dragged, the hour and the height are read off the
+ * day's curve by the hand. The day is the imagery's when it has one, since that
+ * is the day the shadow was cast.
  *
  * The geometry and the glyphs are `lib/skyOverlay.js`; this holds the point,
  * the day, the hour, the shadow, and the layers they are drawn on.
@@ -34,6 +37,7 @@
  * @param {(name: string, fallback: string) => string} [deps.colour] theme lookup
  * @param {(engine: object) => object} [deps.surface] the drawing layer factory
  */
+import { untrack } from 'svelte';
 import { bearingBetween } from '../../../lib/horizon/geometry.js';
 import { cornerHandles } from '../../../lib/map/handles.js';
 import { createSurface } from '../../../lib/map/surface.js';
@@ -41,11 +45,14 @@ import { destination, formatBearing, formatHeight, haversine } from '../../../li
 import {
   bodyReading,
   bodySvg,
+  castsReversed,
   clockOf,
+  fallsSentence,
   hourTicks,
   isBelow,
   markScale,
   nearestSample,
+  shadowOnCurve,
   shadowSentence,
   upRuns,
 } from '../../../lib/skyOverlay.js';
@@ -58,6 +65,23 @@ const REACH = 0.22;
 
 /** A tip this close to the foot is the second click of a double click, not a shadow. */
 const SAME_POINT_M = 0.5;
+
+/** A shadow no hour of the day casts is drawn grey, wherever it is drawn. */
+const NO_HOUR = '#9b9b9b';
+const HANDLE_FILL = '#f5a623';
+
+/**
+ * The tip of a shadow, an arrow pointing away from the foot. Its point is the
+ * centre of the mark, so it lands on the tip whichever way the map is turned.
+ */
+function arrowMark(bearing, fill, live = false) {
+  return {
+    className: `path-handle shadow-tip${live ? ' live' : ''}`,
+    html: `<svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true"><path d="M18 18 9.5 33h17z" fill="${fill}" stroke="#fff" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+    size: [36, 36],
+    rotation: bearing,
+  };
+}
 
 function themeColour(name, fallback) {
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -98,6 +122,8 @@ export function createSkyState({
   let shadowTicket = 0;
   let shadowLayer = null;
   let pointer = null; // where the tip would land, while it is aimed
+  let held = false; // an end of the shadow is in the hand
+  let aimLayer = null; // what the hand would read, beside it
   // A wall clock to land the slider on once the day's samples are in, from a
   // hand-off. Spent on the first load, so a later date is read at its own hour.
   let handedClock = null;
@@ -105,7 +131,8 @@ export function createSkyState({
   function draw() {
     const map = engine();
     if (!map) return;
-    drawShadow();
+    // the hour following a dragged end redraws the sky; the handle held stays
+    if (!held) drawShadow();
     layer ??= surface(map);
     if (!on || !sky || !anchor) {
       layer.clear();
@@ -214,48 +241,140 @@ export function createSkyState({
     shadowLayer ??= surface(map);
     if (!on || !shadow) {
       shadowLayer.clear();
+      hideAim();
       return;
     }
     const sun = colour('--sky-sun', '#bd8721');
     const shapes = [];
     if (!shadow.tip) {
       shapes.push({ id: 'shadow-foot', kind: 'dot', at: shadow.foot, style: { radius: 4, stroke: '#fff', strokeWidth: 2, fill: sun, fillOpacity: 1, interactive: false } });
-      if (pointer) shapes.push({ id: 'shadow-live', kind: 'line', points: [shadow.foot, pointer], style: { stroke: sun, strokeWidth: 2, strokeOpacity: 0.9, dash: '6 5', interactive: false } });
+      if (pointer) {
+        const casts = preview(shadow.foot, pointer)?.length !== 0;
+        shapes.push({ id: 'shadow-live', kind: 'line', points: [shadow.foot, pointer], style: liveStyle(casts) });
+        shapes.push({ id: 'shadow-live-tip', kind: 'marker', at: pointer, ...arrowMark(bearingBetween(shadow.foot, pointer), casts ? HANDLE_FILL : NO_HOUR, true), keyboard: false });
+      }
       shadowLayer.set(shapes);
       return;
     }
     const points = [shadow.foot, shadow.tip];
+    const answer = shadowRead?.answer;
+    const none = Boolean(answer && !answer.moments?.length);
     shapes.push({ id: 'shadow-casing', kind: 'line', points, style: { stroke: '#000', strokeWidth: 6, strokeOpacity: 0.4, interactive: false } });
-    shapes.push({ id: 'shadow', kind: 'line', points, style: { stroke: sun, strokeWidth: 3, strokeOpacity: 1, interactive: false } });
+    shapes.push({ id: 'shadow', kind: 'line', points, style: { stroke: none ? NO_HOUR : sun, strokeWidth: 3, strokeOpacity: 1, interactive: false } });
     const [foot, tip] = cornerHandles(points, { prefix: 'shadow-end', onMove: moveEnd, onDrop: dropEnd });
-    shapes.push({ ...foot, title: 'Drag to move the foot' }, { ...tip, title: 'Drag to move the tip of the shadow' });
-    const first = shadowRead?.answer?.moments?.[0];
+    shapes.push(
+      { ...foot, title: 'Drag to move the foot' },
+      { ...tip, ...arrowMark(bearingBetween(shadow.foot, shadow.tip), none ? NO_HOUR : HANDLE_FILL), title: 'Drag to move the tip of the shadow' }
+    );
+    const first = answer?.moments?.[0];
     if (first) {
+      const [x, y] = besideFoot();
       shapes.push({
         id: 'shadow-word',
         kind: 'marker',
         at: shadow.foot,
         className: 'measure-word use',
-        html: `<span style="transform:translate(0px,24px)">${escape(`≈ ${formatHeight(first.height_m, units())} tall`)}</span>`,
+        html: `<span style="transform:translate(${x}px,${y}px)">${escape(`≈ ${formatHeight(first.height_m, units())} tall`)}</span>`,
         keyboard: false,
       });
     }
     shadowLayer.set(shapes);
   }
 
-  /** An end of the shadow on its way: the line follows, and what it answered waits for the drop. */
-  function moveEnd(index, at) {
+  function liveStyle(casts) {
+    return { stroke: casts ? colour('--sky-sun', '#bd8721') : NO_HOUR, strokeWidth: 2, strokeOpacity: 0.9, dash: '6 5', interactive: false };
+  }
+
+  /**
+   * Where the height sits: a quarter turn left of the shadow, off both the
+   * shadow and the sun's ray, which runs on from the foot the other way.
+   */
+  function besideFoot() {
+    const map = engine();
+    const a = map?.latLngToContainerPoint?.(shadow.foot);
+    const b = map?.latLngToContainerPoint?.(shadow.tip);
+    const length = a && b ? Math.hypot(b.x - a.x, b.y - a.y) : 0;
+    if (!length) return [0, 24];
+    // wider than tall, as the words are
+    return [Math.round(((b.y - a.y) / length) * 62), Math.round((-(b.x - a.x) / length) * 28)];
+  }
+
+  /**
+   * A shadow from `foot` to `end` read off the day's curve, as the hand moves:
+   * each moment with its clock, its sample and the height. Null before the day
+   * is in, which reads as nothing rather than as no hour.
+   */
+  function preview(foot, end) {
+    if (!sky?.curve) return null;
+    const length = haversine(foot, end);
+    return shadowOnCurve(sky.curve, bearingBetween(foot, end)).map((moment) => ({
+      ...moment,
+      height: length * Math.tan((moment.altitude * Math.PI) / 180),
+    }));
+  }
+
+  /** What the shadow under the hand reads, beside the hand, on a layer of its own. */
+  function showAim(at, reading) {
+    const map = engine();
+    if (!map || !reading) return hideAim();
+    aimLayer ??= surface(map);
+    const [first] = reading;
+    const text = first ? `${first.clock} · ≈ ${formatHeight(first.height, units())} tall` : 'No hour of the day';
+    const icon = {
+      className: `measure-word mine shadow-aim${first ? '' : ' none'}`,
+      html: `<span style="transform:translate(calc(50% + 16px),16px)">${escape(text)}</span>`,
+    };
+    if (!aimLayer.patch('shadow-aim', { at, icon })) aimLayer.set([{ id: 'shadow-aim', kind: 'marker', at, ...icon, keyboard: false }]);
+  }
+
+  function hideAim() {
+    aimLayer?.clear();
+  }
+
+  /** The slider on the hour the hand's shadow names: the sun's ray swings opposite it. */
+  function followHour(reading) {
+    if (reading?.length) index = reading[0].index;
+  }
+
+  /**
+   * An end of the shadow on its way: the line and the arrow follow, the hour and
+   * the height are read by the hand, and the backend is asked at the drop.
+   */
+  function moveEnd(end, at) {
     if (!shadow?.tip) return;
-    shadow = index === 0 ? { ...shadow, foot: at } : { ...shadow, tip: at };
+    if (!held) shadowLayer?.patch('shadow-word', { icon: { className: 'measure-word use', html: '' } });
+    held = true;
+    shadow = end === 0 ? { ...shadow, foot: at } : { ...shadow, tip: at };
     const points = [shadow.foot, shadow.tip];
-    shadowLayer?.patch('shadow', { points });
+    const reading = preview(shadow.foot, shadow.tip);
+    const casts = reading?.length !== 0;
+    shadowLayer?.patch('shadow', { points, style: { stroke: casts ? colour('--sky-sun', '#bd8721') : NO_HOUR, strokeWidth: 3, strokeOpacity: 1, interactive: false } });
     shadowLayer?.patch('shadow-casing', { points });
+    const arrow = arrowMark(bearingBetween(shadow.foot, shadow.tip), casts ? HANDLE_FILL : NO_HOUR);
+    shadowLayer?.patch('shadow-end-1', { icon: arrow, rotation: arrow.rotation });
+    showAim(at, reading);
+    followHour(reading);
   }
 
   function dropEnd() {
+    held = false;
+    hideAim();
+    plantOn(shadow.foot);
     shadowRead = null;
     drawShadow();
     readShadow();
+  }
+
+  /**
+   * The sun drawn from the shadow's foot, so its ray and the shadow make one
+   * line through it. The slider keeps its hour while that point's sky is read,
+   * and the reading on screen stays until then: a foot is a few steps from
+   * where the sky was read, and a blank arc at every drop would only flicker.
+   */
+  function plantOn(point) {
+    if (anchor && haversine(anchor, point) < SAME_POINT_M) return;
+    if (sky) handedClock = sky.curve.clock[index] ?? null;
+    anchor = { lat: point.lat, lon: point.lon };
   }
 
   /** The slider on the hour a moment of the shadow's answer names. */
@@ -282,15 +401,16 @@ export function createSkyState({
     });
     if (sky.zone?.name) query.set('zone', sky.zone.name);
     const mine = ++shadowTicket;
-    shadowRead = { date, answer: null, busy: true, error: '' };
+    const zone = sky.zone?.name ?? '';
+    shadowRead = { date, zone, answer: null, busy: true, error: '' };
     try {
       const answer = await api.get(`/api/geo/shadow?${query}`);
       if (mine !== shadowTicket) return;
-      shadowRead = { date, answer, busy: false, error: '' };
+      shadowRead = { date, zone, answer, busy: false, error: '' };
       showMoment(0);
     } catch (failure) {
       if (mine !== shadowTicket) return;
-      shadowRead = { date, answer: null, busy: false, error: failure?.message || 'Could not read the sun' };
+      shadowRead = { date, zone, answer: null, busy: false, error: failure?.message || 'Could not read the sun' };
     }
     drawShadow();
   }
@@ -299,6 +419,7 @@ export function createSkyState({
   function dropShadowStart() {
     tracing = null;
     pointer = null;
+    hideAim();
     if (!shadow?.tip) shadow = null;
     drawShadow();
     return true;
@@ -309,6 +430,8 @@ export function createSkyState({
     shadowRead = null;
     tracing = null;
     pointer = null;
+    held = false;
+    hideAim();
     shadowTicket += 1; // an answer in flight is nobody's
     drawShadow();
   }
@@ -362,6 +485,10 @@ export function createSkyState({
           height: formatHeight(moment.height_m, units()),
           sun: `sun at ${formatBearing(moment.sun_azimuth)}, ${Number(moment.sun_altitude).toFixed(1)}° up`,
         })),
+        // a shadow no hour casts says which way they fall that day, and whether
+        // it was drawn the wrong way round
+        falls: answer && !answer.moments?.length && 'falls' in answer ? fallsSentence(answer.falls) : '',
+        swappable: Boolean(answer && !answer.moments?.length && castsReversed(answer)),
         noDay: !usableDate(pictureDate()),
       };
     },
@@ -381,6 +508,7 @@ export function createSkyState({
       if (tracing) dropShadowStart();
       layer?.clear();
       shadowLayer?.clear();
+      hideAim();
     },
 
     setDay(value) {
@@ -433,8 +561,25 @@ export function createSkyState({
       if (tracing !== 'tip' || !shadow || !at) return;
       const had = pointer;
       pointer = { lat: at.lat, lon: at.lon };
-      if (had) shadowLayer?.patch('shadow-live', { points: [shadow.foot, pointer] });
-      else drawShadow();
+      const reading = preview(shadow.foot, pointer);
+      const casts = reading?.length !== 0;
+      if (had) {
+        shadowLayer?.patch('shadow-live', { points: [shadow.foot, pointer], style: liveStyle(casts) });
+        const arrow = arrowMark(bearingBetween(shadow.foot, pointer), casts ? HANDLE_FILL : NO_HOUR, true);
+        shadowLayer?.patch('shadow-live-tip', { at: pointer, icon: arrow, rotation: arrow.rotation });
+      } else drawShadow();
+      showAim(pointer, reading);
+      followHour(reading);
+    },
+
+    /** The shadow read with its ends the other way round: the tip is the foot now. */
+    swapShadow() {
+      if (!shadow?.tip) return;
+      shadow = { foot: shadow.tip, tip: shadow.foot };
+      plantOn(shadow.foot);
+      shadowRead = null;
+      drawShadow();
+      readShadow();
     },
 
     showMoment,
@@ -456,6 +601,7 @@ export function createSkyState({
       if (tracing === 'foot') {
         shadow = { foot: point, tip: null };
         tracing = 'tip';
+        plantOn(point);
         drawShadow();
         return true;
       }
@@ -465,6 +611,7 @@ export function createSkyState({
         shadow = { ...shadow, tip: point };
         tracing = null;
         pointer = null;
+        hideAim();
         drawShadow();
         readShadow();
         return true;
@@ -503,8 +650,9 @@ export function createSkyState({
           handedClock ?? result.moment.local.slice(11, 16)
         );
         handedClock = null;
-        // a shadow read for another day is read again for this one
-        if (shadow?.tip && shadowRead?.date !== result.date) readShadow();
+        // a shadow read for another day, or in another zone, is read again for this one
+        const read = shadowRead;
+        if (shadow?.tip && (read?.date !== result.date || (read?.zone ?? '') !== (result.zone?.name ?? ''))) readShadow();
       } catch {
         if (mine === ticket) notify('Could not read the sky for that point', 'danger');
       } finally {
@@ -512,12 +660,18 @@ export function createSkyState({
       }
     },
 
-    draw,
+    /**
+     * Lay the sky and the shadow again. Untracked, so an effect that redraws on
+     * the day or the hour does not also redraw on the shadow: an end being
+     * dragged moves it, and laying the handles again would drop the one held.
+     */
+    draw: () => untrack(draw),
     destroy() {
       ticket += 1; // an answer in flight has nothing left to land on
       shadowTicket += 1;
       layer?.destroy();
       shadowLayer?.destroy();
+      aimLayer?.destroy();
       layer = shadowLayer = null;
     },
   };

@@ -23,6 +23,7 @@ const calls = () => ({
   onclearshadow: vi.fn(),
   onmoment: vi.fn(),
   oncopyshadow: vi.fn(),
+  onswapshadow: vi.fn(),
 });
 
 function show(props) {
@@ -78,4 +79,17 @@ it('says when no hour casts it, when it is being read, and when the imagery has 
   unmount(held.pop());
   show({ ...calls(), shadow: shadow({ busy: true }) });
   expect(document.querySelector('.shadow').textContent).toContain('Reading the sun…');
+});
+
+it('says which way that day’s shadows fall when no hour casts it, and offers the ends the other way round', () => {
+  const on = calls();
+  const falls = 'That day, shadows fall between 277° and 083°, through north.';
+  show({ ...on, shadow: shadow({ answered: true, falls, swappable: true }) });
+  expect(document.querySelector('.shadow').textContent).toContain(falls);
+  button('Swap the ends').click();
+  expect(on.onswapshadow).toHaveBeenCalledTimes(1);
+  unmount(held.pop());
+  // drawn either way round with no hour, there is nothing to swap
+  show({ ...calls(), shadow: shadow({ answered: true, falls, swappable: false }) });
+  expect(button('Swap the ends')).toBeFalsy();
 });

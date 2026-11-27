@@ -559,3 +559,44 @@ def test_no_hour_throws_a_shadow_toward_the_sun_side_of_the_sky():
     zone = localtime.zone_for(*PARIS)
     start, end = localtime.day_bounds(date(2024, 6, 21), zone)
     assert sky.shadow_moments(*PARIS, start, end, 180.0) == []
+
+
+# -- where a day's shadows fall ------------------------------------------------
+
+CARACAS = (10.5027, -66.9164)
+
+
+def _day(point, day):
+    return localtime.day_bounds(day, localtime.zone_for(*point))
+
+
+def _inside(bearing, falls):
+    return (bearing - falls["from"]) % 360 <= (falls["to"] - falls["from"]) % 360
+
+
+def test_a_day_s_shadows_sweep_from_sunrise_s_round_to_sunset_s_through_north():
+    falls = sky.shadow_falls(*CARACAS, *_day(CARACAS, date(2025, 3, 2)))
+    assert falls["whole"] is False
+    assert falls["from"] == pytest.approx(277, abs=1)
+    assert falls["to"] == pytest.approx(83, abs=1)
+    assert min(falls["middle"], 360 - falls["middle"]) < 5
+
+
+def test_every_bearing_in_the_sweep_has_an_hour_and_none_outside_it():
+    start, end = _day(CARACAS, date(2025, 3, 2))
+    falls = sky.shadow_falls(*CARACAS, start, end)
+    for bearing in range(0, 360, 15):
+        cast = bool(sky.shadow_moments(*CARACAS, start, end, float(bearing)))
+        assert cast == _inside(bearing, falls), bearing
+
+
+def test_a_sweep_holds_together_on_whichever_side_the_sun_passes():
+    # south of the tropic in June the sun passes north, so the shadows fall south
+    falls = sky.shadow_falls(-30.0, 25.0, *_day((-30.0, 25.0), date(2025, 6, 21)))
+    assert abs(falls["middle"] - 180) < 5
+    assert _inside(180, falls) and not _inside(0, falls)
+
+
+def test_a_midnight_sun_casts_all_round_and_a_polar_night_casts_nothing():
+    assert sky.shadow_falls(*TROMSO, *_day(TROMSO, date(2025, 6, 21)))["whole"] is True
+    assert sky.shadow_falls(*TROMSO, *_day(TROMSO, date(2025, 12, 21))) is None

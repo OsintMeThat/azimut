@@ -3540,15 +3540,22 @@ body is under the horizon. The anchor is a point and not the map centre, so pann
 leaves the path alone. Coords & Sky opens the same mode with its own point, date
 and time, and hands over no computed value.
 
-**Read a shadow**, under the anchor, is there for when it is wanted and changes
-nothing else. Its two clicks are the foot of something and the tip of its
-shadow; on imagery with a day of its own the panel's date moves to that day, the
-one the shadow was cast. The shadow's direction names the hour the sun stood
-opposite, its length the thing's height at that sun, for level ground seen from
-overhead, and the slider goes to that hour so the sun's ray lines up. A day the
-sun crosses that bearing twice gives both hours, each pressed to put the slider
-on it. Its ends drag, and it is read again where they are dropped, or on another
-date. Imagery with no day is read on the panel's date, and the panel says so.
+**Read a shadow**, under the anchor, is there for when it is wanted. Its two
+clicks are the foot of something and the tip of its shadow; on imagery with a day
+of its own the panel's date moves to that day, the one the shadow was cast. The
+foot click moves the anchor there, keeping the hour, so the sun's ray and the
+shadow make one line through the foot: the sun on one side, the shadow on the
+other. The tip is an arrow pointing away from the foot. While the tip is aimed or
+an end dragged, the hour and the height are read off the day's curve beside the
+hand and the sun's ray swings opposite; a direction no hour casts turns the line
+grey. The shadow's direction names the hour the sun stood opposite, its length the
+thing's height at that sun, for level ground seen from overhead, and the slider
+goes to that hour. A day the sun crosses that bearing twice gives both hours, each
+pressed to put the slider on it. A shadow no hour casts stays grey, and the panel
+says between which bearings that day's shadows fall; when the shadow the other way
+round has an hour, **Swap the ends** reads it so. Its ends drag, and it is read
+again where they are dropped, or on another date. Imagery with no day is read on
+the panel's date, and the panel says so.
 Escape lets go of a shadow half put down; a whole one waits, hidden, with the
 anchor. It copies and goes into a note.
 

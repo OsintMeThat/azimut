@@ -2,12 +2,16 @@ import { describe, expect, it } from 'vitest';
 import {
   bodyReading,
   bodySvg,
+  castsReversed,
   clockOf,
+  compassWord,
+  fallsSentence,
   hourTicks,
   isBelow,
   markScale,
   nearestSample,
   phaseAngleOf,
+  shadowOnCurve,
   shadowSentence,
   upRuns,
 } from './skyOverlay.js';
@@ -177,5 +181,65 @@ describe('a shadow read', () => {
 
   it('says so when no hour of the day casts it', () => {
     expect(shadowSentence({ date: '2024-06-21', moments: [] }, 'metric')).toBe('No hour of 2024-06-21 casts this shadow');
+  });
+});
+
+describe('a shadow read by the hand', () => {
+  // a day at ten-minute steps, the sun up from 06:00 to 18:00 and due south at noon
+  const steps = Array.from({ length: 144 }, (_, i) => i * 10);
+  const curve = {
+    minutes: steps,
+    clock: steps.map((m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`),
+    sun_azimuth: steps.map((m) => (m / 4) % 360),
+    sun_altitude: steps.map((m) => 60 * Math.sin(((m - 360) / 720) * Math.PI)),
+  };
+
+  it('names the minute between two samples the sun stood opposite, and the sample nearest it', () => {
+    // a shadow along 302.5° has the sun at 122.5°, 08:10 in this day
+    const [moment, ...more] = shadowOnCurve(curve, 302.5);
+    expect(more).toEqual([]);
+    expect(moment.clock).toBe('08:10');
+    expect(moment.index).toBe(49);
+    expect(moment.altitude).toBeCloseTo(60 * Math.sin(((490 - 360) / 720) * Math.PI), 1);
+    // and a quarter of the way to the next sample
+    expect(shadowOnCurve(curve, 303.75)[0].clock).toBe('08:15');
+  });
+
+  it('reads a sample landing right on the bearing once', () => {
+    expect(shadowOnCurve(curve, 0).map((one) => one.clock)).toEqual(['12:00']);
+  });
+
+  it('has no hour for a shadow toward a sun that never stands there', () => {
+    expect(shadowOnCurve(curve, 180)).toEqual([]);
+    // the sun at 45° is under the horizon
+    expect(shadowOnCurve(curve, 225)).toEqual([]);
+  });
+});
+
+describe('which way a day’s shadows fall', () => {
+  const falls = { from: 277.3, to: 83.1, middle: 0.2, whole: false };
+
+  it('says the arc and the side of the sky it is on', () => {
+    expect(fallsSentence(falls)).toBe('That day, shadows fall between 277° and 083°, through north.');
+    expect(fallsSentence({ from: 120, to: 240, middle: 180, whole: false })).toContain('through south.');
+  });
+
+  it('says the sun stays down, and nothing when shadows go all round', () => {
+    expect(fallsSentence(null)).toBe('The sun stays down all that day.');
+    expect(fallsSentence({ from: 0, to: 0, middle: 0, whole: true })).toBe('');
+  });
+
+  it('knows whether the shadow the other way round has an hour: its bearing is the sun’s', () => {
+    expect(castsReversed({ sun_azimuth: 306, falls })).toBe(true);
+    expect(castsReversed({ sun_azimuth: 126, falls })).toBe(false);
+    expect(castsReversed({ sun_azimuth: 126, falls: { ...falls, whole: true } })).toBe(true);
+    expect(castsReversed({ sun_azimuth: 126, falls: null })).toBe(false);
+    expect(castsReversed({ falls })).toBe(false);
+  });
+
+  it('names a bearing by its side of the sky', () => {
+    expect([0, 44, 46, 135, 180, 290, 359].map(compassWord)).toEqual([
+      'north', 'north-east', 'north-east', 'south-east', 'south', 'west', 'north',
+    ]);
   });
 });
