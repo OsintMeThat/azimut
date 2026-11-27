@@ -156,7 +156,7 @@
   const time = (side) => (radar && side?.time ? `${side.time.slice(0, 5)} UTC` : '');
 </script>
 
-<section class="step" aria-label="Which imagery">
+<section class="step" aria-label="Which imagery" data-guide="detect.when">
   <h3>{heading}</h3>
 
   {#if several}

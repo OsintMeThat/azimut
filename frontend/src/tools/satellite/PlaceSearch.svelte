@@ -223,6 +223,7 @@
             id={`${listId}-${index}`}
             role="option"
             aria-selected={index === at}
+            data-guide={index === 0 ? 'sat.answer' : undefined}
             onmouseenter={() => (at = index)}
             onclick={() => choose(item)}
           >

@@ -105,6 +105,39 @@ describe('the guide asking the app', () => {
     askApp({ report: true });
     expect(open.mock.calls[0][0].endsWith('#settings')).toBe(true);
   });
+
+  it('asks the tab it came from to show a control', () => {
+    const opener = fakeTab();
+    vi.spyOn(window, 'opener', 'get').mockReturnValue(opener);
+    const show = { tool: 'satellite', anchor: 'sat.place', label: 'Place', press: 'Press Place' };
+    askApp({ show });
+    expect(opener.postMessage).toHaveBeenCalledWith({ 'azimut:guide': { show } }, location.origin);
+    expect(opener.focus).toHaveBeenCalled();
+  });
+
+  it('opens the step’s tool when no app tab is there, and asks for the control once that tab has loaded', () => {
+    vi.spyOn(window, 'opener', 'get').mockReturnValue(null);
+    const app = { ...fakeTab(), addEventListener: vi.fn() };
+    const open = vi.spyOn(window, 'open').mockReturnValue(app);
+    const show = { tool: 'satellite', anchor: 'sat.place', label: 'Place', press: 'Press Place' };
+    askApp({ show });
+    expect(open.mock.calls[0][0].endsWith('#satellite')).toBe(true);
+    expect(app.postMessage).not.toHaveBeenCalled();
+    const [event, loaded] = app.addEventListener.mock.calls[0];
+    expect(event).toBe('load');
+    loaded();
+    expect(app.postMessage).toHaveBeenCalledWith({ 'azimut:guide': { show } }, location.origin);
+    app.closed = true;
+  });
+
+  it('opens the app where it opens by itself for a control of its top bar', () => {
+    vi.spyOn(window, 'opener', 'get').mockReturnValue(null);
+    const app = { ...fakeTab(), addEventListener: vi.fn() };
+    const open = vi.spyOn(window, 'open').mockReturnValue(app);
+    askApp({ show: { tool: null, anchor: 'start.goto', label: 'Go to', press: '' } });
+    expect(open.mock.calls[0][0].endsWith('#')).toBe(true);
+    app.closed = true;
+  });
 });
 
 describe('the app hearing the guide', () => {
@@ -112,10 +145,11 @@ describe('the app hearing the guide', () => {
     const open = vi.fn();
     const report = vi.fn();
     const example = vi.fn();
-    const stop = listenToGuide({ tools: ['media', 'settings'], open, report, example });
+    const show = vi.fn();
+    const stop = listenToGuide({ tools: ['media', 'settings'], open, report, example, show });
     window.dispatchEvent(new MessageEvent('message', { data, origin }));
     stop();
-    return { open, report, example };
+    return { open, report, example, show };
   }
 
   it('opens the tool asked for, or the report', () => {
@@ -124,10 +158,35 @@ describe('the app hearing the guide', () => {
     expect(hear({ 'azimut:guide': { example: true } }).example).toHaveBeenCalled();
   });
 
+  it('shows the control asked for, in a tool it has or in its top bar', () => {
+    const step = { tool: 'media', anchor: 'media.import', label: 'Import', press: 'Press Import' };
+    expect(hear({ 'azimut:guide': { show: step } }).show).toHaveBeenCalledWith(step);
+    const bar = hear({ 'azimut:guide': { show: { anchor: 'start.goto', label: 'Go to' } } });
+    expect(bar.show).toHaveBeenCalledWith({ tool: null, anchor: 'start.goto', label: 'Go to', press: '' });
+    // only words reach the toast and the bubble
+    const odd = hear({ 'azimut:guide': { show: { tool: 'media', anchor: 'media.import', label: { html: 'x' }, press: 7 } } });
+    expect(odd.show).toHaveBeenCalledWith({ tool: 'media', anchor: 'media.import', label: '', press: '' });
+    // a view of the case panel it has opens with it, and nothing else does
+    const todo = { tool: 'media', anchor: 'todo.go', label: 'Geolocate', press: 'Geolocate', sidebar: 'todo' };
+    expect(hear({ 'azimut:guide': { show: todo } }).show).toHaveBeenCalledWith(todo);
+    // a Settings section by its id, and nothing else
+    const site = { tool: 'settings', anchor: 'settings.hub-hosting', label: 'Hosting', press: '', settings: 'website' };
+    expect(hear({ 'azimut:guide': { show: site } }).show).toHaveBeenCalledWith(site);
+    const smuggled = hear({ 'azimut:guide': { show: { ...site, settings: '<img>' } } });
+    expect(smuggled.show).toHaveBeenCalledWith({ tool: 'settings', anchor: 'settings.hub-hosting', label: 'Hosting', press: '' });
+    const stray = hear({ 'azimut:guide': { show: { ...todo, sidebar: 'attic' } } });
+    expect(stray.show).toHaveBeenCalledWith({ tool: 'media', anchor: 'todo.go', label: 'Geolocate', press: 'Geolocate' });
+  });
+
   it('ignores another site, a tool it does not have and anything else', () => {
     for (const heard of [
       hear({ 'azimut:guide': { open: 'media' } }, 'https://example.com'),
+      hear({ 'azimut:guide': { show: { tool: 'media', anchor: 'media.import' } } }, 'https://example.com'),
       hear({ 'azimut:guide': { open: 'nowhere' } }),
+      hear({ 'azimut:guide': { show: { tool: 'nowhere', anchor: 'media.import' } } }),
+      hear({ 'azimut:guide': { show: { tool: 'media' } } }),
+      hear({ 'azimut:guide': { show: { tool: 'media', anchor: '' } } }),
+      hear({ 'azimut:guide': { show: 'media.import' } }),
       hear({ 'azimut:guide': { report: 'yes' } }),
       hear({ 'azimut:guide': { example: 'yes' } }),
       hear({ open: 'media' }),
@@ -137,6 +196,7 @@ describe('the app hearing the guide', () => {
       expect(heard.open).not.toHaveBeenCalled();
       expect(heard.report).not.toHaveBeenCalled();
       expect(heard.example).not.toHaveBeenCalled();
+      expect(heard.show).not.toHaveBeenCalled();
     }
   });
 

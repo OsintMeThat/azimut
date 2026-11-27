@@ -320,7 +320,7 @@
 <div class="cmp-dock-body review-body">
 {#if error}<p class="warn" role="alert">{error}</p>{/if}
 
-<section class="run">
+<section class="run" data-guide="detect.run">
   <div class="row run-head">
     <strong class="grow">{run.title}</strong>
     {#if !pending}

@@ -142,12 +142,12 @@
 <div class="map-bar" role="toolbar" aria-label="Map" tabindex="-1" style:max-width={room ? `${room}px` : null} onpointerdown={(event) => event.stopPropagation()}>
   {#if isMap}
     {#if keep !== null}
-      <label class="keep" title="This day or slide shows the map as the one before it does">
+      <label class="keep" title="This day or slide shows the map as the one before it does" data-guide="plate.map-stays">
         <input type="checkbox" checked={keep} onchange={(event) => onkeep?.(event.currentTarget.checked)} /> Map stays where it was</label>
       <span class="rule"></span>
     {/if}
     <button type="button" class:on={framing} aria-pressed={framing} disabled={held} title={framing ? 'Done framing (Esc)' : 'Frame by the hand: zoom with the wheel, turn with a Shift-drag'}
-      aria-label="Frame the map" onclick={onframe}><Icon name="move" size={14} />{#if framing}<span>Done</span>{/if}</button>
+      aria-label="Frame the map" data-guide={framing ? 'plate.frame-done' : 'plate.frame'} onclick={onframe}><Icon name="move" size={14} />{#if framing}<span>Done</span>{/if}</button>
     <button type="button" class="dial" bind:this={dial} aria-label={`Compass, ${Math.round(-bearing + 360) % 360}°`} disabled={held}
       title="Drag to turn the map. A press puts north up." onpointerdown={grabDial}>
       <svg viewBox="-12 -12 24 24" width="22" height="22" aria-hidden="true">
@@ -166,6 +166,7 @@
     onclick={() => (menu = !menu)}><Icon name="satellite" size={13} /><span>{ground}</span><Icon name="chevronDown" size={11} /></button>
   {#if day}
     <button type="button" class="ground day" bind:this={dayAnchor} aria-expanded={dayMenu} aria-label="Ground's day" title={dayMenu ? undefined : 'The day the ground\'s picture was taken'}
+      data-guide="plate.ground-day"
       onclick={openDay}><Icon name="clock" size={13} /><span>{looking ? 'Looking…' : day}</span><Icon name="chevronDown" size={11} /></button>
   {/if}
   {#if isMap && onsameview}

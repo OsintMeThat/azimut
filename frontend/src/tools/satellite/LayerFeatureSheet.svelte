@@ -188,7 +188,8 @@
 
 <!-- a section's line: its name, and what it holds while it is folded -->
 {#snippet head(id, title, holds, help)}
-  <button type="button" class="fold" aria-expanded={opened.has(id)} data-section={id} title={help} onclick={() => toggle(id)}>
+  <button type="button" class="fold" aria-expanded={opened.has(id)} data-section={id} title={help} onclick={() => toggle(id)}
+    data-guide={id === 'note' ? 'layer.sheet-note' : id === 'sources' ? 'layer.sheet-sources' : undefined}>
     <Icon name={opened.has(id) ? 'chevronDown' : 'chevronRight'} size={11} /><span class="fold-name">{title}</span>
     {#if !opened.has(id) && holds}<span class="fold-holds">{holds}</span>{/if}
   </button>
@@ -199,7 +200,7 @@
     <div class="sheet-head">
       <LayerSelectionStyle {controller} label="Feature style" size={22} regroup={false} disabled={busy} />
       {#if one}
-        <input class="name" aria-label="Feature name" bind:value={form.name} maxlength="300" placeholder="Name"
+        <input class="name" aria-label="Feature name" data-guide="layer.sheet-name" bind:value={form.name} maxlength="300" placeholder="Name"
           onchange={() => controller.saveForm()} onkeydown={blur} />
       {:else}
         <span class="name count">{chosen.length} selected</span>
@@ -306,7 +307,7 @@
                 onkeydown={(event) => { if (event.key === 'Enter') addSource(); else if (event.key === 'Escape') { event.stopPropagation(); adding = false; refused = ''; } }}
                 onblur={addSource} />
             {:else if form.links.length < 10}
-              <button type="button" class="add-source" aria-label="Add a source" title="Add the address of a post, a page or a map" onclick={() => (adding = true)}><Icon name="plus" size={11} /> Add</button>
+              <button type="button" class="add-source" aria-label="Add a source" data-guide="layer.sheet-add-source" title="Add the address of a post, a page or a map" onclick={() => (adding = true)}><Icon name="plus" size={11} /> Add</button>
             {/if}
             {#if refused}<p class="refused" role="alert">{refused}</p>{/if}
           </div>

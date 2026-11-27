@@ -147,7 +147,7 @@
     {#if layers}
       <div class="tabs" role="tablist" aria-label="The list">
         <!-- the two halves carry no count, as Satellite's: the list under them is the count -->
-        <button type="button" role="tab" aria-selected={tab !== 'layers'} class:on={tab !== 'layers'} title={`What the page holds, top first: ${list.length}`}
+        <button type="button" role="tab" aria-selected={tab !== 'layers'} class:on={tab !== 'layers'} title={`What the page holds, top first: ${list.length}`} data-guide="plate.on-page"
           onclick={() => (tab = 'page')}>On the page</button>
         <button type="button" role="tab" aria-selected={tab === 'layers'} class:on={tab === 'layers'} data-guide="plate.layers"
           title="Where the maps get what they draw: their ground and the case's layers" onclick={() => (tab = 'layers')}>Layers</button>

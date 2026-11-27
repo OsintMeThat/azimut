@@ -3353,7 +3353,7 @@
           onclick={toggleCaptures}
           title="Show the panel"
         >
-          <Icon name="chevronLeft" size={15} />
+          <span class="cap-open" data-guide="sat.panel-open"><Icon name="chevronLeft" size={15} /></span>
           <span class="label" style="margin:0">{PANEL_TABS[panelTab]}</span>
           <span class="count">{panelCount}</span>
         </button>
@@ -3989,6 +3989,11 @@
   }
   .captures.collapsed .cap-head .label {
     writing-mode: vertical-rl;
+  }
+  /* the arrow alone, so the guide can point at it */
+  .cap-open {
+    display: grid;
+    place-items: center;
   }
   .count {
     font-size: var(--fs-xs);

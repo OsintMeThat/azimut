@@ -3,40 +3,46 @@
     "draft": true,
     "pages": [
       {
+        "shot": "inspect-scenes",
+        "anchor": "geo.pill",
+        "label": "Geolocating",
+        "title": "Geolocate a video, scene by scene",
+        "text": "Mark each place a video shows as a scene. Geolocate it beside the map, drop leads, capture, and Make the proof lays out what it gathered."
+      },
+      {
+        "shot": "post-home",
+        "anchor": "post.new",
+        "label": "New post",
+        "title": "Geo Report is now Post",
+        "text": "A geolocation, a video thread, a map plate, a comparison or your own words, seen as X or Bluesky will show it, then marked as posted."
+      },
+      {
+        "shot": "notebook-note",
+        "anchor": "notebook.pdf",
+        "label": "Export",
+        "title": "Reports, written as they print",
+        "text": "No Markdown to learn: columns, charts, tables and sources as cards, out as a PDF, an offline page or your own site."
+      },
+      {
+        "shot": "detect",
+        "anchor": "detect.tabs",
+        "label": "Routines",
+        "title": "A routine over time",
+        "text": "Its dashboard reads every pass together, counts and spots that stay or come and go, and Catch up reads the passes it missed."
+      },
+      {
         "title": "And also",
         "items": [
-          { "icon": "clock", "text": "Mark to geolocate lays out Whole video, Passage and Instant side by side: press Passage, then drag across the bar from where the place shows to where it ends." },
-          { "icon": "pin", "text": "Save place drops a pin where you click and asks its name; while a scene is geolocated it drops numbered leads in the scene's colour, gone once the scene is proved." },
-          { "icon": "layers", "text": "Places and Media are two map layers of their own, both on, so a place you save is always seen; captures stay in the Saved panel." },
-          { "icon": "proof", "text": "A proof saved with no place yet keeps its scene geolocated: the pill opens that proof with your new captures, and its point map lists the scene's leads." },
-          { "icon": "pin", "text": "A place is one drop, red until its card gives it a colour, and a Names switch writes each name under it." },
-          { "icon": "pin", "text": "A scene's leads are counted beside its captures, in the To-do, the pill and Inspect." },
-          { "icon": "satellite", "text": "Tick Layers on the map to capture the map as drawn, each source credited on the picture." },
-          { "icon": "crosshair", "text": "The Geolocating pill lists what its scene gathered, deletes a capture or a frame from there, and links to Inspect, Satellite and Horizon, in the app and the extension." },
-          { "icon": "proof", "text": "Make the proof says when a scene has no map capture yet, and takes you to the map." },
-          { "icon": "post", "text": "Geo Report is now Post: the same tool, for more kinds of posts." },
-          { "icon": "at", "text": "Bluesky posts now mention a real Bluesky handle, @geoconfirmed.org by default." },
-          { "icon": "alignment", "text": "Align has its own seat on the map: the line through two things lined up in a picture, run on; draw a few and they meet near the camera." },
-          { "icon": "sun", "text": "Reading a shadow moved from Measure to Sun and moon, one press when you want it, and the slider goes to the hour it gives." },
-          { "icon": "unlink", "text": "Media's Unused filter finds the files nothing uses, and every delete says what it touches before it runs." },
-          { "icon": "image", "text": "The Google basemap keeps its credit and logo in plain sight." },
-          { "icon": "brush", "text": "Settings › General picks the accent colour of the interface among eleven, and menus, dialogs and tabs now move briefly as they open." },
-          { "icon": "eyeOff", "text": "A plate's map hides one feature, or everything a layer held before a day you pick." },
-          { "icon": "clock", "text": "A plate's bar stays still on busy days, scrolls its steps with the wheel, and plays hour by hour when you ask." },
-          { "icon": "video", "text": "Right-click a plate's marker that shows a video or a photo to set it on the page, pointing at its place." },
-          { "icon": "columns", "text": "Horizon's Side by side is live: the photo above, the terrain under it, locked together or each on its own." },
-          { "icon": "columns", "text": "A note's Columns set two pictures side by side at one height, or words beside a picture, in the PDF and on the web." },
-          { "icon": "image", "text": "Reference windows open over the Horizon view too, the same ones as on the map." },
+          { "icon": "layers", "text": "Collage plays a video in a rail under the canvas, and Panorama stitches the frames between A and B." },
           { "icon": "zoneSearch", "text": "Inspect searches a part of a picture: draw a zone over it, then press Google Lens, Yandex, Bing or TinEye." },
-          { "icon": "video", "text": "A file's mark plays it in its card, a stack one at a time, and Play beside the map takes it to the panel where it was." },
-          { "icon": "move", "text": "Move place on a place's card picks it up and puts it down where you click. A proof's point is moved in its proof." },
-          { "icon": "proof", "text": "A proof's point is filed without a question, and where its video stands the map shows the video alone, with the proof's dot." },
-          { "icon": "chart", "text": "A Detect routine opens a dashboard of its passes in a window: counts, spots that stay or come and go, judged a spot at a time, and put in a note as charts you can edit." },
-          { "icon": "calendar", "text": "Catch up lists the passes a routine missed and reads the ones you tick, one run each, oldest first." },
-          { "icon": "trash", "text": "Deleting a proof takes its geolocation with it, and restoring it from the Trash puts it back." },
-          { "icon": "polygon", "text": "Save place's arrow offers Save zone: click its corners and name it. A zone is drawn as its area, with no pin, and a click in it opens its card. Edit footprint drags its corners." },
-          { "icon": "pin", "text": "Click a lead to pick it, then press Delete to remove it." },
-          { "icon": "ruler", "text": "In Compare and Detect, a measure, an arrow or a box takes two clicks as well as a drag." }
+          { "icon": "columns", "text": "Horizon's Side by side is live: the photo above, the terrain under it, locked together or each on its own." },
+          { "icon": "alignment", "text": "Align has its own seat on the map, and reading a shadow moved to Sun and moon." },
+          { "icon": "polygon", "text": "Save place's arrow offers Save zone, and the case's places and media are two map layers of their own." },
+          { "icon": "satellite", "text": "Tick Layers on the map to capture the map as drawn, each source credited on the picture." },
+          { "icon": "eyeOff", "text": "A plate's map hides one feature, and its days play hour by hour when you ask." },
+          { "icon": "unlink", "text": "Media's Unused filter finds the files nothing uses, and every delete says what it touches before it runs." },
+          { "icon": "globe", "text": "Settings › Website puts your notes online as a site of your own, on GitHub Pages." },
+          { "icon": "brush", "text": "Settings › General picks the accent colour of the interface among eleven." }
         ]
       }
     ]

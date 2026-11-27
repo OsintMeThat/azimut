@@ -297,7 +297,7 @@
     <input class="title" aria-label="Layer name" title="Rename the layer" bind:value={layerDetails.title} maxlength="200"
       disabled={controller.loading} onchange={saveDetails} onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
     <LayerKeyButton caseId={controller.editor?.caseId} colours={worn.colours} worn={worn.keys} look={iconOf} disabled={controller.loading} />
-    <button type="button" class="icon-act more-btn" aria-label="Layer actions" title="Description, time, download" aria-expanded={layerMenu}
+    <button type="button" class="icon-act more-btn" aria-label="Layer actions" title="Description, time, download" aria-expanded={layerMenu} data-guide="layer.more"
       bind:this={layerMenuAnchor} disabled={controller.loading} onclick={() => (layerMenu = !layerMenu)}><Icon name="more" size={14} /></button>
     <!-- with nothing changed it is a way back out: no question to ask -->
     <button type="button" class="icon-act more-btn discard-btn" aria-label="Discard changes"
@@ -305,7 +305,7 @@
       disabled={busy} onclick={() => (controller.changed ? (discard = true) : discardChanges())}><Icon name="undo" size={14} /></button>
     <!-- Leaving the layer from the panel too, where the eye is. The press keeps the focus where
          it is: leaving a field would save it, and Done saves it anyway. -->
-    <button class="btn btn-primary btn-sm done" title="Save what is left in a field and stop editing this layer"
+    <button class="btn btn-primary btn-sm done" title="Save what is left in a field and stop editing this layer" data-guide="layer.done"
       disabled={busy || !layerDetails.title.trim() || (controller.sketch && !controller.complete)}
       onmousedown={(event) => event.preventDefault()} onclick={done}><Icon name="check" size={12} /> Done</button>
   </header>
@@ -353,7 +353,7 @@
               {:else}<span class="group-dot" style={`--swatch:${group.colour}`}></span>{/if}
               <span class="name">{group.name}</span><span class="count">{members.length}</span>
             </button>
-            <button class="icon-act more more-btn" aria-label={`Settings of group ${group.name}`} title="Group settings" aria-expanded={groupMenu?.id === group.id}
+            <button class="icon-act more more-btn" aria-label={`Settings of group ${group.name}`} title="Group settings" aria-expanded={groupMenu?.id === group.id} data-guide="layer.group-more"
               onclick={(event) => { controller.group = group.id; groupMenu = groupMenu?.id === group.id ? null : { id: group.id, anchor: event.currentTarget }; }}>
               <Icon name="more" size={14} />
             </button>
@@ -377,7 +377,7 @@
                   aria-label={`Move ${feature.properties.name || 'Unnamed feature'}`} title="Drag to reorder or move to a group"
                   disabled={controller.pending > 0 || !!controller.sketch} onkeydown={(event) => nudgeFeature(event, feature)}>
                   <Icon name="grip" size={14} stroke={2.5} /></button>
-                <button class="feature-row" aria-pressed={selection.includes(feature.properties.key)} class:absent={feature.properties.$absent}
+                <button class="feature-row" data-guide={feature.properties.entity_id ? 'layer.linked' : 'layer.feature'} aria-pressed={selection.includes(feature.properties.key)} class:absent={feature.properties.$absent}
                   title={feature.properties.$absent ? 'Not on the map on the layer\'s day' : null}
                   class:active={selection.includes(feature.properties.key) || selected?.properties.key === feature.properties.key}
                   onclick={async (event) => { if (event.shiftKey || event.ctrlKey || event.metaKey) controller.toggleSelected(feature.properties.key, members.toReversed().map((feature) => feature.properties.key), event.shiftKey);
@@ -416,12 +416,12 @@
     {#if newGroup}
       <form class="new-group" onsubmit={(event) => { event.preventDefault(); createGroup(); }}>
         <!-- svelte-ignore a11y_autofocus -->
-        <input aria-label="New group name" bind:value={groupName} placeholder="Group name" maxlength="200" autofocus />
+        <input aria-label="New group name" data-guide="layer.group-field" bind:value={groupName} placeholder="Group name" maxlength="200" autofocus />
         <button class="icon-act" aria-label="Create group" title="Create group" disabled={!groupName.trim() || controller.pending > 0}><Icon name="check" size={13} /></button>
         <button type="button" class="icon-act" aria-label="Cancel new group" title="Cancel" onclick={() => (newGroup = false)}><Icon name="x" size={12} /></button>
       </form>
     {:else}
-      <button class="add" data-new-group-trigger onclick={() => (newGroup = true)}><Icon name="plus" size={12} /> New group</button>
+      <button class="add" data-new-group-trigger data-guide="layer.new-group" onclick={() => (newGroup = true)}><Icon name="plus" size={12} /> New group</button>
     {/if}
     <p class="tally">{controller.features.length} {controller.features.length === 1 ? 'feature' : 'features'}</p>
   {/if}
@@ -431,7 +431,8 @@
   <FloatingMenu anchor={layerMenuAnchor} align="end" width={220} label="Layer actions" onclose={() => (layerMenu = false)}>
     <button type="button" class="fm-item" onclick={() => { layerMenu = false; describing = true; }}>
       <Icon name="note" size={14} /><span class="fm-grow">{controller.editor.description ? 'Edit the description' : 'Add a description'}</span></button>
-    <button type="button" class="fm-item" role="menuitemcheckbox" aria-checked={!!controller.editor.track?.on} disabled={busy} title={LAYER_HELP.track} onclick={switchTrack}>
+    <button type="button" class="fm-item" role="menuitemcheckbox" aria-checked={!!controller.editor.track?.on} disabled={busy} title={LAYER_HELP.track} onclick={switchTrack}
+      data-guide="layer.track-on">
       <Icon name="clock" size={14} /><span class="fm-grow">Track over time</span>
       {#if controller.editor.track?.on}<Icon name="check" size={13} />{/if}</button>
     {#if controller.editor.track?.on}
@@ -446,7 +447,7 @@
       <div class="fm-sub" title={LAYER_HELP.clock}><span>Clock</span><ClockField value="" clock={{ zone: controller.editor.track.zone ?? 'UTC', fixed: '' }} timed={false} disabled={busy}
         onpick={(zone) => { if (zone) controller.setTrack({ zone }); }} /></div>
     {/if}
-    <button type="button" class="fm-item" disabled={busy || !!controller.sketch} onclick={download}>
+    <button type="button" class="fm-item" disabled={busy || !!controller.sketch} data-guide="layer.download-item" onclick={download}>
       <Icon name="download" size={14} /><span class="fm-grow">Download layer</span></button>
     <button type="button" class="fm-item" disabled={busy || !!controller.sketch} onclick={sendToMyMaps}>
       <Icon name="upload" size={14} /><span class="fm-grow">Send to My Maps…</span></button>

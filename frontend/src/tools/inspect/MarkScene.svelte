@@ -14,7 +14,7 @@
 <div class="mark" role="group" aria-label="Mark to geolocate" data-guide="inspect.scene">
   <span class="mark-head"><Icon name="pin" size={12} /> Mark to geolocate</span>
   <div class="kinds">
-    <button class="btn btn-sm kind" disabled={Boolean(wholeOff)} onclick={() => onwhole?.()} title={wholeOff || INSPECT_HELP.markWhole}>
+    <button class="btn btn-sm kind" disabled={Boolean(wholeOff)} onclick={() => onwhole?.()} title={wholeOff || INSPECT_HELP.markWhole} data-guide="inspect.whole">
       <Icon name="video" size={13} />
       <span class="name">Whole video</span>
     </button>

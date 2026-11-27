@@ -297,8 +297,9 @@
       uiState.onboarding = { kind: 'beta' };
     }
   });
-  // Find's button is framed on its own in the pictured guide
-  const switchModes = MODES.map((one) => (one.id === 'find' ? { ...one, guide: 'horizon.find' } : one));
+  // Find's and Overlay's buttons are framed on their own in the pictured guide
+  const GUIDED_MODES = { find: 'horizon.find', overlay: 'horizon.lay' };
+  const switchModes = MODES.map((one) => (GUIDED_MODES[one.id] ? { ...one, guide: GUIDED_MODES[one.id] } : one));
   function showBeta() {
     if (!uiState.onboarding) uiState.onboarding = { kind: 'beta' };
   }
@@ -2173,6 +2174,7 @@
                   class="btn btn-sm btn-primary"
                   disabled={confirming || Boolean(saveBlocked)}
                   title={saveBlocked || 'Keep this view in the case and the place on the search, which stops it'}
+                  data-guide="find.confirm"
                   onclick={confirmPlace}><Icon name="check" size={13} />This is the place</button
                 >
               {/if}

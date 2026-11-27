@@ -16,6 +16,8 @@
     listId = 'horizon-suggestions',
     // Picking or moving a viewpoint still stands at typed coordinates.
     oncoordinates = null,
+    /** The `data-guide` anchor the pictured guide frames the search box by. */
+    guide = undefined,
   } = $props();
 
   let searching = $state(false);
@@ -70,7 +72,7 @@
   }
 </script>
 
-<div class="map-search">
+<div class="map-search" data-guide={guide}>
   <PlaceSearch
     bind:value
     centre={view ? { lat: view.lat, lon: view.lon } : null}

@@ -284,7 +284,8 @@
       <div class="tabs" role="tablist" aria-label="Look sections" tabindex="-1" onkeydown={tabKey}>
         {#each TABS as item (item.id)}
           <button type="button" class="tab" class:on={tab === item.id} role="tab" id={`${uid}-tab-${item.id}`} aria-selected={tab === item.id}
-            aria-controls={`${uid}-section`} tabindex={tab === item.id ? 0 : -1} title={item.title} onclick={() => choose(item.id)}>
+            aria-controls={`${uid}-section`} tabindex={tab === item.id ? 0 : -1} title={item.title} data-guide={item.id === 'cover' ? 'notebook.look-cover' : undefined}
+            onclick={() => choose(item.id)}>
             {item.label}{#if marked[item.id]}<span class="dot" role="img" aria-label="Set" title={LOOK_HELP.tabSet}></span>{/if}
           </button>
         {/each}
@@ -432,7 +433,7 @@
             <div class="seg" role="radiogroup" aria-label="Cover page">
               {#each COVERS as cover (cover.id)}
                 <button type="button" class:on={coverIs === cover.id} role="radio" aria-checked={coverIs === cover.id}
-                  title={COVER_HELP[cover.id]} onclick={() => set({ cover: coverFor(cover.id) })}>{cover.label}</button>
+                  title={COVER_HELP[cover.id]} data-guide={cover.id === 'style' ? 'notebook.cover-style' : undefined} onclick={() => set({ cover: coverFor(cover.id) })}>{cover.label}</button>
               {/each}
             </div>
           </div>
@@ -440,6 +441,7 @@
             <label class="row" title={LOOK_HELP.subtitle}>
               <span class="key">Subtitle</span>
               <input class="input" value={subtitle} maxlength={SUBTITLE_MAX} placeholder="A line under the title" title={LOOK_HELP.subtitle}
+                data-guide="notebook.cover-subtitle"
                 oninput={(event) => typedSubtitle(event.currentTarget.value)} onblur={commitSubtitle}
                 onkeydown={(event) => { if (event.key === 'Enter') commitSubtitle(); }} />
             </label>
@@ -448,7 +450,7 @@
                 <span class="key">Picture</span>
                 <div class="picture">
                   <div class="picked">
-                    <button type="button" class="btn btn-sm pick" title={LOOK_HELP.image} onclick={() => (picking = !picking)}>
+                    <button type="button" class="btn btn-sm pick" title={LOOK_HELP.image} data-guide="notebook.cover-picture" onclick={() => (picking = !picking)}>
                       <Icon name="image" size={13} /><span>{coverPicture?.label ?? (whole.cover.image ? 'No longer in the case' : 'Choose a picture')}</span>
                     </button>
                     {#if whole.cover.image}
@@ -464,7 +466,7 @@
                       <div class="picture-list">
                         {#each pictures as entity (entity.id)}
                           <button type="button" class="picture-row" class:on={entity.id === whole.cover.image} title={entity.label}
-                            onclick={() => pickPicture(entity)}><Icon name="image" size={12} /><span>{entity.label}</span></button>
+                            data-guide="notebook.cover-pick" onclick={() => pickPicture(entity)}><Icon name="image" size={12} /><span>{entity.label}</span></button>
                         {/each}
                         {#if !pictures.length}<p class="none">No picture in the case matches.</p>{/if}
                       </div>

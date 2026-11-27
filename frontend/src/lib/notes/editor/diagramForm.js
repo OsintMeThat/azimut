@@ -141,6 +141,7 @@ export function diagramForm(panel, {
   view, state, write, undo = null, canUndo = () => false, palette = () => [], keep = null, fromCase = null, kind = null, close = null,
 }) {
   panel.classList.add('dg-form');
+  panel.dataset.guide = 'notebook.diagram-form';
   panel.setAttribute('role', 'group');
   panel.setAttribute('aria-label', 'Diagram');
   let shape = '';
@@ -651,6 +652,7 @@ export function diagramForm(panel, {
     // the panel is the block's again once the form goes
     destroy: () => {
       panel.classList.remove('dg-form');
+      delete panel.dataset.guide;
       panel.removeAttribute('role');
       panel.removeAttribute('aria-label');
     },
@@ -704,6 +706,7 @@ export function openDiagramGallery(view, anchor, { model = null, caseId = '', on
     const card = element('button', `dg-pick${model?.kind === kind ? ' dg-pick-now' : ''}`);
     card.type = 'button';
     card.dataset.kind = kind;
+    if (kind === 'flow') card.dataset.guide = 'notebook.diagram-flow';
     const unfit = model && model.kind !== kind && !convertModel(model, kind);
     card.disabled = Boolean(unfit);
     card.setAttribute('aria-label', `${label}: ${needs}${model?.kind === kind ? ', the kind it is now' : ''}`);

@@ -4,18 +4,29 @@
   const CORNER = 14;
   /** Between the control's foot and the bubble, the arrow's tip a little short of it. */
   const GAP = 10;
+  /** Between the control and its ring, so the ring clears the control's own edge. */
+  const RING = 5;
+  /** How far the ring's echo travels out, in pixels across, whatever the control's size. */
+  const PING = 24;
 
   /**
    * Where a bubble `width` wide sits under the control at `rect`, between `room.left`
    * and `room.right` (the window, or the panel the control is in): centred on the
    * control where it fits, slid inward at an edge, its arrow (`arrow`, from the
-   * bubble's left) still on the control's middle.
+   * bubble's left) still on the control's middle. Given its `height` and the room's
+   * `bottom`, a bubble with no room under the control goes over it (`above`).
    */
-  export function placeUnder(rect, width, room) {
+  export function placeUnder(rect, width, room, height = 0) {
     const middle = rect.left + rect.width / 2;
     const left = Math.max(room.left + EDGE, Math.min(middle - width / 2, room.right - EDGE - width));
     const arrow = Math.min(Math.max(middle - left, CORNER), width - CORNER);
-    return { left: Math.round(left), top: Math.round(rect.bottom + GAP), arrow: Math.round(arrow) };
+    const place = { left: Math.round(left), top: Math.round(rect.bottom + GAP), arrow: Math.round(arrow) };
+    const floor = (room.bottom ?? Infinity) - EDGE;
+    if (place.top + height <= floor) return place;
+    const over = rect.top - GAP - height;
+    if (over >= EDGE) return { ...place, top: Math.round(over), above: true };
+    // a control as tall as the window: the bubble stays on screen, over its foot
+    return { ...place, top: Math.round(Math.max(EDGE, floor - height)) };
   }
 </script>
 
@@ -26,14 +37,19 @@
    * the work beside it, and never in the way. It takes no focus and holds no key, so
    * whatever was being done goes on. It goes on its action, on ✕, on Escape, on a
    * press anywhere else, after `timeout` (held while the pointer rests on it), and as
-   * soon as the control is gone; a resize moves it with the control.
+   * soon as the control is gone; a resize or a scroll moves it with the control.
+   *
+   * `ring` also closes a ring round the control, for the guide pointing at a control in
+   * the live app (lib/showInApp.svelte.js). The ring takes no press, so the control
+   * under it still works.
    */
   import Icon from './Icon.svelte';
 
-  let { anchor, within = null, text, action = '', onaction, onclose, timeout = 10_000 } = $props();
+  let { anchor, within = null, text, action = '', onaction, onclose, timeout = 10_000, ring = false } = $props();
 
   let bubble = $state(null);
   let place = $state(null);
+  let lit = $state(null);
 
   function measure() {
     const rect = anchor?.isConnected ? anchor.getBoundingClientRect() : null;
@@ -41,10 +57,19 @@
       onclose?.();
       return;
     }
+    // with a ring, the bubble points at the ring rather than into it
+    const aim = ring
+      ? { left: rect.left - RING, top: rect.top - RING, width: rect.width + RING * 2, height: rect.height + RING * 2, bottom: rect.bottom + RING }
+      : rect;
+    if (ring) lit = aim;
     if (!bubble) return;
     const box = within?.isConnected ? within.getBoundingClientRect() : null;
-    const room = { left: Math.max(0, box?.left ?? 0), right: Math.min(window.innerWidth, box?.right ?? Infinity) };
-    place = placeUnder(rect, bubble.offsetWidth, room);
+    const room = {
+      left: Math.max(0, box?.left ?? 0),
+      right: Math.min(window.innerWidth, box?.right ?? Infinity),
+      bottom: window.innerHeight,
+    };
+    place = placeUnder(aim, bubble.offsetWidth, room, bubble.offsetHeight);
   }
 
   // Measured once drawn, and again whenever the control or the window changes size:
@@ -60,10 +85,13 @@
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(later) : null;
     observer?.observe(anchor);
     window.addEventListener('resize', later);
+    // a scroll does not bubble, so a panel scrolling the control along is heard on the way down
+    document.addEventListener('scroll', later, { capture: true, passive: true });
     return () => {
       cancelAnimationFrame(frame);
       observer?.disconnect();
       window.removeEventListener('resize', later);
+      document.removeEventListener('scroll', later, { capture: true });
     };
   });
 
@@ -97,9 +125,22 @@
   });
 </script>
 
+{#if ring && lit}
+  <span
+    class="ring"
+    style:left="{lit.left}px"
+    style:top="{lit.top}px"
+    style:width="{lit.width}px"
+    style:height="{lit.height}px"
+    style:--grow-x={1 + PING / lit.width}
+    style:--grow-y={1 + PING / lit.height}
+    aria-hidden="true"
+  ></span>
+{/if}
 <div
   class="coachmark"
   class:placed={place != null}
+  class:above={place?.above}
   role="status"
   bind:this={bubble}
   style:left={place ? `${place.left}px` : '0'}
@@ -156,6 +197,40 @@
     border-top: 1px solid var(--border-strong);
     transform: rotate(45deg);
   }
+  /* over the control, the arrow hangs from the bubble's foot */
+  .coachmark.above::before {
+    top: auto;
+    bottom: -6px;
+    border: 0;
+    border-right: 1px solid var(--border-strong);
+    border-bottom: 1px solid var(--border-strong);
+  }
+  .coachmark.above.placed {
+    animation-name: arrive-over;
+  }
+  /* The guide's look on its pictures (Spotlight.svelte), in the accent here because
+     the live screen is no picture. Its dark edge holds it on a light page or imagery.
+     The bubble comes later in the page, so it paints over the ring at the same level. */
+  .ring {
+    position: fixed;
+    z-index: 1250;
+    box-sizing: border-box;
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+    pointer-events: none;
+    animation: motion-fade-in var(--motion-pop) var(--ease) backwards;
+  }
+  /* one ring going out from it, twice, so the eye lands there first */
+  .ring::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border: 2px solid var(--accent);
+    border-radius: inherit;
+    opacity: 0;
+    animation: ping 1.4s var(--ease) 0.3s 2;
+  }
   .dot {
     flex-shrink: 0;
     width: 7px;
@@ -201,8 +276,27 @@
       translate: 0 -4px;
     }
   }
+  @keyframes arrive-over {
+    from {
+      opacity: 0;
+      translate: 0 4px;
+    }
+  }
+  /* the same few pixels out on a button as on a whole panel */
+  @keyframes ping {
+    from {
+      opacity: 0.8;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: scale(var(--grow-x), var(--grow-y));
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
-    .coachmark.placed {
+    .coachmark.placed,
+    .coachmark.above.placed,
+    .ring::after {
       animation: none;
     }
   }

@@ -100,6 +100,7 @@
           class:on={view.ground === ground.id}
           aria-pressed={view.ground === ground.id}
           title={ground.title}
+          data-guide={ground.id === 'imagery' ? 'horizon.satellite' : undefined}
           onclick={() => pickGround(ground.id)}>{ground.label}</button
         >
       {/each}

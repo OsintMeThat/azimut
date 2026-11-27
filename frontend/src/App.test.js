@@ -142,6 +142,20 @@ describe('Settings', () => {
   });
 });
 
+describe('the guide showing a control in the app', () => {
+  it('rings it with the same coachmark, once, afresh for each ask', () => {
+    expect(markup.match(/\{#key pointing\.at\}/g)).toHaveLength(1);
+    expect(markup).toMatch(
+      /\{#key pointing\.at\}\s*\{#if pointing\.at\}\s*<Coachmark anchor=\{pointing\.at\.element\} text=\{pointing\.at\.label\} ring timeout=\{8000\} onclose=\{stopPointing\} \/>/
+    );
+  });
+
+  it('does it when a detached guide asks', () => {
+    const heard = source.slice(source.indexOf('listenToGuide({'), source.indexOf('})', source.indexOf('listenToGuide({')));
+    expect(heard).toContain('show: showInApp,');
+  });
+});
+
 describe('a capture the extension filed', () => {
   it('offers its toast’s Put to the note on the side, and nothing for a bookmark or a place', () => {
     const handler = source.slice(source.indexOf("onEvent('capture'"), source.indexOf("onEvent('bookmark'"));

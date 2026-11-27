@@ -276,6 +276,7 @@
       class:active={tool === entry.id}
       aria-pressed={tool === entry.id}
       title="{entry.label} ({entry.shortcut})"
+      data-guide={entry.id === 'rect' ? 'proof.box' : undefined}
       onclick={() => (tool = tool === entry.id ? 'select' : entry.id)}
     >
       <Icon name={entry.icon} size={18} />
@@ -395,6 +396,7 @@
         class="tb-btn"
         class:active={colorOpen}
         title="Annotation colour"
+        data-guide="proof.colour"
         onclick={() => toggle('color')}
         bind:this={colorBtn}
       >

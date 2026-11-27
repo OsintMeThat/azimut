@@ -103,7 +103,7 @@
   {/if}
   {#if layered}
     <div class="fm-sep"></div>
-    <label class="fm-item layered" title={LAYERS_HINT}>
+    <label class="fm-item layered" title={LAYERS_HINT} data-guide="plate.layers-that-day-menu">
       <input type="checkbox" checked={element.layers_on === 'imagery'} onchange={(event) => (element.layers_on = event.currentTarget.checked ? 'imagery' : 'plate')} />
       <span class="fm-grow">Layers as they stood that day</span></label>
     <p class="fm-note">Its dated layers, legend and counts read that day, not the plate's.</p>
@@ -112,7 +112,7 @@
   {#if element.basemap === WAYBACK_ID}
     <div class="rows">
       <span class="key">Release</span>
-      <select aria-label="Wayback release" value={String(element.release ?? '')} onchange={(event) => setRelease(event.currentTarget.value)}>
+      <select aria-label="Wayback release" value={String(element.release ?? '')} onchange={(event) => setRelease(event.currentTarget.value)} data-guide="plate.wayback-release">
         <option value="">Newest</option>
         {#each releases as entry (entry.release)}<option value={String(entry.release)}>{entry.date}</option>{/each}
       </select>
@@ -138,7 +138,7 @@
     <p class="note">One pass at 10 m a pixel, empty where it did not reach, its tiles spending your Copernicus quota.</p>
   {/if}
   {#if layered}
-    <label class="check" title={LAYERS_HINT}>
+    <label class="check" title={LAYERS_HINT} data-guide="plate.layers-that-day">
       <input type="checkbox" checked={element.layers_on === 'imagery'} onchange={(event) => (element.layers_on = event.currentTarget.checked ? 'imagery' : 'plate')} />
       Layers as they stood that day</label>
     <p class="note">Its dated layers, legend and counts read that day, not the plate's.</p>

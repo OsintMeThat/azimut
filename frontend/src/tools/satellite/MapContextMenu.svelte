@@ -50,6 +50,9 @@
     onclose,
   } = $props();
 
+  /** The acts the pictured guide frames on their own (lib/guide.js). */
+  const MENU_GUIDES = { horizon: 'map.look', measure: 'map.measure-from', lead: 'map.drop-lead' };
+
   let menuEl = $state();
   let subEl = $state();
   /** The row each submenu hangs from, by submenu id. */
@@ -214,7 +217,7 @@
   <div class="rule" role="separator"></div>
 
   {#each actions as action (action.id)}
-    <button class="item" role="menuitem" onclick={() => onpick(action.id)}>
+    <button class="item" role="menuitem" data-guide={MENU_GUIDES[action.id]} onclick={() => onpick(action.id)}>
       <Icon name={action.icon} size={13} />
       <span>{action.label}</span>
     </button>
@@ -248,6 +251,7 @@
   <button
     bind:this={subRowEl.links}
     class="item"
+    data-guide="map.open-in"
     class:open={openSub === 'links'}
     role="menuitem"
     aria-haspopup="menu"
@@ -292,6 +296,7 @@
         <a
           class="item link"
           role="menuitem"
+          data-guide={link.id === 'google_sat' ? 'map.google-satellite' : undefined}
           href={fullscreen ? undefined : link.url}
           target="_blank"
           rel="noreferrer"

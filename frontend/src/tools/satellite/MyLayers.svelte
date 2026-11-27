@@ -36,7 +36,7 @@
   {#if controller.editor}
     <LayerEditor {controller} {ondone} {onfly} {ondeleteplace} />
   {:else}
-    <AddedLayers rows={personal} heading="My layers" headingIcon="stack" addLabel="New layer"
+    <AddedLayers rows={personal} heading="My layers" headingIcon="stack" addLabel="New layer" addGuide="layer.new"
       ondownload={(row) => controller.download(row)}
       onmap={(row) => void putInNote(layerMapOffer(caseState.current?.id, row))}
       onwebmap={webMap} busy={making}

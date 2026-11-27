@@ -3272,6 +3272,7 @@
           <input
             id="pc-mention"
             class="input mono"
+            data-guide="post.mention"
             placeholder={target === 'bluesky' ? '@name.bsky.social' : '@GeoConfirmed'}
             bind:value={mention}
             onchange={regenerate}
@@ -3415,7 +3416,7 @@
                     <Icon name="x" size={11} />
                   </button>
                 </span>
-                <button class="btn btn-ghost btn-sm" onclick={() => copyImage(proofHref)} title="Copy this image">
+                <button class="btn btn-ghost btn-sm" onclick={() => copyImage(proofHref)} title="Copy this image" data-guide="post.copy-image">
                   <Icon name="copy" size={13} /> Copy image
                 </button>
                 <button class="btn btn-ghost btn-sm" onclick={openProofPicker} title="Attach a different proof">

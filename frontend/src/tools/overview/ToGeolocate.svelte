@@ -231,7 +231,7 @@
                   <button type="button" class="btn btn-xs go" aria-label={`Open ${nameOf(scene)}`}
                     title="Its proof states no place yet: add the point in Geo Proof" onclick={() => openProof(scene)}>Open</button>
                 {:else}
-                  <button type="button" class="btn btn-xs go" class:on={isLive(scene)} disabled={busy} aria-pressed={isLive(scene)}
+                  <button type="button" class="btn btn-xs go" class:on={isLive(scene)} disabled={busy} aria-pressed={isLive(scene)} data-guide="todo.go"
                     aria-label={isLive(scene) ? `Stop geolocating ${nameOf(scene)}` : `Geolocate ${nameOf(scene)}`}
                     title={isLive(scene) ? 'Stop geolocating it; its captures stay' : `Find it on the map, its ${isPicture(scene) ? 'picture' : 'video'} beside it`} onclick={() => go(scene)}>
                     {isLive(scene) ? 'Stop' : 'Geolocate'}

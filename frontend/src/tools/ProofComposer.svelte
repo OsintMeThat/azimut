@@ -8053,7 +8053,7 @@
     <button class="btn btn-ok btn-sm" data-guide="proof.save" onclick={() => save()} disabled={!proofHasContent || saving}>
       <Icon name="save" size={14} /> <span>{#if saving}Saving…{:else}Save<span class="fold-word">{' proof'}</span>{/if}</span>
     </button>
-    <button class="btn btn-info btn-sm" data-guide="proof.save" onclick={() => save({ andPost: true })} disabled={!proofHasContent || saving}>
+    <button class="btn btn-info btn-sm" data-guide="proof.to-post" onclick={() => save({ andPost: true })} disabled={!proofHasContent || saving}>
       <Icon name="post" size={14} /> To Post
     </button>
     {/if}
@@ -8222,6 +8222,7 @@
                   class="meta-add"
                   class:alone={!proof.points.some((one) => one.coords.trim())}
                   title="Add a point"
+                  data-guide="proof.add-point"
                   onclick={addPoint}
                 >
                   <Icon name="plus" size={12} />
@@ -8260,6 +8261,7 @@
                       ? 'Not checked yet. Check it on the map'
                       : 'Move this point on the map'}
                     onclick={() => (pointMap = { row: i, view: pointMapView(i) })}
+                    data-guide={i > 0 && i === proof.points.length - 1 ? 'proof.new-pin' : undefined}
                   >
                     <Icon name="pin" size={13} />
                   </button>
@@ -8272,6 +8274,7 @@
                   <input
                     class="input point-label"
                     placeholder="label"
+                    data-guide={i === 0 ? 'proof.first-label' : i === proof.points.length - 1 ? 'proof.new-label' : undefined}
                     value={point.label}
                     oninput={(e) => namePoint(i, e.target.value)}
                   />
@@ -8279,6 +8282,7 @@
                     class="field-act"
                     class:on={point.pov}
                     title="Point of view"
+                    data-guide={i > 0 && i === proof.points.length - 1 ? 'proof.new-pov' : undefined}
                     onclick={() => togglePov(i)}
                   >
                     <Icon name="eye" size={13} />

@@ -891,7 +891,7 @@
       controlsTop={60}
       {onclick}
     >
-      <MapNavigation {engine} {view} {bearing} units={imperial ? 'imperial' : 'metric'} listId="horizon-find-suggestions" />
+      <MapNavigation {engine} {view} {bearing} units={imperial ? 'imperial' : 'metric'} listId="horizon-find-suggestions" guide="find.place" />
       {#if layers}
         <AddedLayersOverlay
           engine={ready ? engine : null}

@@ -622,7 +622,7 @@
     <p id="export-short-said" class="address-said" class:bad={wrong} role="status">
       {wrong || 'Publishing again under this short name replaces the page; GitHub keeps every earlier version.'}</p>
 
-    <div class="site" role="group" aria-label="On the site">
+    <div class="site" role="group" aria-label="On the site" data-guide="notebook.site-role">
       <span class="lbl">On the site</span>
       <div class="choice-line">
         <div class="choice" role="radiogroup" aria-label="On the site">
@@ -740,7 +740,8 @@
     <p class="lead"><Icon name="info" size={13} /> Publish to your own GitHub Pages site in one press: connect GitHub once, in Settings › Website.</p>
     <p class="quiet">{GITHUB_FREE}</p>
     <p class="quiet">{PAGES_PUBLIC}</p>
-    <button type="button" class="btn btn-sm" title="Open Settings on Website, where GitHub Pages is set" onclick={() => openSettings()}>
+    <button type="button" class="btn btn-sm" title="Open Settings on Website, where GitHub Pages is set" data-guide="notebook.website-open"
+      onclick={() => openSettings()}>
       Open Settings › Website</button>
   </div>
 {/if}

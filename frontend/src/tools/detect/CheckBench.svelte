@@ -90,7 +90,7 @@
 <div class="bench-root" bind:clientWidth={width} bind:this={root} onkeydown={onKey}>
   <div class="console cmp-glass" class:narrow role="region" aria-label="Checks on the map" data-guide="detect.bench" bind:clientHeight={deckHeight}>
     {#if bench.choosingPasses}
-      <section class="drawer cmp-glass" aria-label={bench.draft ? 'Passes of the new check' : 'Change the passes of the check'}>
+      <section class="drawer cmp-glass" aria-label={bench.draft ? 'Passes of the new check' : 'Change the passes of the check'} data-guide="detect.passes">
         <header>
           <strong>{bench.draft ? 'New check' : 'Change the passes'}</strong>
           <button class="cmp-icon" aria-label="Close" title="Close" onclick={closeDrawer}><Icon name="x" size={13} /></button>
@@ -240,16 +240,16 @@
       <div class="tools">
         <div class="pins" role="group" aria-label="Pin to drop on the map">
           <button type="button" class="pin" class:on={bench.pinning === 'found'} aria-pressed={bench.pinning === 'found'}
-            onclick={() => bench.arm('found')}><i class="shape shape-found" aria-hidden="true"></i>Should be found</button>
+            data-guide="detect.pin-found" onclick={() => bench.arm('found')}><i class="shape shape-found" aria-hidden="true"></i>Should be found</button>
           <button type="button" class="pin" class:on={bench.pinning === 'empty'} aria-pressed={bench.pinning === 'empty'}
-            onclick={() => bench.arm('empty')}><i class="shape shape-empty" aria-hidden="true"></i>Should stay empty</button>
+            data-guide="detect.pin-empty" onclick={() => bench.arm('empty')}><i class="shape shape-empty" aria-hidden="true"></i>Should stay empty</button>
           <span class="count cmp-mono">{pinCount} pin{pinCount === 1 ? '' : 's'}</span>
         </div>
         <span class="overlay-acts">
           <OverlayDisplay bind:markers={bench.markers} bind:outlines={bench.outlines} bind:checkPins={bench.checkPins}
             bind:hidden={bench.hideOverlays} what="the check overlays" upward />
         </span>
-        <button class="btn test" class:btn-primary={!bench.tested} class:done={bench.tested} disabled={!bench.canTest}
+        <button class="btn test" class:btn-primary={!bench.tested} class:done={bench.tested} disabled={!bench.canTest} data-guide="detect.bench-test"
           title={bench.blocked || undefined} onclick={() => bench.test()}>{bench.testLabel}</button>
       </div>
       {#if bench.blocked && bench.dated && (!bench.pinning || bench.plan?.error)}

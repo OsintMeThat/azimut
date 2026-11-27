@@ -217,6 +217,7 @@ export class HintWidget extends WidgetType {
     const hint = document.createElement('span');
     hint.className = 'cm-hint';
     hint.dataset.hint = 'true';
+    if (!this.template) hint.dataset.guide = 'notebook.guidance';
     hint.textContent = this.text || 'Guidance';
     hint.title = this.template ? 'Guidance: shown in grey, never printed' : 'Guidance from the template: type over it';
     return hint;

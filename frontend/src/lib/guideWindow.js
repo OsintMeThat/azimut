@@ -9,6 +9,7 @@
  */
 import { buildHash, splitHash } from './hash.js';
 import { JOURNEYS, MENU_ITEMS } from './guide.js';
+import { SIDEBAR_VIEWS } from './sidebar.js';
 
 export const GUIDE_ROUTE = 'guide';
 /** The tab the guide opens in, so a second press brings that tab back rather than adding one. */
@@ -65,12 +66,13 @@ function reachable(tab) {
 let appTab = null;
 
 /**
- * Ask the app to do something from the guide's tab: `{ open: <tool> }`, `{ report: true }`
- * or `{ example: true }`.
+ * Ask the app to do something from the guide's tab: `{ open: <tool> }`, `{ report: true }`,
+ * `{ example: true }` or `{ show: { tool, anchor, label, press } }` (lib/showInApp.svelte.js).
  *
  * It goes to the tab that detached the guide. A guide opened from its address alone has
  * none, so the app opens in a tab of its own on what was asked, and later asks go there.
- * An address cannot say to file the example, so that one is asked again once the tab has loaded.
+ * An address cannot say to file the example or which control to light, so those are asked
+ * again once the tab has loaded.
  */
 export function askApp(ask) {
   const tab = reachable(window.opener) ?? reachable(appTab);
@@ -79,21 +81,36 @@ export function askApp(ask) {
     tab.focus();
     return;
   }
-  const route = ask.report ? 'settings' : ask.example ? 'horizon' : ask.open;
+  const route = ask.report ? 'settings' : ask.example ? 'horizon' : ask.show ? (ask.show.tool ?? '') : ask.open;
   appTab = window.open(`${here()}#${route}`, APP_TAB);
-  if (ask.example) appTab?.addEventListener('load', () => appTab.postMessage({ [KEY]: ask }, location.origin));
+  if (ask.example || ask.show) appTab?.addEventListener('load', () => appTab.postMessage({ [KEY]: ask }, location.origin));
+}
+
+const text = (value) => (typeof value === 'string' ? value : '');
+
+/** A control to light, as `showInApp` takes it, or null when the ask is not one the app can answer. */
+function showAsk(show, tools) {
+  if (typeof show?.anchor !== 'string' || !show.anchor) return null;
+  const tool = show.tool ?? null;
+  if (tool !== null && !tools.includes(tool)) return null;
+  const sidebar = SIDEBAR_VIEWS.includes(show.sidebar) ? show.sidebar : null;
+  // a Settings section by its id, never anything a message could smuggle in
+  const settings = tool === 'settings' && typeof show.settings === 'string' && /^[a-z]+(:[a-z]+)?$/.test(show.settings) ? show.settings : null;
+  return { tool, anchor: show.anchor, label: text(show.label), press: text(show.press), ...(sidebar ? { sidebar } : {}), ...(settings ? { settings } : {}) };
 }
 
 /**
  * In the app: do what a guide tab asks. Only this page's own tabs are heard, and only
  * a tool the app has.
  */
-export function listenToGuide({ tools, open, report, example }) {
+export function listenToGuide({ tools, open, report, example, show }) {
   const onmessage = (event) => {
     if (event.origin !== location.origin) return;
     const ask = event.data?.[KEY];
+    const lit = showAsk(ask?.show, tools);
     if (ask?.report === true) report();
     else if (ask?.example === true) example();
+    else if (lit) show(lit);
     else if (tools.includes(ask?.open)) open(ask.open);
   };
   window.addEventListener('message', onmessage);

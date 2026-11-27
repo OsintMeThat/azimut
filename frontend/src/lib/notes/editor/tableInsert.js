@@ -75,6 +75,7 @@ export function openTablePicker(view) {
   title.append(name, size);
   const squares = document.createElement('div');
   squares.className = 'cm-table-picker-grid';
+  squares.dataset.guide = 'notebook.table-size';
   squares.tabIndex = 0;
   squares.setAttribute('role', 'slider');
   squares.setAttribute('aria-label', 'Rows by columns. Arrows to size, Enter to put in');

@@ -137,7 +137,7 @@
     bind:this={anchors.start} onclick={() => toggle('start')}>{startSaid}</button>
   {#if !event}
     <span class="to" aria-hidden="true">→</span>
-    <button type="button" class="bound" class:open-ended={span.end === '' && !span.unknown} class:mixed={span.end === null} aria-label="When it leaves the map" aria-expanded={open === 'end'}
+    <button type="button" class="bound" class:open-ended={span.end === '' && !span.unknown} class:mixed={span.end === null} aria-label="When it leaves the map" aria-expanded={open === 'end'} data-guide="layer.feature-end"
       title="The day it leaves the map" disabled={busy} bind:this={anchors.end} onclick={() => toggle('end')}>{endSaid}</button>
   {/if}
   <span class="grow"></span>

@@ -18,7 +18,7 @@
   }
 </script>
 
-<div class="dc" role="group" aria-label="How far the line stands">
+<div class="dc" role="group" aria-label="How far the line stands" data-guide="find.bands">
   <span class="dc-name">How far</span>
   {#each DISTANCE_BANDS as band (band.id)}
     <button

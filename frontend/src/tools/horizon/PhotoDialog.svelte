@@ -128,7 +128,7 @@
       {:else if failed}
         <p class="quiet warn">{failed}</p>
       {:else if media.length}
-        <SourcePicker {media} {caseId} {current} {onpick} filters={FILTERS} dense />
+        <SourcePicker {media} {caseId} {current} {onpick} filters={FILTERS} dense guide="horizon.photos" />
       {:else}
         <p class="quiet">This case has no photo or video yet.</p>
       {/if}

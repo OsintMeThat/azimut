@@ -305,6 +305,8 @@
         extensions: [
           noteExtensions({ handlers, placeholder, readOnly, editable, template, mode: noteMode.mode }),
           EditorView.updateListener.of(selected),
+          // the column words are written in, which the guide's films frame (`lib/guide.js`)
+          EditorView.contentAttributes.of({ 'data-guide': 'notebook.text' }),
         ],
       }),
     });
@@ -632,7 +634,7 @@
     <span class="rule" role="presentation"></span>
     <button type="button" class="tb" title="Cite a case item (@)" aria-label="Cite a case item" disabled={readOnly} onclick={cite} data-guide="notebook.cite"><Icon name="at" size={14} /></button>
     <button type="button" class="tb" title="Put in a case picture" aria-label="Put in a case picture" class:on={pictureOpen} disabled={readOnly}
-      onclick={() => (pictureOpen = !pictureOpen)}><Icon name="image" size={14} /></button>
+      data-guide="notebook.picture" onclick={() => (pictureOpen = !pictureOpen)}><Icon name="image" size={14} /></button>
     <button type="button" class="tb" title="Insert a heading, a picture, a table, a map… (/)" aria-label="Insert a block" disabled={readOnly} onclick={slash}><Icon name="plus" size={14} /></button>
     <span class="rule" role="presentation"></span>
     <div class="mode" role="radiogroup" aria-label="How the page is shown">
@@ -658,7 +660,8 @@
           {/each}
           {#if builtIns.length && pictures.length}<div class="picture-sep" role="presentation"></div>{/if}
           {#each pictures as entity (entity.id)}
-            <button type="button" class="picture-row" onclick={() => pickPicture(entity)}>
+            <button type="button" class="picture-row" data-guide={entity.type === 'proof' ? 'notebook.picture-proof' : undefined}
+              onclick={() => pickPicture(entity)}>
               <Icon name={entity.attrs?.kind === 'video' ? 'video' : 'image'} size={13} /><span>{entity.label}</span>
               {#if entity.attrs?.folder}<small>{entity.attrs.folder}</small>{/if}
             </button>

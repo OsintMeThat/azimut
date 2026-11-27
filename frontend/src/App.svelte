@@ -35,6 +35,7 @@
   import { openExtensionSettings, openGuide, openIssueReport, openTodo } from './lib/navigate.js';
   import { todoHintAt, todoHintGiven } from './lib/sceneHints.js';
   import { listenToGuide } from './lib/guideWindow.js';
+  import { pointing, showInApp, stopPointing } from './lib/showInApp.svelte.js';
   import { openFindExample } from './lib/findExample.js';
   import { leaveFullscreen } from './lib/fullscreen.js';
   import { startSupportBeat } from './lib/supportBeat.js';
@@ -70,6 +71,10 @@
   import { noteDock, setDockOpen } from './lib/notes/noteDock.svelte.js';
   import { readStatus, stoppedBecause } from './lib/workspace.js';
   import { analysisSearch, leaveAnalysisView } from './lib/analysisSearch.svelte.js';
+
+  /** The rail's stages and the tabs the pictured guide frames on their own (lib/guide.js). */
+  const RAIL_GUIDES = { collect: 'rail.collect', map: 'rail.map', compose: 'rail.compose' };
+  const TAB_GUIDES = { media: 'tab.media', satellite: 'tab.satellite', compare: 'tab.compare', horizon: 'tab.horizon', plate: 'tab.plate', notebook: 'tab.notebook' };
 
   // The rail holds the pipeline workspaces (docs/UI.md §3); tools are tabs
   // inside them. Three workspaces sit apart from the stages: home, the mark in
@@ -140,6 +145,7 @@
         uiState.guide = null;
         openFindExample();
       },
+      show: showInApp,
     })
   );
   let firstShow = true;
@@ -547,8 +553,10 @@
           onclick={() => openWorkspace(ws)}
           title={ws.label}
         >
-          <Icon name={ws.icon} size={19} />
-          <span>{ws.label}</span>
+          <span class="rail-face" data-guide={RAIL_GUIDES[ws.id]}>
+            <Icon name={ws.icon} size={19} />
+            <span>{ws.label}</span>
+          </span>
         </button>
       {/each}
       <!-- The case, under the four stages and apart from them: it is what every stage
@@ -589,7 +597,7 @@
               title={TOOL_HOVERS[toolId]}
               onclick={() => (uiState.tool = toolId)}
             >
-              {toolLabel(toolId)}
+              <span data-guide={TAB_GUIDES[toolId]}>{toolLabel(toolId)}</span>
             </button>
           {/each}
           <span class="ink" aria-hidden="true"></span>
@@ -656,6 +664,12 @@
     onclose={() => (todoPointer = null)}
   />
 {/if}
+<!-- the guide's "Show me in the app": keyed so a second ask starts its own time -->
+{#key pointing.at}
+  {#if pointing.at}
+    <Coachmark anchor={pointing.at.element} text={pointing.at.label} ring timeout={8000} onclose={stopPointing} />
+  {/if}
+{/key}
 
 {#if workspaceStopped}
   <WorkspaceStopped {...workspaceStopped} />
@@ -781,6 +795,13 @@
     color: var(--text-3);
     font-size: var(--fs-xs);
     font-weight: 500;
+  }
+  /* the icon and the name as one, so the guide can frame them together */
+  .rail-face {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
   }
   .rail-btn:hover {
     color: var(--text-1);

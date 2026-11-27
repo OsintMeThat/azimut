@@ -101,7 +101,7 @@
 </script>
 
 {#if held}
-  <div class="geo-pill" role="group" aria-label={named} style:--scene={color}>
+  <div class="geo-pill" role="group" aria-label={named} style:--scene={color} data-guide="geo.pill">
     <button
       class="geo-scene"
       onclick={() => backToScene()}
@@ -125,11 +125,12 @@
         aria-expanded={listOpen}
         aria-label={HELP.gathered}
         data-testid="geolocating-count"
+        data-guide="geo.counts"
       >
         <SceneCounts scene={held} live mark={false} size={12} bump={pulse > 0} />
       </button>
     {/key}
-    <span class="geo-links">
+    <span class="geo-links" data-guide="geo.links">
       <button class="geo-link" onclick={() => backToScene()} title={HELP.inspect} aria-label={HELP.inspect}>
         <Icon name="inspect" size={13} />
       </button>
@@ -143,17 +144,17 @@
     <span class="geo-rule" aria-hidden="true"></span>
     <!-- once a proof holds the scene, open in Geo Proof or saved with no place yet, the press opens it: never a second one -->
     {#if inGeoProof || held.proof}
-      <button class="geo-make" onclick={() => openHeldProof(held)} title={inGeoProof ? HELP.openHere : HELP.open}>
+      <button class="geo-make" onclick={() => openHeldProof(held)} title={inGeoProof ? HELP.openHere : HELP.open} data-guide="geo.make">
         <Icon name="proof" size={12} />
         <span class="geo-make-words">Open the proof</span>
       </button>
     {:else}
-      <button class="geo-make" onclick={() => backToScene(true)} title={picture ? HELP.makePicture : HELP.make}>
+      <button class="geo-make" onclick={() => backToScene(true)} title={picture ? HELP.makePicture : HELP.make} data-guide="geo.make">
         <Icon name="proof" size={12} />
         <span class="geo-make-words">Make the proof</span>
       </button>
     {/if}
-    <button class="geo-stop" onclick={stop} title={HELP.stop} aria-label="Stop geolocating">
+    <button class="geo-stop" onclick={stop} title={HELP.stop} aria-label="Stop geolocating" data-guide="geo.stop">
       <Icon name="x" size={12} />
     </button>
   </div>

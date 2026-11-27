@@ -83,7 +83,7 @@
     <Icon name="link" size={13} />{#if !iconOnly}<span>Link caught</span>{/if}
   </button>
 {:else if !posted}
-  <button type="button" class="btn btn-sm pc-mark" class:accent bind:this={opener}
+  <button type="button" class="btn btn-sm pc-mark" class:accent bind:this={opener} data-guide="post.posted"
     aria-haspopup="dialog" aria-expanded={asking} aria-label="Mark as posted"
     title={iconOnly ? 'Mark as posted' : 'Say it went out, with its link if you have it'} onclick={() => (asking = !asking)}>
     <Icon name="flag" size={13} />{#if !iconOnly}<span>Mark as posted</span>{/if}

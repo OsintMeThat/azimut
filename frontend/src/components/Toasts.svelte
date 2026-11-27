@@ -26,7 +26,7 @@
       <Icon name={icons[t.kind] ?? 'compass'} size={15} />
       <span>{t.message}</span>
       {#each actionsOf(t) as action, i (i)}
-        <button class="toast-action" type="button" onclick={() => activate(t, action)}>
+        <button class="toast-action" type="button" data-guide="toast.action" onclick={() => activate(t, action)}>
           {action.label}
         </button>
       {/each}

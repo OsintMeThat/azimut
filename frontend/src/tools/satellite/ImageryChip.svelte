@@ -155,6 +155,7 @@
               class="row"
               class:on={provider.id === providerId}
               disabled={provider.needs_key}
+              data-guide={provider.id === WAYBACK_ID ? 'imagery.wayback' : undefined}
               onclick={() => pick(provider)}
               title={provider.needs_key ? 'Add this provider’s API key in Settings' : undefined}
             >

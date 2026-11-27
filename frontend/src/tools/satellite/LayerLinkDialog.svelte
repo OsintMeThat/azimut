@@ -50,7 +50,8 @@
   <div class="kinds" role="group" aria-label="Kinds">
     {#each KINDS as [id, label]}
       {#if !id || counts[id]}
-        <button type="button" aria-pressed={kind === id} onclick={() => (kind = id)}>{label} <span>{counts[id]}</span></button>
+        <button type="button" aria-pressed={kind === id} data-guide={id === 'proof' ? 'layer.link-proofs' : undefined}
+          onclick={() => (kind = id)}>{label} <span>{counts[id]}</span></button>
       {/if}
     {/each}
   </div>
@@ -69,7 +70,7 @@
     <ul aria-label="Located in the case">
       {#each shown.slice(0, 300) as row (keyOf(row))}
         {@const already = held.has(keyOf(row))}
-        <li><label class:already>
+        <li><label class:already data-guide="layer.link-row">
           <input type="checkbox" value={keyOf(row)} bind:group={checked} disabled={already} />
           <Icon name={ICONS[row.kind] ?? 'pin'} size={12} />
           <span class="title">{row.title || 'Untitled'}</span>
@@ -81,7 +82,7 @@
   {/if}
   <div class="actions">
     <button class="btn btn-sm" onclick={() => controller.closeLinking()}>Cancel</button>
-    <button class="btn btn-primary btn-sm" disabled={!checked.length || controller.pending > 0} onclick={add}>
+    <button class="btn btn-primary btn-sm" disabled={!checked.length || controller.pending > 0} data-guide="layer.link-add" onclick={add}>
       Add{checked.length ? ` ${checked.length}` : ''}</button>
   </div>
 </Modal>

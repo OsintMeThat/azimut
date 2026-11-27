@@ -53,7 +53,7 @@
 <FloatingMenu {anchor} {at} width={300} {align} role="dialog" label="Mark as posted" onclose={() => oncancel?.()}>
   <form class="mp" onsubmit={submit}>
     <label class="mp-label" for={fieldId}>Link to the post (optional)</label>
-    <input id={fieldId} class="input mp-field" class:invalid={!!error} bind:this={field} bind:value={text}
+    <input id={fieldId} class="input mp-field" class:invalid={!!error} bind:this={field} bind:value={text} data-guide="post.posted-link"
       oninput={() => (error = '')} placeholder="https://x.com/…" spellcheck="false" autocomplete="off"
       aria-invalid={!!error} aria-describedby={`${fieldId}-said`} />
     {#if error}
@@ -62,7 +62,7 @@
       <p class="mp-said" id={`${fieldId}-said`}>Keeps it with the proof and dates it.</p>
     {/if}
     <div class="mp-row">
-      <button type="submit" class="btn btn-primary btn-sm">{submitLabel}</button>
+      <button type="submit" class="btn btn-primary btn-sm" data-guide="post.posted-save">{submitLabel}</button>
       <button type="button" class="btn btn-ghost btn-sm" onclick={() => oncancel?.()}>Cancel</button>
     </div>
   </form>

@@ -14,7 +14,7 @@
   <button type="button" class:on={value !== PUBLIC} aria-pressed={value !== PUBLIC} title={LOOK_HELP.internal}
     onclick={() => onchange(INTERNAL)}>Internal</button>
   <button type="button" class:on={value === PUBLIC} aria-pressed={value === PUBLIC} title={LOOK_HELP.public}
-    onclick={() => onchange(PUBLIC)}>Public</button>
+    data-guide={tight ? 'notebook.page-public' : 'notebook.edition-public'} onclick={() => onchange(PUBLIC)}>Public</button>
 </div>
 
 <style>

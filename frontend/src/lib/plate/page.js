@@ -160,6 +160,9 @@ export const SYMBOL = Object.freeze({ symbol: 'badge-crosshair', size: 7 });
  * takes. `measure(line)` gives a line's width in millimetres when the face is known
  * (`textMeasurer`); without it, a fair guess from the letter count.
  */
+/** The space between lines of words on a plate, as a share of their size: sized and drawn alike. */
+export const LEADING = 1.25;
+
 export function labelBox(element, measure = null) {
   const lines = String(element.text || ' ').split('\n');
   const size = element.size ?? 9;
@@ -170,7 +173,7 @@ export function labelBox(element, measure = null) {
   }
   const longest = measure ? Math.max(...lines.map((line) => measure(line, element))) : Math.max(...lines.map((line) => line.length)) * size * 0.19;
   const width = Math.min(160, Math.max(8, longest + (framed ? 3 : 1)));
-  const height = Math.max(4, lines.length * size * MM_PER_PT * (element.leading ?? 1.2) + (framed ? 2 : 0.5));
+  const height = Math.max(4, lines.length * size * MM_PER_PT * (element.leading ?? LEADING) + (framed ? 2 : 0.5));
   return [element.box[0], element.box[1], round(width), round(height)];
 }
 

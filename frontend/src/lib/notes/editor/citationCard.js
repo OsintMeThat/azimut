@@ -388,6 +388,7 @@ class CardView {
     this.said = card.said;
     this.timer = 0;
     this.dom = el('div', 'cm-cite');
+    this.dom.dataset.guide = 'notebook.cite-card';
     this.dom.setAttribute('role', 'dialog');
     cards.set(this.dom, this);
     this.dom.addEventListener('mousedown', (event) => {

@@ -106,7 +106,7 @@
                 {/if}
                 {#if onlayer && entry}
                   <button type="button" class="mini" aria-label={`${row.title} on ${name(map)}`} title="Its look, what shows of it and its names, on this map"
-                    onclick={() => onlayer(map, row)}><Icon name="chevronRight" size={12} /></button>
+                    data-guide={isTracked(row) ? 'plate.layer-page' : undefined} onclick={() => onlayer(map, row)}><Icon name="chevronRight" size={12} /></button>
                 {/if}
               </div>
               {#if onlayer && entry}

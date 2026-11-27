@@ -250,11 +250,11 @@
     <button type="button" aria-label="Select an area" title="Select an area" aria-pressed={controller.lassoing} disabled={busy}
       onclick={() => (controller.lassoing ? controller.stop() : controller.lasso())}><Icon name="lasso" size={15} /></button>
     <span class="rule" aria-hidden="true"></span>
-    <button type="button" aria-label="Add markers" title="Add markers" aria-pressed={controller.placing} disabled={busy}
+    <button type="button" aria-label="Add markers" title="Add markers" data-guide="layer.markers" aria-pressed={controller.placing} disabled={busy}
       onclick={() => (controller.placing ? controller.stop() : controller.start())}><Icon name="pin" size={15} /></button>
-    <button type="button" aria-label="Draw line" title="Draw a line" aria-pressed={sketch?.type === 'LineString' && !sketch.key} disabled={busy}
+    <button type="button" aria-label="Draw line" title="Draw a line" data-guide="layer.line" aria-pressed={sketch?.type === 'LineString' && !sketch.key} disabled={busy}
       onclick={() => (sketch?.type === 'LineString' && !sketch.key ? controller.stop() : controller.startShape('LineString'))}><Icon name="line" size={15} /></button>
-    <button type="button" aria-label="Draw area" title="Draw an area" aria-pressed={sketch?.type === 'Polygon' && !sketch.key && !sketch.shape} disabled={busy}
+    <button type="button" aria-label="Draw area" title="Draw an area" data-guide="layer.area" aria-pressed={sketch?.type === 'Polygon' && !sketch.key && !sketch.shape} disabled={busy}
       onclick={() => (sketch?.type === 'Polygon' && !sketch.key && !sketch.shape ? controller.stop() : controller.startShape('Polygon'))}><Icon name="polygon" size={15} /></button>
     <button type="button" aria-label="Draw a circle" title="A circle: its centre, then its reach" aria-pressed={sketch?.shape === 'circle'} disabled={busy}
       onclick={() => (sketch?.shape === 'circle' ? controller.stop() : controller.startShape('Circle'))}><Icon name="circle" size={15} /></button>
@@ -262,7 +262,7 @@
       onclick={() => (sketch?.shape === 'rect' ? controller.stop() : controller.startShape('Rectangle'))}><Icon name="square" size={15} /></button>
     <button type="button" aria-label="Paste a position" title="Paste coordinates, a map link or a post" disabled={busy}
       onclick={() => controller.openPaste()}><Icon name="clipboard" size={15} /></button>
-    <button type="button" aria-label="Add from the case" title="Add places, proofs and files of the case" disabled={busy}
+    <button type="button" aria-label="Add from the case" title="Add places, proofs and files of the case" data-guide="layer.link" disabled={busy}
       onclick={() => controller.openLinking()}><Icon name="link" size={15} /></button>
     <span class="rule" aria-hidden="true"></span>
     <LayerSelectionStyle {controller} label="Style" disabled={busy || (!!sketch && sketch.type !== 'Selection')} onopen={(open) => (styling = open)} />

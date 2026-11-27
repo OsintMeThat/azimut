@@ -856,7 +856,8 @@
   }
 </script>
 
-<div class="plate-map" class:live={interactive} class:dim={element.hidden} bind:this={container}
+<!-- the map being framed, which the pictured guide frames as it moves (lib/guide.js) -->
+<div class="plate-map" class:live={interactive} class:dim={element.hidden} bind:this={container} data-guide={interactive ? 'plate.framing' : undefined}
   style:left="{element.box[0] * PX_PER_MM}px" style:top="{element.box[1] * PX_PER_MM}px"
   style:width="{width}px" style:height="{height}px" style:opacity={element.hidden ? 0.15 : element.opacity ?? 1}
   style:visibility={away ? 'hidden' : null}>

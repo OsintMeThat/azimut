@@ -125,7 +125,7 @@
         <button class="btn btn-primary grow" disabled={busy || !detail} onclick={onrun}>
           <Icon name="play" size={12} /> Run routine
         </button>
-        <button class="btn" disabled={busy || !detail} onclick={oncatchup} title="List the passes it missed and read them one run each">
+        <button class="btn" disabled={busy || !detail} onclick={oncatchup} title="List the passes it missed and read them one run each" data-guide="detect.catch-up">
           <Icon name="calendar" size={13} /> Catch up
         </button>
       {/if}
@@ -143,7 +143,7 @@
     <p class="empty">No finished pass yet. Run it on the newest pass, or catch up on the ones it missed: what it finds gathers here pass after pass.</p>
   {:else}
     <section class="glance" aria-label="What its passes found">
-      <button class="open" onclick={() => (dashboard = true)}>
+      <button class="open" data-guide="detect.glance" onclick={() => (dashboard = true)}>
         <span class="open-head">
           <span>Dashboard</span>
           <span class="open-go">Open <Icon name="maximize" size={12} /></span>
