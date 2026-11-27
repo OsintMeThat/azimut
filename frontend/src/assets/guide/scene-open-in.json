@@ -1,0 +1,12 @@
+{
+  "width": 1200,
+  "height": 760,
+  "anchors": {
+    "map.google-satellite": {
+      "x": 592,
+      "y": 528.8,
+      "w": 140,
+      "h": 27.3
+    }
+  }
+}

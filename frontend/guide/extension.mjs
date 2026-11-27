@@ -8,13 +8,13 @@
  * is a stand-in, a plain header where the site has its own, so the map's middle falls
  * where `engine/mapsites.py` expects it.
  *
- * The copy differs from what ships in three ways, all of them about being driven rather
- * than clicked: the site is granted to it up front, where a press on the toolbar button
- * grants it to the real one; its popup is opened in a tab, so it is told which tab is
- * the map; and the panel's shadow root is open, so the anchors inside it can be found.
+ * The copy differs from what ships in two ways, both about being driven rather than
+ * clicked: the site is granted to it up front, where a press on the toolbar button
+ * grants it to the real one, and the panel's shadow root is open, so the anchors inside
+ * it can be found.
  *
- * A stage gets the map tab. A popup does not show in a picture of a tab, so it is
- * photographed on its own and laid over the map where a browser drops it.
+ * A stage gets the map tab, and `tools()` does what a press on the toolbar button does
+ * there: the worker injects the map tools into the tab.
  */
 
 import { chromium } from '@playwright/test';
@@ -81,17 +81,6 @@ function driveableCopy(source, scratch) {
   const opened = readFileSync(overlay, 'utf8').replace('attachShadow({ mode: "closed" })', 'attachShadow({ mode: "open" })');
   if (!opened.includes('mode: "open"')) throw new Error('mapoverlay.js no longer attaches its shadow root as the guide expects');
   writeFileSync(overlay, opened);
-  writeFileSync(
-    join(copy, 'guide-tab.js'),
-    `const query = chrome.tabs.query.bind(chrome.tabs);\n` +
-      `chrome.tabs.query = (q) => (q && q.active && q.currentWindow ? query({ url: '${SITE}/*' }) : query(q));\n`
-  );
-  const popupPath = join(copy, 'popup.html');
-  const popup = readFileSync(popupPath, 'utf8').replace(
-    '<script type="module" src="popup.js">',
-    '<script src="guide-tab.js"></script>\n  <script type="module" src="popup.js">'
-  );
-  writeFileSync(popupPath, popup);
   return copy;
 }
 
@@ -105,6 +94,9 @@ export async function openExtension({ source, scratch, api, token, caseId, view,
     channel: 'chromium',
     headless: true,
     args: [`--disable-extensions-except=${path}`, `--load-extension=${path}`],
+    // in English whatever this machine's language, as in shots.mjs
+    env: { ...process.env, LANG: 'en_GB.UTF-8', LANGUAGE: 'en_GB', LC_ALL: 'en_GB.UTF-8' },
+    locale: 'en-GB',
     viewport: window,
     deviceScaleFactor: 2,
     colorScheme: 'dark',
@@ -112,7 +104,6 @@ export async function openExtension({ source, scratch, api, token, caseId, view,
   });
   await context.route(`${SITE}/**`, (route) => route.fulfill({ contentType: 'text/html', body: PAGE }));
   const [worker] = context.serviceWorkers().length ? context.serviceWorkers() : [await context.waitForEvent('serviceworker')];
-  const id = new URL(worker.url()).host;
   await worker.evaluate(
     (stored) => chrome.storage.local.set(stored),
     { backendUrl: api, token, lastCaseId: caseId, captureMarks: true }
@@ -130,6 +121,11 @@ export async function openExtension({ source, scratch, api, token, caseId, view,
     return { x: there.x - centre.x + window.width / 2, y: there.y - centre.y + HEADER + (window.height - HEADER) / 2 };
   };
 
+  // what a press on the toolbar button injects into a map site (background.js MAP_FILES)
+  const listed = /const MAP_FILES = \[([\s\S]*?)\];/.exec(readFileSync(join(path, 'background.js'), 'utf8'));
+  if (!listed) throw new Error('background.js no longer lists MAP_FILES as the guide expects');
+  const mapFiles = [...listed[1].matchAll(/"([^"]+)"/g)].map((one) => one[1]);
+
   return {
     map,
     at,
@@ -138,79 +134,53 @@ export async function openExtension({ source, scratch, api, token, caseId, view,
       await map.reload();
       await map.waitForFunction(() => [...document.images].every((img) => img.complete));
     },
-    /** The popup, opened as a pressed toolbar button opens it, settled on the map's reading. */
-    async popup() {
-      const page = await context.newPage();
-      await page.setViewportSize({ width: 340, height: 600 });
-      await page.goto(`chrome-extension://${id}/popup.html`);
-      await page.locator('#state-map').waitFor();
-      await page.waitForFunction(() => document.getElementById('lat').value && document.getElementById('case').value);
-      return page;
+    /** The tools over the map, as one press on the toolbar button opens them there. */
+    async tools() {
+      await worker.evaluate(
+        async ({ site, files }) => {
+          const [tab] = await chrome.tabs.query({ url: `${site}/*` });
+          await chrome.scripting.executeScript({ target: { tabId: tab.id }, files });
+        },
+        { site: SITE, files: mapFiles }
+      );
+      await map.locator('[data-guide="ext.capture"]').waitFor();
     },
     close: () => context.close(),
   };
 }
 
 /**
- * Lay `popup` over the map tab where a browser drops it, under the toolbar on the right,
- * and stand its anchors over it, so the map tab is photographed as one picture.
- */
-export async function layPopup(map, popup) {
-  const body = popup.locator('body');
-  const box = await body.boundingBox();
-  const png = await body.screenshot({ animations: 'disabled', caret: 'hide' });
-  const anchors = await popup.evaluate(() =>
-    [...document.querySelectorAll('[data-guide]')]
-      .map((el) => ({ name: el.dataset.guide, box: el.getBoundingClientRect() }))
-      .filter(({ box }) => box.width > 0 && box.height > 0)
-      .map(({ name, box }) => ({ name, x: box.x, y: box.y, w: box.width, h: box.height }))
-  );
-  await map.evaluate(
-    ({ src, width, height, anchors }) => {
-      const left = window.innerWidth - width - 16;
-      const top = 8;
-      const img = document.createElement('img');
-      img.id = 'guide-popup';
-      img.src = src;
-      Object.assign(img.style, {
-        position: 'fixed', left: `${left}px`, top: `${top}px`, width: `${width}px`, height: `${height}px`,
-        borderRadius: '8px', boxShadow: '0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.25)', zIndex: 10,
-      });
-      document.body.appendChild(img);
-      for (const one of anchors) {
-        const mark = document.createElement('div');
-        mark.dataset.guide = one.name;
-        Object.assign(mark.style, {
-          position: 'fixed', left: `${left + one.x}px`, top: `${top + one.y}px`, width: `${one.w}px`, height: `${one.h}px`,
-          pointerEvents: 'none', zIndex: 11,
-        });
-        document.body.appendChild(mark);
-      }
-      return img.decode();
-    },
-    { src: `data:image/png;base64,${png.toString('base64')}`, width: box.width, height: box.height, anchors }
-  );
-}
-
-/**
  * Stand the anchors drawn inside the panel's shadow root over it in the page itself,
- * where the shots measure them.
+ * where the shots measure them. Each stand-in follows its control frame by frame: the
+ * panel lays itself out again as the case and its scenes come in, and a box read once
+ * was left where the control had been.
  */
 export async function liftAnchors(map, names) {
-  const boxes = [];
-  for (const name of names) {
-    const box = await map.locator(`[data-guide="${name}"]`).first().boundingBox();
-    if (box) boxes.push({ name, ...box });
-  }
-  await map.evaluate((boxes) => {
-    for (const one of boxes) {
+  for (const name of names) await map.locator(`[data-guide="${name}"]`).first().waitFor();
+  await map.evaluate((names) => {
+    const inside = (name) => {
+      for (const host of document.querySelectorAll('*')) {
+        const found = host.shadowRoot?.querySelector(`[data-guide="${name}"]`);
+        if (found) return found;
+      }
+      return null;
+    };
+    const marks = names.map((name) => {
       const mark = document.createElement('div');
-      mark.dataset.guide = one.name;
-      Object.assign(mark.style, {
-        position: 'fixed', left: `${one.x}px`, top: `${one.y}px`, width: `${one.width}px`, height: `${one.height}px`,
-        pointerEvents: 'none',
-      });
+      mark.dataset.guide = name;
+      Object.assign(mark.style, { position: 'fixed', pointerEvents: 'none' });
       document.body.appendChild(mark);
-    }
-  }, boxes);
+      return { name, mark, control: inside(name) };
+    });
+    const follow = () => {
+      for (const one of marks) {
+        // a control drawn again is another element: found anew
+        if (!one.control?.isConnected) one.control = inside(one.name);
+        const box = one.control?.getBoundingClientRect();
+        if (box) Object.assign(one.mark.style, { left: `${box.x}px`, top: `${box.y}px`, width: `${box.width}px`, height: `${box.height}px` });
+      }
+      requestAnimationFrame(follow);
+    };
+    follow();
+  }, names);
 }

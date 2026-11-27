@@ -27,6 +27,10 @@ photo of the sample proof Settings › Templates shows a proof template on
 the same ground from above, cut from USGS The National Map orthoimagery (public
 domain) at zoom 15 around Glacier Point and Half Dome, 720 px wide.
 
+`bridge_channel.jpg` also ships in the app, which files it with its source in the
+guide's practice case, the photo a reader geolocates on their own before checking
+the answer (`src/lib/practiceCase.js`).
+
 A replacement keeps to the same rule: public domain or CC0, no face anyone
 could recognise, metadata stripped, and a line here.
 
@@ -34,7 +38,7 @@ could recognise, metadata stripped, and a line here.
 
 | Where it shows | What it is | Credit |
 |---|---|---|
-| Satellite, Compare, Detect, Horizon's ground, the proof's capture | USGS The National Map orthoimagery | Public domain |
+| Satellite, Compare, Detect, Horizon's ground, the proof's capture, the Map plate's imagery | USGS The National Map orthoimagery | Public domain |
 | Create your analyzer: the Al Udeid Air Base passes of 27 July and 30 September 2026 | Copernicus Sentinel-2, read through Sentinel Hub | Contains modified Copernicus Sentinel data 2026. Free and open under the Copernicus data policy |
 | The capture extension's pictures, the analyzer library's map | OpenStreetMap tiles | © OpenStreetMap contributors, ODbL |
 | Compare's map side | OpenTopoMap | Map data © OpenStreetMap contributors, SRTM; map style © OpenTopoMap (CC-BY-SA) |

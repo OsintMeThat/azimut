@@ -1,0 +1,18 @@
+{
+  "width": 1200,
+  "height": 760,
+  "anchors": {
+    "media.open-reverse": {
+      "x": 444.5,
+      "y": 484.3,
+      "w": 168,
+      "h": 33.2
+    },
+    "media.open-inspect": {
+      "x": 444.5,
+      "y": 451.2,
+      "w": 168,
+      "h": 33.2
+    }
+  }
+}

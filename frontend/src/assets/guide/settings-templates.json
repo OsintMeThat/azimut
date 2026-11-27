@@ -6,19 +6,19 @@
       "x": 186,
       "y": 34,
       "w": 604,
-      "h": 158.5
+      "h": 178.7
     },
     "settings.report-templates": {
       "x": 186,
-      "y": 192.5,
+      "y": 212.7,
       "w": 604,
-      "h": 158.5
+      "h": 192.3
     },
-    "settings.plate-templates": {
+    "settings.note-templates": {
       "x": 186,
-      "y": 351.1,
+      "y": 405,
       "w": 604,
-      "h": 157.1
+      "h": 259.3
     }
   }
 }

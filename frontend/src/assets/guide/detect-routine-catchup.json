@@ -1,0 +1,12 @@
+{
+  "width": 1536,
+  "height": 822,
+  "anchors": {
+    "detect.catch-read": {
+      "x": 1169,
+      "y": 737.3,
+      "w": 355,
+      "h": 31.2
+    }
+  }
+}

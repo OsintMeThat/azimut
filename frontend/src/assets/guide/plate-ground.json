@@ -1,0 +1,18 @@
+{
+  "width": 1036,
+  "height": 642,
+  "anchors": {
+    "plate.ground-wayback": {
+      "x": 842.7,
+      "y": 437.7,
+      "w": 87.7,
+      "h": 87.2
+    },
+    "plate.ground-grey": {
+      "x": 842.7,
+      "y": 77,
+      "w": 87.7,
+      "h": 75.2
+    }
+  }
+}

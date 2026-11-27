@@ -1,0 +1,12 @@
+{
+  "width": 1376,
+  "height": 782,
+  "anchors": {
+    "notebook.chart-fill": {
+      "x": 550.8,
+      "y": 599.8,
+      "w": 145.2,
+      "h": 26
+    }
+  }
+}

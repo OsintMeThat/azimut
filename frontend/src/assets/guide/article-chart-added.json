@@ -1,0 +1,12 @@
+{
+  "width": 1376,
+  "height": 782,
+  "anchors": {
+    "notebook.chart-source": {
+      "x": 75,
+      "y": 307.8,
+      "w": 621,
+      "h": 28
+    }
+  }
+}

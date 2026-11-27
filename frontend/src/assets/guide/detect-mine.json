@@ -1,5 +1,12 @@
 {
-  "width": 1089,
-  "height": 719,
-  "anchors": {}
+  "width": 1045,
+  "height": 689,
+  "anchors": {
+    "detect.new": {
+      "x": 665.6,
+      "y": 67,
+      "w": 379,
+      "h": 59
+    }
+  }
 }

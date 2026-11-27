@@ -1,12 +1,12 @@
 {
   "width": 620,
-  "height": 369,
+  "height": 409,
   "anchors": {
     "sat.capture-menu": {
-      "x": 275,
+      "x": 275.1,
       "y": 28,
       "w": 280,
-      "h": 273.3
+      "h": 314.1
     }
   }
 }

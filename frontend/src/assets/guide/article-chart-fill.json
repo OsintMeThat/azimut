@@ -1,0 +1,12 @@
+{
+  "width": 1376,
+  "height": 782,
+  "anchors": {
+    "notebook.fill-add": {
+      "x": 88,
+      "y": 421,
+      "w": 102,
+      "h": 28
+    }
+  }
+}
