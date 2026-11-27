@@ -3305,7 +3305,7 @@
         {#if replyTo}
           <!-- Beside the source rather than inside its field, so a layout leaving the
                source out never greys it. -->
-          <label class="reply-check" data-guide="post.reply"
+          <label class="reply-check"
             title={`The post goes out under the source post on ${replySite}, without the link to it`}>
             <input type="checkbox" checked={replyChosen} onchange={(event) => setReplying(event.currentTarget.checked)} />
             Post as a reply under the source

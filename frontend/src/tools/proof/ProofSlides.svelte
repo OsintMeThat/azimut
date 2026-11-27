@@ -369,7 +369,7 @@
 {/snippet}
 
 <div class="slides" class:line={mode !== 'strip'} class:compact={compact && mode === 'strip'} bind:clientWidth={width}
-  role="region" aria-label="Slides of the video" data-guide="proof.slides">
+  role="region" aria-label="Slides of the video">
   {#if mode === 'gone'}
     <span class="said"><Icon name="video" size={13} />The video of this proof is no longer in the case</span>
   {:else if mode === 'lone'}

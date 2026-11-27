@@ -291,7 +291,7 @@
 
 <NoteStyles {savePrefs} />
 
-<section class="group" data-guide="settings.proof-handle">
+<section class="group">
   <h3>On proofs</h3>
   <div class="row">
     <div class="row-label" title={HELP.handle}>

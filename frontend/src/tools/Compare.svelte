@@ -3253,7 +3253,7 @@
   {#if both && (mode !== 'side' || difference)}
     <div class="mode-footer">
       <!-- hugs its controls, so the guide frames them rather than the whole row -->
-      <div class="mix" data-guide="compare.mix">
+      <div class="mix">
         <ModeControl {mode} bind:divider bind:opacity bind:blinkB bind:blinkPaused bind:blinkInterval />
         {#if difference}
           <DifferenceBar bind:settings={changeOptions} bind:open={differenceOpen} status={changeStatus}

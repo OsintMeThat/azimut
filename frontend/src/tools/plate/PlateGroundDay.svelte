@@ -112,7 +112,7 @@
   {#if element.basemap === WAYBACK_ID}
     <div class="rows">
       <span class="key">Release</span>
-      <select aria-label="Wayback release" value={String(element.release ?? '')} onchange={(event) => setRelease(event.currentTarget.value)} data-guide="plate.wayback-release">
+      <select aria-label="Wayback release" value={String(element.release ?? '')} onchange={(event) => setRelease(event.currentTarget.value)}>
         <option value="">Newest</option>
         {#each releases as entry (entry.release)}<option value={String(entry.release)}>{entry.date}</option>{/each}
       </select>

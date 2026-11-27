@@ -481,7 +481,7 @@
     onpick={(id, row) => figuresOfNote(caseId, id ?? CASE_NOTES, row)} onclose={() => (figureNotesAnchor = null)} />
 {/if}
 
-<section class="group" data-guide="settings.plate-templates">
+<section class="group">
   <h3>Map plate templates</h3>
   <p class="note">
     A plate's layout, paper and colours without a case's ground or layers, shared as a file.

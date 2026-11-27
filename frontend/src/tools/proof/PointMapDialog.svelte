@@ -189,7 +189,7 @@
     </p>
   {/if}
   <div class="body">
-  <div class="stage" bind:this={stageEl} data-guide="point.map">
+  <div class="stage" bind:this={stageEl}>
     <MapSurface
       bind:engine
       bind:element

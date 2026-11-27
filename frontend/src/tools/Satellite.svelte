@@ -2920,7 +2920,7 @@
 
       <!-- What the window does with the tool, beside the imagery it shows. -->
       {#snippet beside()}
-        <div class="window-ctl" data-guide="sat.window">
+        <div class="window-ctl">
           <button
             class="btn btn-icon"
             class:on={linked}

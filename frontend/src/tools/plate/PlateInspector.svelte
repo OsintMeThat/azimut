@@ -140,7 +140,7 @@
   /** Whether the steps to a Copernicus account are shown under the locked Sentinel-2 ground. */
   let copernicusShown = $state(false);
   /** The grounds the pictured guide frames on their own (lib/guide.js). */
-  const GROUND_GUIDES = { [WAYBACK_ID]: 'plate.ground-wayback', 'plain-grey': 'plate.ground-grey' };
+  const GROUND_GUIDES = { 'plain-grey': 'plate.ground-grey' };
   /** The words of the ready plates' source lines and figure, which the guide frames apart from a title's (lib/guide.js). */
   const TEXT_GUIDES = { source: 'plate.source-text', cartouche: 'plate.cartouche-text', figure: 'plate.figure-text' };
   const name = (map) => mapName(spec, map);

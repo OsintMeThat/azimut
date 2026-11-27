@@ -51,7 +51,7 @@
   } = $props();
 
   /** The acts the pictured guide frames on their own (lib/guide.js). */
-  const MENU_GUIDES = { horizon: 'map.look', measure: 'map.measure-from', lead: 'map.drop-lead' };
+  const MENU_GUIDES = { horizon: 'map.look', lead: 'map.drop-lead' };
 
   let menuEl = $state();
   let subEl = $state();

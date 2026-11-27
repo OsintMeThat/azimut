@@ -209,7 +209,7 @@
 {/snippet}
 
 {#if open.length || left.length}
-  <section class="geo" aria-label="To geolocate" data-guide="todo.geolocate">
+  <section class="geo" aria-label="To geolocate">
     {#if open.length}
       <h4>To geolocate <span class="count">{total}</span></h4>
       {#each shown as file (file.video)}

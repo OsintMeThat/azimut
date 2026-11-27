@@ -296,7 +296,7 @@
   </div>
 </section>
 
-<section class="group" data-guide="settings.free-imagery">
+<section class="group">
   <h3>Free imagery</h3>
   <p class="intro">No key needed. What each lets a picture of it be used for:</p>
   <ul class="terms">

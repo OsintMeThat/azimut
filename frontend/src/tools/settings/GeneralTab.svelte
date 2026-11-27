@@ -187,7 +187,7 @@
   </div>
 </section>
 
-<section class="group" data-guide="settings.support">
+<section class="group">
   <h3>Support</h3>
   <div class="row">
     <div class="row-label">

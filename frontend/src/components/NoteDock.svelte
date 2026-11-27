@@ -173,7 +173,7 @@
       <div class="spacer"></div>
       <ViewModes {page} inPlace onchange={setPage} />
       <button type="button" class="btn btn-ghost btn-sm add" title="Put what is on screen in this note, or cite a source" aria-haspopup="menu"
-        aria-label="Add" aria-expanded={Boolean(adding)} data-guide="notes.add" onclick={(event) => openAdding(event.currentTarget)}>
+        aria-label="Add" aria-expanded={Boolean(adding)} onclick={(event) => openAdding(event.currentTarget)}>
         <Icon name="plus" size={14} /><span>Add</span></button>
       <button type="button" class="btn btn-ghost btn-sm" title="Open in the Notebook" aria-label="Open in the Notebook" onclick={inNotebook}>
         <Icon name="maximize" size={14} /></button>
