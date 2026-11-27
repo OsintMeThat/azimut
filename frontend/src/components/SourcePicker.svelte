@@ -23,7 +23,8 @@
   // "change file" dialog of both Inspect and Reverse Search, so none of them drift.
   // A tool that reads only some kinds narrows the filters (`filters`), and a
   // dialog that is one step of a larger task takes a denser grid (`dense`).
-  let { media, works = [], caseId, current = null, onpick, filters = FILTERS, dense = false } = $props();
+  /** `guide`: the `data-guide` anchor the guide's pictures frame the list by. */
+  let { media, works = [], caseId, current = null, onpick, filters = FILTERS, dense = false, guide = undefined } = $props();
 
   let query = $state('');
   let filter = $state('all');
@@ -43,6 +44,8 @@
   );
   const recentPaths = $derived(new Set(recent.map((m) => m.path)));
   const rest = $derived(shown.filter((m) => !recentPaths.has(m.path)));
+  /** The card a guide's picture frames once a name is searched: the first one shown. */
+  const firstPath = $derived((recent[0] ?? rest[0])?.path ?? null);
   const browserEntries = $derived(filtered.map((m) => ({ ...m, id: m.path, attrs: { folder: m.folder ?? '' } })));
 
   function frameCount(m) {
@@ -63,11 +66,11 @@
   }
 </script>
 
-<div class="picker">
+<div class="picker" data-guide={guide}>
   {#if media.length === 0}
     <p class="hint">Add an image or a video to the case first.</p>
   {:else}
-    <div class="bar">
+    <div class="bar" data-guide={guide ? 'picker.search' : undefined}>
       <SearchInput bind:value={query} placeholder="Search names…" width="100%" />
       <button class="btn btn-ghost btn-sm browse" class:active={browsing} title="Browse folders" onclick={() => (browsing = !browsing)}>…</button>
     </div>
@@ -98,7 +101,13 @@
       </div>
     {:else}
       {#snippet card(m)}
-        <button class="card" class:current={m.path === current} onclick={() => onpick(m)} title={m.title || m.filename}>
+        <button
+          class="card"
+          class:current={m.path === current}
+          onclick={() => onpick(m)}
+          title={m.title || m.filename}
+          data-guide={guide && m.path === firstPath ? 'picker.first' : undefined}
+        >
           <span class="thumb">
             {#if m.thumbnail}
               <img src={fileUrl(caseId, m.thumbnail)} alt="" loading="lazy" />

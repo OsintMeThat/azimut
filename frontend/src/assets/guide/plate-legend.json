@@ -1,0 +1,12 @@
+{
+  "width": 1036,
+  "height": 642,
+  "anchors": {
+    "plate.legend-name": {
+      "x": 761,
+      "y": 334.7,
+      "w": 194,
+      "h": 26
+    }
+  }
+}

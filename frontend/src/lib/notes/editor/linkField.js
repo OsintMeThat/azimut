@@ -291,6 +291,7 @@ export function linkField(view, target, act) {
 
   const newCard = ({ url, title }) => {
     const link = button('', 'Link', { title: 'A plain link to the address', primary: true });
+    link.dataset.guide = 'notebook.link-go';
     link.addEventListener('click', () => act({ link: url, title }));
     primary = () => link.click();
     const actions = el('div', 'cm-link-actions', link);

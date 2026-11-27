@@ -1,0 +1,24 @@
+{
+  "width": 1140,
+  "height": 752,
+  "anchors": {
+    "plate.export-formats": {
+      "x": 359,
+      "y": 232.3,
+      "w": 422,
+      "h": 288.4
+    },
+    "plate.export-quality": {
+      "x": 447,
+      "y": 566.7,
+      "w": 334,
+      "h": 28.5
+    },
+    "plate.export-go": {
+      "x": 714,
+      "y": 674.2,
+      "w": 67,
+      "h": 31.2
+    }
+  }
+}

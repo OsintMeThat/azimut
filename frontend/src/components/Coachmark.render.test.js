@@ -1,7 +1,13 @@
 // @vitest-environment happy-dom
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Coachmark, { placeUnder } from './Coachmark.svelte';
+
+// happy-dom's URL will not name a file, so the path is built the node way
+const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'Coachmark.svelte'), 'utf8');
 
 /**
  * A word pointed at one control for a moment: under it, its arrow on the control's
@@ -30,6 +36,7 @@ function show(props = {}) {
 beforeEach(() => {
   rect = { left: 1450, top: 8, width: 28, height: 28, right: 1478, bottom: 36 };
   window.innerWidth = 1500;
+  window.innerHeight = 800;
   onaction.mockClear();
   onclose.mockClear();
 });
@@ -66,6 +73,19 @@ describe('where it sits', () => {
 
   it('holds the window’s margin in a window narrower than itself', () => {
     expect(placeUnder({ left: 100, width: 20, bottom: 30 }, 400, { left: 0, right: 300 }).left).toBe(8);
+  });
+
+  it('goes over a control with no room under it', () => {
+    const room = { ...WINDOW, bottom: 800 };
+    expect(placeUnder({ left: 600, width: 40, top: 760, bottom: 790 }, 200, room, 30)).toEqual({ left: 520, top: 720, arrow: 100, above: true });
+    // under it still while it fits there
+    expect(placeUnder({ left: 600, width: 40, top: 700, bottom: 730 }, 200, room, 30)).toEqual({ left: 520, top: 740, arrow: 100 });
+  });
+
+  it('stays on screen beside a control as tall as the window', () => {
+    const place = placeUnder({ left: 0, width: 64, top: 0, bottom: 800 }, 200, { ...WINDOW, bottom: 800 }, 30);
+    expect(place.top).toBe(762);
+    expect(place.above).toBeUndefined();
   });
 });
 
@@ -140,5 +160,76 @@ describe('the coachmark', () => {
     window.dispatchEvent(new Event('resize'));
     await new Promise((resolve) => setTimeout(resolve, 40));
     expect(onclose).toHaveBeenCalled();
+  });
+
+  it('follows the control when a panel scrolls it along', async () => {
+    const bubble = show();
+    const before = bubble.style.left;
+    const panel = document.createElement('div');
+    document.body.append(panel);
+    rect = { ...rect, left: 1150, right: 1178 };
+    // a scroll does not bubble: heard all the same
+    panel.dispatchEvent(new Event('scroll'));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    flushSync();
+    expect(bubble.style.left).not.toBe(before);
+    panel.remove();
+  });
+
+  it('goes over a control at the foot of the window, its arrow turned down', () => {
+    window.innerHeight = 800;
+    rect = { left: 600, top: 770, width: 40, height: 24, right: 640, bottom: 794 };
+    expect(show().classList.contains('above')).toBe(true);
+  });
+});
+
+describe('the ring', () => {
+  const ringOf = () => document.querySelector('.ring');
+
+  it('is drawn only when asked, so a plain coachmark stays a word and an arrow', () => {
+    show();
+    expect(ringOf()).toBeNull();
+  });
+
+  it('closes round the control a little off its edge, unheard by screen readers', () => {
+    rect = { left: 400, top: 200, width: 80, height: 28, right: 480, bottom: 228 };
+    show({ ring: true, action: '' });
+    const ring = ringOf();
+    expect([ring.style.left, ring.style.top, ring.style.width, ring.style.height]).toEqual(['395px', '195px', '90px', '38px']);
+    expect(ring.getAttribute('aria-hidden')).toBe('true');
+  });
+
+  it('points the bubble at the ring rather than into it', () => {
+    rect = { left: 400, top: 200, width: 80, height: 28, right: 480, bottom: 228 };
+    const bubble = show({ ring: true });
+    // the control's foot, the ring's room round it, then the bubble's gap
+    expect(bubble.style.top).toBe('243px');
+  });
+
+  it('leaves the control under it pressable: a press there reaches it and takes the pointer down', () => {
+    const pressed = vi.fn();
+    show({ ring: true });
+    anchor.addEventListener('pointerdown', pressed);
+    anchor.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    expect(pressed).toHaveBeenCalled();
+    expect(onclose).toHaveBeenCalled();
+  });
+
+  it('moves with the control', async () => {
+    rect = { left: 400, top: 200, width: 80, height: 28, right: 480, bottom: 228 };
+    show({ ring: true });
+    rect = { ...rect, top: 120, bottom: 148 };
+    document.body.dispatchEvent(new Event('scroll'));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    flushSync();
+    expect(ringOf().style.top).toBe('115px');
+  });
+
+  it('takes no press, and drops its echo for a reader who asked for less motion', () => {
+    const css = source.slice(source.indexOf('<style>'));
+    const rule = css.slice(css.indexOf('.ring {'), css.indexOf('}', css.indexOf('.ring {')));
+    expect(rule).toContain('pointer-events: none');
+    const calm = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+    expect(calm).toContain('.ring::after');
   });
 });

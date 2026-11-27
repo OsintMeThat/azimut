@@ -96,7 +96,8 @@
       </dl>
       <p class="quiet">{WORDPRESS_FREE}</p>
       <p class="quiet">{WORDPRESS_COM}</p>
-      <button type="button" class="btn btn-sm" title="Open Settings on Website, where the site is set" onclick={openSettings}>
+      <button type="button" class="btn btn-sm" title="Open Settings on Website, where the site is set" data-guide="notebook.website-open"
+        onclick={openSettings}>
         Open Settings › Website</button>
     </div>
   {:else}

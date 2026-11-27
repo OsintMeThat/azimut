@@ -242,7 +242,7 @@ export function updatedSaid(when) {
 export function flowSteps({ repository = '', host = '' } = {}) {
   return [
     ['Write', 'A note in the Notebook, with its pictures, maps and sources.'],
-    ['Publish', 'Notebook › Publish › GitHub Pages, as an article, a page or unlisted.'],
+    ['Publish', 'Export › Web folder › Publish to GitHub Pages, as an article, a page or unlisted.'],
     ['GitHub keeps it', `One folder per note in ${repository || 'your repository'}.`],
     ['Readers find it', `On ${host || 'your site'}, in its lists, its feed and search engines.`],
   ];

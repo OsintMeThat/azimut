@@ -1,0 +1,24 @@
+{
+  "width": 1137,
+  "height": 750,
+  "anchors": {
+    "plate.ask-geolocation": {
+      "x": 281.7,
+      "y": 134.7,
+      "w": 96,
+      "h": 25.3
+    },
+    "plate.ask-change": {
+      "x": 240.6,
+      "y": 105.5,
+      "w": 177.9,
+      "h": 25.3
+    },
+    "plate.ask-situation": {
+      "x": 156.8,
+      "y": 105.5,
+      "w": 79.8,
+      "h": 25.3
+    }
+  }
+}

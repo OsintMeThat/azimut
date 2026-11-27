@@ -190,7 +190,7 @@ proof for publication.
 | ✅ **Detect routines over time** | Reads a routine's passes as a dashboard of counts, spots that stay, come and go, judged a spot at a time, put in a note as editable charts or out as CSV, and catches it up on the passes it missed. |
 | ✅ **Copernicus layers & figures** | Writes composite, index and script layers offered in every map, reads one as a Detect rule, and lays several renderings of a pass out as a captioned figure. |
 | ✅ **Capture extension** | Adds case map tools to third-party maps, hands media to publishing and reverse search sites, and supports extension updates. |
-| ✅ **Home, guide & onboarding** | Opens recent work and task lists from Home, pictures every tool in the `?` guide with three walked journeys, tours a newcomer and opens each version on its What's new. |
+| ✅ **Home, guide & onboarding** | Opens recent work and task lists from Home, pictures every tool in the `?` guide, plays its journeys over the real screens with a practice case, tours a newcomer and opens each version on its What's new. |
 | ✅ **Support & feedback** | Offers a tip, a form and a problem report from one top-bar button, Tip, each hidden until its link exists and opened only on a press. |
 | ✅ **Inspect & Collage** | Autosaves work per file, captures the frame on screen with frames, marks and sound along the bar, arranges frames into collages straightened by a level line, and searches a zone drawn over a picture or a frame on the reverse-search engines. |
 | ✅ **Panorama from a pan** | Plays the video in a rail under the Collage canvas, picks a pan's frames between A and B, stitches them with seams halfway between frames, and trims the empty edges. |
@@ -350,6 +350,7 @@ stops making sense.
 - **Free band formulas in Detect:** a rule read on an expression the analyst writes. A normalised difference and a single band already work, including from a layer they wrote, so what is left is the general case — an arbitrary expression needs its own product family, a generated evalscript and thresholds calibrated on real scenes.
 - **A deleted case waits before it is gone:** artifacts, entities and bulk deletes are all recoverable, while removing a case is the one act with no way back and only a typed DELETE in front of it. Move the folder aside instead, and empty it later.
 - **A fire detection to click:** the points the app already draws close in, read back under the pointer for the detection's time, satellite, confidence and power.
+- **More guide journeys:** date a picture, check someone else's geolocation; more short films in place of pictures (Compare's blink between two dates).
 - **A live public map:** a layer published as GeoJSON at a public address (a Gist) that a uMap remote-data layer reads, so one press updates a map others follow.
 - **Dated layers by side in Compare:** a GeoConfirmed or other dated layer showing on each side only what was known by that side's date.
 - **Find, narrower still:** near a road or a track (OpenFreeMap's transportation layer, a line decoder and a tile cap per area), turns kept between searches of one area, a mirrored place shown flipped in Overlay, and the lens searched for a collage laid wholly by hand.

@@ -1,0 +1,18 @@
+{
+  "width": 978,
+  "height": 360,
+  "anchors": {
+    "settings.hub-hosting": {
+      "x": 158.2,
+      "y": 202.5,
+      "w": 61.1,
+      "h": 40.2
+    },
+    "settings.hub-wordpress": {
+      "x": 587.4,
+      "y": 202.5,
+      "w": 78.5,
+      "h": 40.2
+    }
+  }
+}

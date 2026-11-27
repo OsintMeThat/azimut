@@ -55,6 +55,8 @@
 
   /** The ready plate a comparison can be set on. */
   const PAIRED = 'before-after';
+  /** The chips the pictured guide frames on their own (lib/guide.js). */
+  const ASK_GUIDES = { situation: 'plate.ask-situation', change: 'plate.ask-change', geolocation: 'plate.ask-geolocation' };
   /** What the house layout answers: a situation as of the plate's day, played day by day on a dated layer. */
   const HOUSE_ASKS = ['situation', 'evolution'];
   const house = houseLayout();
@@ -106,12 +108,12 @@
       <h4>Layout</h4>
       <div class="asks" role="group" aria-label="What the plate shows">
         {#each [['all', 'All'], ...ASKS] as [id, words] (id)}
-          <button type="button" class="ask" aria-pressed={ask === id} onclick={() => choose(id)}>{words}</button>
+          <button type="button" class="ask" aria-pressed={ask === id} data-guide={ASK_GUIDES[id]} onclick={() => choose(id)}>{words}</button>
         {/each}
       </div>
       <div class="gallery" role="listbox" aria-label="Layout">
         {#if houseShown}
-          <button type="button" class="tile" role="option" aria-selected={from.kind === 'house'} onclick={() => pick('house')} ondblclick={make}>
+          <button type="button" class="tile" role="option" aria-selected={from.kind === 'house'} data-guide="plate.layout-house" onclick={() => pick('house')} ondblclick={make}>
             <TemplateSketch data={house} width={180} /><span class="name">House layout</span><span class="note">The map, a key, a locator and the title.</span></button>
         {/if}
         {#each shown as entry (entry.id)}
@@ -142,7 +144,7 @@
         <p class="note">A blank page has no map yet. The first one added looks where the Map is looking, with its layers.</p>
       {:else}
         {#if paired && pairs?.length}
-          <label class="from-pair"><span>From a comparison</span>
+          <label class="from-pair" data-guide="plate.from-pair"><span>From a comparison</span>
             <select aria-label="From a comparison" value={pair} onchange={(event) => (pair = event.currentTarget.value)}>
               <option value="">None</option>
               {#each pairs as row (row.session)}<option value={row.session}>{row.title || row.session}</option>{/each}
@@ -159,7 +161,8 @@
         {#if rows.length}
           <ul class="layers" aria-label="Layers drawn">
             {#each rows as row (row.name)}
-              <li><label><input type="checkbox" checked={layers.includes(row.name)} onchange={() => toggle(row.name)} />
+              <!-- the guide frames the first layer not ticked yet, the one its reader ticks (lib/guide.js) -->
+              <li><label data-guide={layers.includes(row.name) ? undefined : 'plate.map-layer'}><input type="checkbox" checked={layers.includes(row.name)} onchange={() => toggle(row.name)} />
                 <span class="layer">{row.title}</span>{#if isTracked(row)}<Icon name="clock" size={11} />{/if}</label></li>
             {/each}
           </ul>
@@ -169,7 +172,7 @@
       {/if}
 
       <h4>Paper</h4>
-      <div class="formats" role="group" aria-label="Paper">
+      <div class="formats" role="group" aria-label="Paper" data-guide="plate.paper">
         <button type="button" aria-pressed={format === ''} onclick={() => (format = '')}>{['house', 'empty'].includes(from.kind) ? 'A4, wide' : 'As laid out'}</button>
         {#each FORMATS as [id, label] (id)}
           <button type="button" aria-pressed={format === id} onclick={() => (format = id)}>{label}</button>
@@ -178,7 +181,7 @@
 
       <h4>Look</h4>
       <div class="looks" role="group" aria-label="Look">
-        <button type="button" class="look" aria-pressed={look === ''} onclick={() => (look = '')}><span class="own">Aa</span><span>Its own</span></button>
+        <button type="button" class="look" aria-pressed={look === ''} data-guide="plate.look" onclick={() => (look = '')}><span class="own">Aa</span><span>Its own</span></button>
         {#each Object.entries(THEMES) as [id, preset] (id)}
           <button type="button" class="look" aria-pressed={look === id} onclick={() => (look = id)}>
             <span class="sample" style:background={preset.theme.paper} style:color={preset.theme.ink}>
@@ -192,7 +195,7 @@
   <div class="foot">
     <span class="said">All of it can be changed on the plate later.</span>
     <button type="button" class="btn" onclick={onclose}>Cancel</button>
-    <button type="button" class="btn btn-primary" onclick={make}><Icon name="plus" size={14} /> Create plate</button>
+    <button type="button" class="btn btn-primary" data-guide="plate.create" onclick={make}><Icon name="plus" size={14} /> Create plate</button>
   </div>
 </Modal>
 

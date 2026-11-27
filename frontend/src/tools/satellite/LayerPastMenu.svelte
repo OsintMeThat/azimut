@@ -31,7 +31,7 @@
 </script>
 
 <!-- a menu nobody finds sets nothing -->
-<button type="button" class="past" class:set={time?.trail !== false || !!time?.since} aria-label="What the map shows of the past"
+<button type="button" class="past" class:set={time?.trail !== false || !!time?.since} aria-label="What the map shows of the past" data-guide="layer.past"
   title="Sets how the past shows: the state before, gains and losses, how long events stay"
   aria-expanded={menu} bind:this={menuAnchor} onclick={() => (menu = !menu)}>
   <span>{pastSaid}</span><Icon name="chevronDown" size={10} /></button>
@@ -45,7 +45,7 @@
     <p class="fm-label">Hatch an area's gains and losses</p>
     <button type="button" class="fm-item" role="menuitemradio" aria-checked={!time?.since} onclick={() => set({ since: null })}>
       {#if !time?.since}<Icon name="check" size={14} />{:else}<span class="tick-room"></span>{/if}<span class="fm-grow">Off</span></button>
-    <button type="button" class="fm-item" role="menuitemradio" aria-checked={time?.since === 'previous'} onclick={() => set({ since: 'previous' })}>
+    <button type="button" class="fm-item" role="menuitemradio" aria-checked={time?.since === 'previous'} data-guide="layer.past-since" onclick={() => set({ since: 'previous' })}>
       {#if time?.since === 'previous'}<Icon name="check" size={14} />{:else}<span class="tick-room"></span>{/if}<span class="fm-grow">Since the state before</span></button>
     <button type="button" class="fm-item" role="menuitemradio" aria-checked={!!time?.since && time.since !== 'previous'}
       onclick={() => (sincePicking = !sincePicking)}>

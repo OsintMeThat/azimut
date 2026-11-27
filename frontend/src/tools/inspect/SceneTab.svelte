@@ -275,6 +275,7 @@
       <button
         class="btn btn-xs locate"
         class:on={sc.geolocating}
+        data-guide="scene.geolocate"
         aria-pressed={!!sc.geolocating}
         onclick={() => ongeolocate?.(sc)}
         title={sc.geolocating ? INSPECT_HELP.sceneStopGeolocating : picture ? INSPECT_HELP.pictureGeolocate : INSPECT_HELP.sceneGeolocate}
@@ -338,11 +339,11 @@
   </button>
 {/snippet}
 
-<div class="scenes" bind:this={node} data-scene-panel>
+<div class="scenes" bind:this={node} data-scene-panel data-guide="inspect.scenes">
   {#if picture}
     {#if !scenes.length}
       <div class="mark-picture">
-        <button class="btn mark" onclick={() => onmark?.()} title={INSPECT_HELP.markPicture}>
+        <button class="btn mark" onclick={() => onmark?.()} title={INSPECT_HELP.markPicture} data-guide="inspect.scene">
           <Icon name="pin" size={14} /> Mark to geolocate
         </button>
         <p class="note">It waits in the To-do until a proof lays it out.</p>

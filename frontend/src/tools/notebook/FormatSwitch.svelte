@@ -9,6 +9,9 @@
 
   let { value = PDF, tight = false, page = false, review = false, onchange = () => {} } = $props();
 
+  // what the guide's pictures frame (`lib/guide.js`)
+  const GUIDES = { [PDF]: 'notebook.format-pdf', [WEB]: 'notebook.format-web', [WORDPRESS]: 'notebook.format-wordpress' };
+  const PAGE_GUIDES = { [HTML]: 'notebook.page-html' };
   const offered = $derived(page ? PAGE_FORMATS : review ? [...FORMATS, REVIEW] : FORMATS);
   const shown = $derived(offered.includes(value) ? value : PDF);
   const labels = $derived(page ? PAGE_LABELS : FORMAT_LABELS);
@@ -24,7 +27,7 @@
 <div class="formats" class:tight role="group" aria-label="Format">
   {#each offered as format (format)}
     <button type="button" class:on={shown === format} aria-pressed={shown === format} title={titles[format]}
-      onclick={() => onchange(format)}>{labels[format]}</button>
+      data-guide={(page ? PAGE_GUIDES : GUIDES)[format]} onclick={() => onchange(format)}>{labels[format]}</button>
   {/each}
 </div>
 

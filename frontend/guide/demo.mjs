@@ -31,13 +31,14 @@ export const IMAGERY = {
 
 /**
  * Where the story happens. The maps open on the channel between the bridge and the
- * terminal; the camera stood on the west bank, south of them, and looked north through
- * a long lens: the cruise gangway below it, the YM Success mid-channel, the Evergreen
- * cranes in front of the bridge's east tower, the west tower out of frame.
+ * terminal; the camera stood high on the west bank, south-west of them, at the edge of
+ * town, and looked north-east through a long lens: the cruise terminal's car park below
+ * it, the YM Success mid-channel, the Evergreen cranes in front of the bridge's east
+ * tower, the west tower out of frame. `TERMINAL` is the crane on that line.
  */
 export const CHANNEL = { lat: 33.7455, lon: -118.274 };
-export const CAMERA = { lat: 33.7398, lon: -118.2782 };
-export const TERMINAL = { lat: 33.7474, lon: -118.2706 };
+export const CAMERA = { lat: 33.74168, lon: -118.27946 };
+export const TERMINAL = { lat: 33.7477, lon: -118.27093 };
 export const BRIDGE = { lat: 33.7497, lon: -118.2716 };
 export const GLACIER_POINT = { lat: 37.7307, lon: -119.5737 };
 const ZONE = 'America/Los_Angeles';

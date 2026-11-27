@@ -375,7 +375,8 @@ export function noteDecorations(state) {
         for (let number = firstLine.number; number <= lastNumber; number += 1) {
           const line = state.doc.line(number);
           ranges.push(lineClass(callout ? `cm-callout cm-callout-${callout.kind}` : 'cm-quote',
-            callout ? { style: `--callout: ${callout.colour}` } : undefined).range(line.from));
+            callout ? { style: `--callout: ${callout.colour}`, ...(callout.kind === 'unverified' ? { 'data-guide': 'notebook.unverified' } : {}) }
+              : undefined).range(line.from));
           if (quoted.has(number)) continue;
           quoted.add(number);
           const mark = /^(?:[ \t]*>[ \t]?)+/.exec(line.text);

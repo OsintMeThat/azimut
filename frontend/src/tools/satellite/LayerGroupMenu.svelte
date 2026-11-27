@@ -40,18 +40,19 @@
 
 <FloatingMenu {anchor} align="end" width={250} role="group" label={`Settings of group ${group.name}`} {onclose}>
   <label class="field" title={HELP.groupName}><span>Name</span>
-    <input aria-label="Group name" value={group.name} maxlength="200"
+    <input aria-label="Group name" data-guide="layer.group-name" value={group.name} maxlength="200"
       onchange={(event) => controller.updateGroup(group.id, { name: event.currentTarget.value })}
       onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} /></label>
   <div class="modes" role="group" aria-label={`How ${group.name} is styled`}>
     {#each MODES as [value, label, said] (value)}
       <button type="button" class="pill" aria-pressed={(group.mode ?? 'individual') === value} title={said} disabled={busy}
+        data-guide={value === 'uniform' ? 'layer.group-style' : undefined}
         onclick={() => controller.updateGroup(group.id, { mode: value })}>{label}</button>
     {/each}
   </div>
   {#if group.mode === 'uniform'}
     <div class="field" title={HELP.groupStyle}><span>Style</span>
-      <LayerStyleButton label="Group style" symbol={group.symbol} colour={group.colour} icon={group.icon ?? ''} {used} {wears}
+      <LayerStyleButton label="Group style" guide="layer.group-look" symbol={group.symbol} colour={group.colour} icon={group.icon ?? ''} {used} {wears}
         caseId={controller.editor?.caseId ?? null} layer={controller.editor?.name ?? null} meta={controller.icons}
         disabled={busy} onpick={(changes) => controller.updateGroup(group.id, changes)} /></div>
   {:else if group.mode === 'colour'}
@@ -59,7 +60,7 @@
       <LayerStyleButton label="Group colour" colour={group.colour} point={false} used={worn}
         caseId={controller.editor?.caseId ?? null} disabled={busy} title="Colour" onpick={({ colour }) => colour && controller.updateGroup(group.id, { colour })} /></div>
   {/if}
-  <label class="switch" title={HELP.labels}><input type="checkbox" aria-label={`Names on the map for ${group.name}`} checked={!!group.labels} disabled={busy}
+  <label class="switch" title={HELP.labels} data-guide="layer.group-names"><input type="checkbox" aria-label={`Names on the map for ${group.name}`} checked={!!group.labels} disabled={busy}
     onchange={(event) => controller.updateGroup(group.id, { labels: event.currentTarget.checked })} /> Names on the map</label>
   {#if controller.editor?.track?.on}
     <!-- a strike fades after its day where a position stays: what the layer's cursor reads -->

@@ -45,6 +45,8 @@
   import { destinationLabel, readDestinations } from '../lib/exportDest.js';
 
   const KIND_ICONS = { image: 'image', satellite: 'satellite', video: 'video', audio: 'audio', file: 'file' };
+  /** The Open in… rows the pictured guide frames on their own (lib/guide.js). */
+  const OPEN_IN_GUIDES = { inspect: 'media.open-inspect', reverse: 'media.open-reverse' };
 
   // Bounded loading: a case that fits one page (the common case, incl. a 3–4
   // file case) is filtered/sorted entirely client-side below; a large case
@@ -966,7 +968,7 @@
       class="btn btn-ghost btn-sm"
       class:active={openIn?.item.path === item.path}
       title="Open in…"
-      data-guide="media.open-in"
+      data-guide={item.kind === 'video' ? 'media.open-in-video' : 'media.open-in'}
       aria-haspopup="menu"
       aria-expanded={openIn?.item.path === item.path}
       onclick={(event) => toggleOpenIn(event, item)}
@@ -1508,7 +1510,7 @@
     style:bottom={openIn.bottom == null ? null : `${openIn.bottom}px`}
   >
     {#each openInOptions(fileOf(openIn.item)) as option (option.id)}
-      <button class="upkeep-option" role="menuitem" onclick={() => runOpenIn(option)}>
+      <button class="upkeep-option" role="menuitem" data-guide={OPEN_IN_GUIDES[option.id]} onclick={() => runOpenIn(option)}>
         <Icon name={option.icon} size={14} />
         <span>{TOOL_LABELS[option.id]}</span>
       </button>
@@ -1518,6 +1520,7 @@
       <button
         class="upkeep-option mark-row"
         role="menuitem"
+        data-guide="media.mark"
         title={marked ? 'Show it in the To-do' : 'Adds it to the To-do, to find where it was taken'}
         onclick={() => {
           const item = openIn.item;

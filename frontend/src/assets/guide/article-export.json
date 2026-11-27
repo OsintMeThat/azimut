@@ -1,0 +1,24 @@
+{
+  "width": 662,
+  "height": 437,
+  "anchors": {
+    "notebook.edition-public": {
+      "x": 183.8,
+      "y": 192.9,
+      "w": 55.1,
+      "h": 23.3
+    },
+    "notebook.format-web": {
+      "x": 246.7,
+      "y": 128.4,
+      "w": 80.3,
+      "h": 23.3
+    },
+    "notebook.format-wordpress": {
+      "x": 327,
+      "y": 128.4,
+      "w": 108.3,
+      "h": 23.3
+    }
+  }
+}

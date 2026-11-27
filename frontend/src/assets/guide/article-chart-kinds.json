@@ -1,0 +1,12 @@
+{
+  "width": 1376,
+  "height": 782,
+  "anchors": {
+    "notebook.chart-timeline": {
+      "x": 49,
+      "y": 169.4,
+      "w": 171.5,
+      "h": 64.3
+    }
+  }
+}

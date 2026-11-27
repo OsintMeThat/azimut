@@ -1918,7 +1918,7 @@
 
   <div class="notes">
     {#if legend.length}
-      <ul class="glass legend" aria-label="What the lines over the photo show">
+      <ul class="glass legend" aria-label="What the lines over the photo show" data-guide="horizon.legend">
         {#each legend as item (item.id)}
           <li><span class="swatch {item.id}" aria-hidden="true"></span>{item.label}</li>
         {/each}

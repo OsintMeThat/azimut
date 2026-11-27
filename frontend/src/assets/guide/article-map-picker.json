@@ -1,0 +1,12 @@
+{
+  "width": 767,
+  "height": 506,
+  "anchors": {
+    "notebook.map-title": {
+      "x": 172.4,
+      "y": 104.2,
+      "w": 422,
+      "h": 33.2
+    }
+  }
+}

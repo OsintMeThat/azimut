@@ -13,7 +13,7 @@
  * A video's transition draws the page again while what is new on a beat appears
  * (`context.reveal`): faded in, or drawn along its lines as far as `t` has gone.
  */
-import { MM_PER_PT, PX_PER_MM, fillTokens, fontFamily, pageSize, shownOn, standsOver } from './page.js';
+import { LEADING, MM_PER_PT, PX_PER_MM, fillTokens, fontFamily, pageSize, shownOn, standsOver } from './page.js';
 import { posterKey } from './clip.js';
 import { bearingTo, circle, corners, decimalLabel, degreeLabel, distance, graticule, project, scaleBar, sector, travel, utmGrid, utmLabel } from './geo.js';
 import { backColourOf, backOf, defaultSize, inkOf } from './words.js';
@@ -132,7 +132,7 @@ function writeLines(ctx, element, context, text, box, { pad = 0, clip = true, si
   if ('letterSpacing' in ctx) ctx.letterSpacing = `${((element.tracking ?? 0) / 100) * sizePt * MM_PER_PT * scale}px`;
   ctx.fillStyle = colour ?? (element.colour || theme.ink);
   ctx.textBaseline = 'top';
-  const lineHeight = sizePt * MM_PER_PT * scale * (element.leading ?? 1.25);
+  const lineHeight = sizePt * MM_PER_PT * scale * (element.leading ?? LEADING);
   const shown = element.upper ? String(text).toUpperCase() : String(text);
   const lines = wrap(ctx, shown, Math.max(1, box.w - 2 * pad));
   const height = lines.length * lineHeight;

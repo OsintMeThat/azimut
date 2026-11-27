@@ -57,8 +57,9 @@
     onsave = () => {},
   } = $props();
 
-  // the switch here leaves Find's tag to the title, where it opens the beta notice
-  const plainModes = $derived(modes.map(({ tag, guide, ...mode }) => mode));
+  // the switch here leaves Find's tag to the title, where it opens the beta notice; its
+  // Overlay is framed on its own in the pictured guide, as the tab's is
+  const plainModes = $derived(modes.map(({ tag, guide, ...mode }) => (mode.id === 'overlay' ? { ...mode, guide: 'find.overlay' } : mode)));
 
   /** Why the setup cannot be saved now, '' when it can. */
   const saveProblem = $derived(!caseOpen ? 'Open a case first' : find.searching ? 'The search is running' : find.searchProblem);
@@ -263,6 +264,7 @@
         type="button"
         class="find-big"
         onclick={() => enlarge('photo')}
+        data-guide="find.enlarge"
         title={big === 'photo' ? 'Back to the three columns (Esc)' : 'Enlarge the photo'}
         aria-label={big === 'photo' ? 'Back to the three columns' : 'Enlarge the photo'}
       >

@@ -188,7 +188,7 @@
       <button type="button" class="btn btn-primary" onclick={onclose}>Close</button>
     {:else}
       <button type="button" class="btn" onclick={onclose}>Cancel</button>
-      <button type="button" class="btn btn-primary" disabled={busy || !(plan?.todo || plan?.titles)} onclick={press}>
+      <button type="button" class="btn btn-primary" disabled={busy || !(plan?.todo || plan?.titles)} data-guide="notebook.archive-go" onclick={press}>
         {busy ? 'Starting…' : pressWords(plan)}</button>
     {/if}
   </div>

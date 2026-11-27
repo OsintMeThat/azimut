@@ -151,14 +151,14 @@
   {/if}
 
   <div class="line">
-    <button type="button" class="icon-act" aria-label="Previous change" title="Previous change"
+    <button type="button" class="icon-act" aria-label="Previous change" title="Previous change" data-guide="layer.previous"
       disabled={!stepMoment(moments, at, -1)} onclick={() => go(stepMoment(moments, at, -1))}><Icon name="chevronLeft" size={12} /></button>
     <button type="button" class="moment" class:open={picking} aria-expanded={picking} title="Pick the day the layer is read at"
       onclick={() => (picking = !picking)}>{momentLabel(at)}</button>
     <button type="button" class="icon-act" aria-label="Next change" title="Next change"
       disabled={!stepMoment(moments, at, 1)} onclick={() => go(stepMoment(moments, at, 1))}><Icon name="chevronRight" size={12} /></button>
     {#if !onToday}
-      <button type="button" class="text-act" title="Read the layer as it is today" onclick={() => go(nowOn())}>Today</button>
+      <button type="button" class="text-act" title="Read the layer as it is today" data-guide="layer.today" onclick={() => go(nowOn())}>Today</button>
     {/if}
     <span class="grow"></span>
     <LayerPastMenu {time} {at} onchange={set} />

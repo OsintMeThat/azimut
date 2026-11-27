@@ -261,6 +261,7 @@ export class Grid {
   build() {
     const { box } = this;
     box.className = `cm-block cm-block-table cm-grid-block${this.writable ? '' : ' cm-grid-locked'}`;
+    box.dataset.guide = 'notebook.table';
     box.dataset.block = 'table';
     const frame = element('div', 'cm-grid-frame');
     if (this.writable) frame.append(this.makeBar());

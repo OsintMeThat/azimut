@@ -1,0 +1,12 @@
+{
+  "width": 1376,
+  "height": 782,
+  "anchors": {
+    "notebook.insert-table": {
+      "x": 39,
+      "y": 504.6,
+      "w": 304,
+      "h": 40.6
+    }
+  }
+}

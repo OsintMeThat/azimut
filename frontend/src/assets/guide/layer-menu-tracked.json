@@ -1,0 +1,12 @@
+{
+  "width": 1036,
+  "height": 642,
+  "anchors": {
+    "layer.download-item": {
+      "x": 706,
+      "y": 256.2,
+      "w": 208,
+      "h": 29.2
+    }
+  }
+}

@@ -87,7 +87,7 @@
     {:else}
       <label class="field">
         <span>Title</span>
-        <input class="input" bind:value={title} maxlength="200" placeholder="The front, 1 September to 15 November" />
+        <input class="input" bind:value={title} maxlength="200" placeholder="The front, 1 September to 15 November" data-guide="notebook.map-title" />
       </label>
 
       <div class="choice" role="radiogroup" aria-label="What the map shows">
@@ -129,7 +129,7 @@
       {#if sources.providers?.length > 1}
         <label class="field">
           <span>Ground</span>
-          <select class="input" bind:value={provider}>
+          <select class="input" bind:value={provider} data-guide="notebook.map-ground">
             {#each sources.providers as one (one.id)}<option value={one.id}>{one.label}</option>{/each}
           </select>
         </label>
@@ -140,7 +140,7 @@
       <button type="button" class="btn btn-ghost start" disabled={!sources} title="Frame a place, then put points, lines and areas on it"
         onclick={() => (starting = true)}>Start an empty map</button>
       <button type="button" class="btn btn-ghost" onclick={() => onclose?.()}>Cancel</button>
-      <button type="submit" class="btn btn-primary" disabled={!ready}>Put the map</button>
+      <button type="submit" class="btn btn-primary" disabled={!ready} data-guide="notebook.map-put">Put the map</button>
     </div>
   </form>
   {/if}

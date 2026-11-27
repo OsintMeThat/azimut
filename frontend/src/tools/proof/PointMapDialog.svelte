@@ -189,7 +189,7 @@
     </p>
   {/if}
   <div class="body">
-  <div class="stage" bind:this={stageEl}>
+  <div class="stage" bind:this={stageEl} data-guide="point.map">
     <MapSurface
       bind:engine
       bind:element
@@ -224,7 +224,8 @@
       <ul>
         {#each leads as lead (lead.id)}
           <li>
-            <button type="button" class:on={onLead(lead)} onclick={() => takeLead(lead)} title={`Put the point on lead ${lead.n}`}>
+            <button type="button" class:on={onLead(lead)} onclick={() => takeLead(lead)} title={`Put the point on lead ${lead.n}`}
+              data-guide={lead.n === 1 ? 'point.lead' : undefined}>
               <span class="num" style:--lead={leadColor ?? '#e5484d'}>{lead.n}</span>
               <span class="mono">{formatCoords(lead.lat, lead.lon, prefs.coordFormat)}</span>
             </button>
@@ -243,6 +244,7 @@
     <button class="btn btn-ghost btn-sm" onclick={onclose}>Cancel</button>
     <button
       class="btn btn-ok btn-sm"
+      data-guide="point.use"
       onclick={() => {
         onpick(at);
         if (!check) onclose();

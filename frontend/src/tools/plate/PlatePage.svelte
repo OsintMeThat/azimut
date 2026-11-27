@@ -768,6 +768,9 @@
   }
 
   const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+  /** The ready plates' main map and title, which the pictured guide frames on the page (lib/guide.js). */
+  const HIT_GUIDES = { map: 'plate.map', title: 'plate.title', legend: 'plate.legend', cartouche: 'plate.cartouche', footage: 'plate.picture',
+    source: 'plate.source-line', before: 'plate.map-before', after: 'plate.map-after', figure: 'plate.figure' };
   const px = (mm) => `${mm * PX_PER_MM}px`;
   const visible = (element) => !element.hidden && (ghosts || shownOn(element, at, stepPlace));
   const polygon = (points) => points.filter(Boolean).map(([x, y]) => `${x},${y}`).join(' ');
@@ -830,7 +833,7 @@
           <div class="hit" class:selected={selection.includes(element.id)} class:map={element.kind === 'map'} class:locked={element.locked}
             class:placing={!!placing && element.kind === 'map'} class:ghost={!shownOn(element, at, stepPlace)}
             style:left={px(element.box[0])} style:top={px(element.box[1])} style:width={px(element.box[2])} style:height={px(element.box[3])}
-            data-element={element.id}
+            data-element={element.id} data-guide={HIT_GUIDES[element.id]}
             onpointerdown={(event) => placing && element.kind === 'map' ? place(event, element)
               : grab(event, element)}
             ondblclick={() => { if (element.kind !== 'map') return; if (lockedMap(element)) sayHeld(); else framing = element.id; }}></div>
@@ -893,7 +896,7 @@
               {@const box = shownBox(element)}
               {#each HANDLES as handle (handle)}
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div class="handle {handle}" style:left={px(box[0] + (handle.includes('w') ? 0 : handle.includes('e') ? box[2] : box[2] / 2))}
+                <div class="handle {handle}" data-guide={handle === 's' ? 'plate.handle' : handle === 'w' ? 'plate.handle-w' : undefined} style:left={px(box[0] + (handle.includes('w') ? 0 : handle.includes('e') ? box[2] : box[2] / 2))}
                   style:top={px(box[1] + (handle.includes('n') ? 0 : handle.includes('s') ? box[3] : box[3] / 2))}
                   style:transform="translate(-50%, -50%) scale({1 / scale})"
                   onpointerdown={(event) => grab(event, element, handle)}></div>

@@ -68,7 +68,7 @@
       <legend>{mode === 'mymaps' ? 'My Maps keeps no history: send one day' : 'What goes in the file'}</legend>
       <label><input type="radio" bind:group={which} value="cursor" /> The layer on {momentLabel(cursor)}</label>
       {#if mode === 'download'}
-        <label><input type="radio" bind:group={which} value="history" /> Every state, dated for a time slider</label>
+        <label data-guide="layer.export-history"><input type="radio" bind:group={which} value="history" /> Every state, dated for a time slider</label>
       {/if}
     </fieldset>
   {/if}
@@ -76,7 +76,7 @@
   {#if mode === 'download'}
     <div class="formats">
       {#each [['kmz', 'KMZ', 'Includes icons for Google Earth or My Maps.'], ['kml', 'KML', 'Geometry, groups and style fields.'], ['geojson', 'GeoJSON', 'Geometry and style fields for GIS tools.']] as [format, name, detail] (format)}
-        <button class="btn" disabled={!!busy} onclick={() => download(format)}><strong>{busy === format ? 'Preparing…' : name}</strong><span>{detail}</span></button>
+        <button class="btn" disabled={!!busy} data-guide={format === 'kmz' ? 'layer.export-kmz' : undefined} onclick={() => download(format)}><strong>{busy === format ? 'Preparing…' : name}</strong><span>{detail}</span></button>
       {/each}
     </div>
     <button type="button" class="switch" onclick={() => { mode = 'mymaps'; if (which === 'history') which = 'cursor'; }}>Send to My Maps instead</button>

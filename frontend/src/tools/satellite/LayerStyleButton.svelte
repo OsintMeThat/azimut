@@ -28,6 +28,8 @@
     onpick,
     /** `(open)`, as the palette opens and closes, for what must step aside from it. */
     onopen = null,
+    /** The guide's anchor for the button, where one copy of it is framed. */
+    guide = undefined,
   } = $props();
 
   let open = $state(false);
@@ -40,7 +42,7 @@
   const meaning = $derived(layerPalette.iconNameOf(icon || symbol));
 </script>
 
-<button type="button" class="style-button" bind:this={trigger} aria-label={label} aria-expanded={open} {disabled}
+<button type="button" class="style-button" bind:this={trigger} aria-label={label} aria-expanded={open} {disabled} data-guide={guide}
   title={mixed ? `${title}: several` : point ? `${title}: ${meaning || wornName}${colourName ? `, ${colourName}` : ''}` : title}
   onclick={() => (open = !open)}>
   {#if point}<MarkerSymbol symbol={picked.id} {colour} icon={worn} {size} />

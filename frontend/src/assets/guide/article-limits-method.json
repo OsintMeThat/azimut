@@ -1,0 +1,12 @@
+{
+  "width": 1376,
+  "height": 782,
+  "anchors": {
+    "notebook.guidance": {
+      "x": 32,
+      "y": 388.3,
+      "w": 496.5,
+      "h": 24.8
+    }
+  }
+}

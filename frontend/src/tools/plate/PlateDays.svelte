@@ -240,7 +240,7 @@
 
 <div class="days">
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="track" bind:clientWidth={width} onpointerdown={grab} title="Drag to go from day to day the plate plays">
+  <div class="track" bind:clientWidth={width} onpointerdown={grab} title="Drag to go from day to day the plate plays" data-guide="plate.days-track">
     <span class="rail"></span>
     <div class="lane" bind:this={lane}>
       {#each view as notch, index (notch.keys[0])}
@@ -274,7 +274,7 @@
   {/if}
 
   <div class="line">
-    <button type="button" class="icon-act" aria-label={hours ? 'Previous moment' : 'Previous day'} title={hours ? 'The moment before' : 'The day before'}
+    <button type="button" class="icon-act" aria-label={hours ? 'Previous moment' : 'Previous day'} title={hours ? 'The moment before' : 'The day before'} data-guide="plate.day-prev"
       disabled={!stepMoment(keys, at, -1)} onclick={() => go(stepMoment(keys, at, -1))}><Icon name="chevronLeft" size={12} /></button>
     <button type="button" class="moment" class:open={picking} aria-expanded={picking} title="Pick a day on the calendar"
       bind:this={dayAnchor} onclick={() => (picking = !picking)}>{at ? momentLabel(dayPart(at)) : 'The page'}</button>

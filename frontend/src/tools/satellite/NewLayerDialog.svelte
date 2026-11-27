@@ -28,7 +28,7 @@
 </script>
 
 <Modal title={source ? 'Create editable copy' : 'New layer'} {onclose} width="420px">
-  <label class="field">
+  <label class="field" data-guide="layer.name">
     <span>Name</span>
     <input type="text" bind:value={title} maxlength="200" disabled={busy} />
   </label>
@@ -68,7 +68,7 @@
   {/if}
   <div class="actions">
     <button class="btn" disabled={busy} onclick={onclose}>Cancel</button>
-    <button class="btn btn-primary" disabled={busy || !ready}
+    <button class="btn btn-primary" disabled={busy || !ready} data-guide="layer.create"
       onclick={() => oncreate(title.trim(), start, description.trim(),
         track ? { on: true, zone: axisZone(caseState.current?.id) || 'UTC' } : null)}>
       {busy ? (start ? 'Importing…' : 'Creating…') : 'Create layer'}

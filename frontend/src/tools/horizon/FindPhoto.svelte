@@ -333,7 +333,7 @@
       </button>
     </div>
   {:else}
-    <canvas bind:this={canvas} class="fp-canvas" aria-hidden="true"></canvas>
+    <canvas bind:this={canvas} class="fp-canvas" aria-hidden="true" data-guide="find.canvas"></canvas>
     {#if rect}
       <svg class="fp-marks" width={width} height={height} aria-hidden="true">
         {#if !overlay.traceHidden}

@@ -12,7 +12,7 @@
 
 <div class="list" role="group" aria-label={label}>
   {#each layers as layer (layer.name)}
-    <label class="row">
+    <label class="row" data-guide="notebook.map-layer">
       <input type="checkbox" checked={chosen.includes(layer.name)} onchange={() => toggle(layer.name)} />
       <span class="name">{layer.title}</span>
       {#if layer.tracked}<small class="tag" title="Its dated edits play on the map's timeline">Over time</small>{/if}

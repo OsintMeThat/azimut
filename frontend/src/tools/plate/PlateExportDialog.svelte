@@ -109,13 +109,14 @@
 <Modal title="Export the plate" {onclose} width="460px">
   <div class="head">
     {#if preview}<img class="preview" src={preview} alt="The page as it will be exported" />{:else}<span class="preview blank">Drawing…</span>{/if}
-    <label class="name" title="The file's name in the folder saved for views">File name<input class="input" aria-label="File name" maxlength="120" bind:value={filename} /></label>
+    <label class="name" title="The file's name in the folder saved for views">File name<input class="input" aria-label="File name" maxlength="120" bind:value={filename} data-guide="plate.export-name" /></label>
   </div>
   {#if past.length}<p class="warn">Runs past its box: {past.join(', ')}. Pick it on the page to fit the box.</p>{/if}
-  <div class="formats" role="radiogroup" aria-label="Format">
+  <div class="formats" role="radiogroup" aria-label="Format" data-guide="plate.export-formats">
     {#each FORMATS as [id, label, detail] (id)}
       {@const off = !offered(id)}
-      <label class:off class:on={format === id} title={off ? (id === 'sheet' ? 'Needs a dated layer on the plate' : 'Needs a dated layer, or slides') : detail}>
+      <label class:off class:on={format === id} title={off ? (id === 'sheet' ? 'Needs a dated layer on the plate' : 'Needs a dated layer, or slides') : detail}
+        data-guide={id === 'mp4' ? 'plate.export-mp4' : undefined}>
         <input type="radio" bind:group={format} value={id} disabled={off} />
         <strong>{label}</strong><span>{off ? (id === 'sheet' ? 'Needs a dated layer on the plate.' : 'Needs a dated layer, or slides. + Slide under the page adds one.') : detail}</span>
       </label>
@@ -133,7 +134,7 @@
     {#if format === 'pdf' || !pixels}
       <div class="row">
         <span title="Dots per inch on the paper">Resolution</span>
-        <div class="segments" role="group" aria-label="Resolution">
+        <div class="segments" role="group" aria-label="Resolution" data-guide="plate.export-quality">
           {#each Object.entries(QUALITIES) as [id, entry] (id)}
             <button type="button" aria-pressed={quality === id} title={id === 'print' ? 'Sharp on paper, a larger file' : 'Enough for a screen, a smaller file'}
               onclick={() => (quality = id)}>{entry.label} · {entry.dpi} dpi</button>
@@ -174,7 +175,7 @@
       <div class="row">
         <span title="How long a day holds when it has no time of its own">Each day</span>
         <label class="hold" title="Seconds a day holds, unless its tile under the page gives it its own">
-          <input class="input" type="number" min="0.2" max="120" step="0.1" aria-label="Seconds each day holds" value={hold}
+          <input class="input" type="number" min="0.2" max="120" step="0.1" aria-label="Seconds each day holds" value={hold} data-guide="plate.export-hold"
             onchange={(event) => onhold?.(event.currentTarget.value)} /> s, unless a day has its own</label>
       </div>
       {#if seconds}
@@ -190,8 +191,9 @@
     {#if noteSheet && format === 'sheet' && ready}<PutInNote offer={noteSheet(days)} class="btn" role="button" icon={false} onput={onclose} />{/if}
     <span class="grow"></span>
     <button class="btn" title="Close without exporting" onclick={onclose}>Cancel</button>
-    {#if postable}<button class="btn" disabled={busy || !ready} title="Files it in the case and opens a Map plate post" onclick={() => run(onpost)}>To Post</button>{/if}
-    <button class="btn btn-primary" disabled={busy || !ready} title="Goes on behind: the top bar says how far" onclick={() => run()}>Export</button>
+    {#if postable}<button class="btn" disabled={busy || !ready} title="Files it in the case and opens a Map plate post"
+      onclick={() => run(onpost)}>To Post</button>{/if}
+    <button class="btn btn-primary" disabled={busy || !ready} title="Goes on behind: the top bar says how far" data-guide="plate.export-go" onclick={() => run()}>Export</button>
   </div>
 </Modal>
 

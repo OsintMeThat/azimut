@@ -98,6 +98,19 @@ function optionMore(completion) {
   return more;
 }
 
+/** The entries the guide's pictures frame (`lib/guide.js`), each by a box over its whole row. */
+const ENTRY_GUIDES = { table: 'notebook.insert-table', chart: 'notebook.insert-chart', diagram: 'notebook.insert-diagram', map: 'notebook.insert-map' };
+
+function optionAnchor(completion) {
+  const guide = ENTRY_GUIDES[completion.insertEntry?.id];
+  if (!guide) return null;
+  const box = document.createElement('span');
+  box.className = 'cm-insert-anchor';
+  box.setAttribute('aria-hidden', 'true');
+  box.dataset.guide = guide;
+  return box;
+}
+
 /** The preview stands beside the list, from its top, where there is room for it; nowhere else. */
 function placePreview(_view, list, _option, info, space) {
   const width = info.right - info.left;
@@ -227,8 +240,9 @@ const look = EditorView.theme({
   },
   '.cm-tooltip.cm-tooltip-autocomplete.cm-insert-menu > ul > li': {
     display: 'grid', gridTemplateColumns: '30px minmax(0, 1fr) auto', gridTemplateRows: 'auto auto', columnGap: '10px', alignItems: 'center',
-    padding: '5px 8px', borderRadius: '6px', lineHeight: '1.25', whiteSpace: 'normal',
+    padding: '5px 8px', borderRadius: '6px', lineHeight: '1.25', whiteSpace: 'normal', position: 'relative',
   },
+  '.cm-insert-menu li .cm-insert-anchor': { position: 'absolute', inset: '0', pointerEvents: 'none' },
   '.cm-insert-menu li .cm-insert-icon': {
     gridRow: '1 / 3', width: '30px', height: '30px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center',
     background: 'var(--bg-3)', color: 'var(--text-2)', border: '1px solid var(--border)', boxSizing: 'border-box',
@@ -277,7 +291,7 @@ export const insertMenu = [
   plusAt,
   plusCloses,
   queryShown,
-  autocompletion({ addToOptions: [{ render: optionIcon, position: 20 }, { render: optionMore, position: 90 }],
+  autocompletion({ addToOptions: [{ render: optionIcon, position: 20 }, { render: optionMore, position: 90 }, { render: optionAnchor, position: 100 }],
     tooltipClass: (state) => (insertOpen(state) ? 'cm-insert-menu' : ''), positionInfo: placePreview }),
   look,
   previewLook,

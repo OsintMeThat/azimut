@@ -1080,7 +1080,7 @@
         <BackButton label="Notes" title="Back to the notes" onclick={() => home()} guide="notebook.home" />
         {#if opened.noteId}
           <input class="input title-input" bind:this={titleInput} bind:value={titleField} onblur={commitTitle} maxlength="300"
-            aria-label="Note name" onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
+            aria-label="Note name" data-guide="notebook.name" onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} />
           <div class="folder-pick" title="The folder this note is filed in">
             <FolderSelect bind:value={folderField} folders={caseState.current?.folders ?? []} emptyLabel="Unfiled" />
           </div>
@@ -1099,14 +1099,14 @@
         {/if}
         <div class="spacer"></div>
         {#if readyBadge && readyBadge.key === badgeKey()}
-          <button type="button" class="btn btn-ghost btn-xs ready-badge" class:clear={!readyBadge.issues}
+          <button type="button" class="btn btn-ghost btn-xs ready-badge" class:clear={!readyBadge.issues} data-guide="notebook.ready-badge"
             title="Ready to publish? What the check before export says, in one place" aria-label={`Ready to publish? ${badgeWords(readyBadge.issues)}`}
             onclick={() => openReady()}>
             {#if readyBadge.issues}<span class="ready-dot" aria-hidden="true"></span><span>{readyBadge.issues}<span class="ready-words">{' to look at'}</span></span>
             {:else}<Icon name="check" size={12} /><span class="ready-words">Ready</span>{/if}</button>
         {/if}
         <LookControl {look} onchange={pickLook} entities={graphEntities} disabled={!look} text={doc.text} />
-        <ViewModes page={pageMode} guide="notebook.view" onchange={setPageMode} />
+        <ViewModes page={pageMode} guide="notebook.view" pageGuide="notebook.view-page" onchange={setPageMode} />
         <button class="btn btn-ghost btn-sm" title="Stays open on the right as you switch tools" aria-label="Pin to the side"
           data-guide="notebook.dock" onclick={() => beside()}><Icon name="panelRight" size={15} /><span class="wide-only">Pin to the side</span></button>
         {#if !solo}
@@ -1115,7 +1115,7 @@
         {/if}
         <button class="btn btn-sm" title="Export this note as a PDF, an HTML page or a web folder" data-guide="notebook.pdf" onclick={() => exportSome([opened.noteId])}>
           <Icon name="download" size={14} /> Export</button>
-        <button class="btn btn-ghost btn-sm" aria-label="More" title="More" onclick={(event) => (menu = { anchor: event.currentTarget })}>
+        <button class="btn btn-ghost btn-sm" aria-label="More" title="More" data-guide="notebook.more" onclick={(event) => (menu = { anchor: event.currentTarget })}>
           <Icon name="more" size={15} /></button>
       </header>
       <div class="body" class:split={pageMode || builder}>
@@ -1166,7 +1166,7 @@
       {/if}
       {#if row}
         <button type="button" class="fm-item" title="Every PDF, HTML page, web folder, WordPress draft and published page of this note, with Show and Check"
-          onclick={() => fromMenu((note) => (editionsOf = { noteId: note.id, title: note.title }))}>
+          data-guide="notebook.editions" onclick={() => fromMenu((note) => (editionsOf = { noteId: note.id, title: note.title }))}>
           <Icon name="file" size={14} /><span class="fm-grow">Editions</span></button>
         <button type="button" class="fm-item" title="Send each outside link to the Internet Archive and keep its copy"
           onclick={() => fromMenu((note) => (archiveOf = { noteId: note.id, title: note.title }))}>
@@ -1403,12 +1403,12 @@
             onclick={() => reviewBody?.send()}>{reviewBusy ? 'Exporting…' : 'Export'}</button>
         {:else if !wordpress}
           <button class={web && !several && githubSet ? 'btn' : 'btn btn-primary'} disabled={exportBusy || githubBusy || Boolean(problem)}
-            onclick={() => runExport(exportIds)}>
+            data-guide="notebook.export-go" onclick={() => runExport(exportIds)}>
             {exportBusy ? 'Exporting…' : found.length ? 'Export anyway' : web ? (several ? `Export ${exportIds.length} web folders` : 'Export web folder')
               : several ? `Export ${exportIds.length} ${html ? 'HTML pages' : 'PDFs'}` : `Export ${named}`}</button>
           {#if web && !several}
             <button class={githubSet ? 'btn btn-primary' : 'btn'} disabled={githubBusy || exportBusy || (githubSet && Boolean(problem))}
-              aria-busy={githubBusy} onclick={runPublish} title={githubWarned ? WEBSITE_HELP.publishAnyway
+              aria-busy={githubBusy} data-guide="notebook.publish" onclick={runPublish} title={githubWarned ? WEBSITE_HELP.publishAnyway
                 : githubSet ? 'Put the folder online in your GitHub repository, one commit'
                 : 'Publish to your own GitHub Pages site, once it is set up in Settings › Website'}>
               <BusyLabel busy={githubBusy} text={WEBSITE_BUSY.publish}>{githubWarned ? 'Publish anyway' : 'Publish to GitHub Pages'}</BusyLabel></button>
@@ -1417,7 +1417,7 @@
           <a class="btn btn-primary" href={draftSent.edit} target="_blank" rel="noopener noreferrer"
             title="The draft in WordPress's editor, where you publish it">Open in WordPress</a>
         {:else}
-          <button class="btn btn-primary" disabled={draftBusy || !draftReady} onclick={() => wordpressDraft?.send()}
+          <button class="btn btn-primary" disabled={draftBusy || !draftReady} data-guide="notebook.send-draft" onclick={() => wordpressDraft?.send()}
             title="Upload the pictures and save the note as a draft; nothing is published">{draftBusy ? 'Sending…' : 'Send as a draft'}</button>
         {/if}
         {/if}

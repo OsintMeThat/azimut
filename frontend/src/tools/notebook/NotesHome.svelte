@@ -307,7 +307,7 @@
       <div class="tiles" data-guide="notebook.ready">
         {#each READY_NOTES.filter((ready) => !SHOWCASE.includes(ready.id)) as ready (ready.id)}
           {@render tile({ name: ready.name, start: ready.id === 'blank' ? 'Note' : ready.name, note: ready.note,
-            body: ready.body, folder: '', look: ready.look })}
+            body: ready.body, folder: '', look: ready.look }, ready.id === 'article' ? 'notebook.start-article' : undefined)}
           {#if ready.id === 'blank'}
             <button type="button" class="tile" title="A note of every geolocation of a period" data-guide="notebook.from-case"
               onclick={() => onnew('from-case')}>

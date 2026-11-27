@@ -67,6 +67,8 @@
     heading = 'Added layers',
     headingIcon = 'compass',
     addLabel = 'Add a layer',
+    /** The `data-guide` anchor of the add button, one per list so the guide frames the right one. */
+    addGuide = undefined,
     onedit = null,
     ondownload = null,
     /** `(row)`: put the layer in the note pinned beside as a map; offered while a note is. */
@@ -549,7 +551,7 @@
       </li>
     {/each}
   </ul>
-  <button type="button" class="add" onclick={() => onadd?.()}>
+  <button type="button" class="add" data-guide={addGuide} onclick={() => onadd?.()}>
     <Icon name="plus" size={12} />
     <span>{addLabel}</span>
   </button>

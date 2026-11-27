@@ -74,6 +74,7 @@
                     {/if}
                     {#if line.fix}
                       <button type="button" class="btn btn-xs fix" title={line.fix.title} disabled={Boolean(busy)}
+                        data-guide={line.fix.id === 'archive' ? 'notebook.ready-archive' : undefined}
                         aria-describedby={`ready-line-${line.key}`} onclick={() => onfix(line)}>
                         {busy === line.key ? 'Working…' : line.fix.label}</button>
                     {/if}

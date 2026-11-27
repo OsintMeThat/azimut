@@ -2219,7 +2219,7 @@
         <BackButton label="Plates" title="Back to the plates" onclick={close} guide="plate.home" />
       {/if}
       {#if plate.template}<span class="kind">Template</span>{/if}
-      <input class="input title-input" bind:value={titleField} onblur={commitTitle} maxlength="200"
+      <input class="input title-input" bind:value={titleField} onblur={commitTitle} maxlength="200" data-guide="plate.name"
         onkeydown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} aria-label="Plate name" />
       {#if autosave.state.status === 'saving' || autosave.state.status === 'pending'}<span class="status">Saving…</span>
       {:else if autosave.state.status === 'saved'}<span class="status"><Icon name="check" size={12} /> Saved</span>
@@ -2305,7 +2305,7 @@
             title="Fills this slide with a copy of the one before it, marks and framing included" onclick={copyPrevious}>Copy the previous slide</button>{/if}</p>
         {:else if playable && at && !playing && !focus}
           <p class="on-step on-day">{momentLabel(at)}: what you add shows on this day only{#if pickedDated.length}<button type="button" class="pill-act"
-            title="Shows what is picked on every day the plate plays" onclick={everyDay}>Show {pickedDated.length === 1 ? 'it' : 'them'} every day</button>{/if}</p>
+            title="Shows what is picked on every day the plate plays" data-guide="plate.every-day" onclick={everyDay}>Show {pickedDated.length === 1 ? 'it' : 'them'} every day</button>{/if}</p>
         {/if}
         {#if barShown}
           <!-- the plate's days and the day's steps on one bar; a plate that plays nothing has none, Add holds its first step -->
@@ -2377,7 +2377,7 @@
             <h3>Map plates</h3>
             <p>A page laid out round the case's maps, exported as an image, a PDF or a video.</p>
           </div>
-          <button class="btn btn-primary" onclick={() => (creating = true)}><Icon name="plus" size={15} /> New plate</button>
+          <button class="btn btn-primary" data-guide="plate.new" onclick={() => (creating = true)}><Icon name="plus" size={15} /> New plate</button>
         </div>
         <p class="hint">A plate opens where the Map is looking. A ready plate starts at once; New plate asks what it shows first.</p>
         <h4>In this case</h4>

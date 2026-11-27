@@ -6,13 +6,13 @@
    */
   import { LOOK_HELP } from '../../lib/notes/lookHelp.js';
 
-  let { page = false, inPlace = false, guide = undefined, onchange = () => {} } = $props();
+  let { page = false, inPlace = false, guide = undefined, pageGuide = undefined, onchange = () => {} } = $props();
 </script>
 
 <div class="modes" class:tight={inPlace} role="group" aria-label="View" data-guide={guide}>
   <button type="button" class:on={!page} aria-pressed={!page} title={LOOK_HELP.write} onclick={() => onchange(false)}>Write</button>
   <button type="button" class:on={page} aria-pressed={page} title={inPlace ? LOOK_HELP.page_in_place : LOOK_HELP.page_pane}
-    onclick={() => onchange(true)}>Page</button>
+    data-guide={pageGuide} onclick={() => onchange(true)}>Page</button>
 </div>
 
 <style>

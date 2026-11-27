@@ -451,6 +451,7 @@
                 onblur={() => (lit = -1)}
                 onclick={() => onplace(place)}
                 title="Look from here, the photo laid as the search found it"
+                data-guide={index === 0 ? 'find.first' : undefined}
               >
                 <span class="fs-rank">{index + 1}</span>
                 <span class="fs-place-text">
@@ -497,7 +498,7 @@
       {/if}
       {#if !find.searching}
         <div class="fs-acts">
-          <button type="button" class="btn btn-sm btn-primary" onclick={() => (preparing = true)}>Change and search again</button>
+          <button type="button" class="btn btn-sm btn-primary" onclick={() => (preparing = true)} data-guide="find.again">Change and search again</button>
           <button type="button" class="btn btn-sm btn-ghost" onclick={() => find.closeSearch()}>Clear the results</button>
         </div>
       {/if}
@@ -664,7 +665,7 @@
         {:else}
           <p class="fs-say">Where the photo may have been taken.</p>
           <div class="fs-acts">
-            <button type="button" class="btn btn-sm btn-primary" onclick={() => find.drawArea()}><Icon name="polygon" size={13} />Draw the area</button>
+            <button type="button" class="btn btn-sm btn-primary" onclick={() => find.drawArea()} data-guide="find.draw"><Icon name="polygon" size={13} />Draw the area</button>
           </div>
         {/if}
       </li>
@@ -687,6 +688,7 @@
                       class:on={find.settings.effort === one.id}
                       aria-pressed={find.settings.effort === one.id}
                       title="{one.title}: {grid.points.toLocaleString('en-US')} points"
+                      data-guide={one.id === 'quick' ? 'find.quick' : undefined}
                       onclick={() => find.setSettings({ effort: one.id })}
                       >{one.label}{effort ? ` · ${effort}` : ''}</button
                     >
@@ -792,7 +794,7 @@
           </div>
         {/if}
         <div class="fs-acts">
-          <button type="button" class="btn btn-sm btn-primary" disabled={Boolean(find.searchProblem) || starting || find.searching} onclick={start}
+          <button type="button" class="btn btn-sm btn-primary" disabled={Boolean(find.searchProblem) || starting || find.searching} onclick={start} data-guide="find.search"
             ><Icon name="search" size={13} />Search</button
           >
           <button
@@ -886,7 +888,7 @@
       </details>
 
       <details class="fs-part" bind:open={help.know}>
-        <summary>
+        <summary data-guide="find.know">
           <span class="fs-part-title">What you know</span>
           <span class="fs-gist">{knowGist}</span>
           <Icon name="chevronDown" size={13} />
@@ -924,7 +926,7 @@
               </span>
             </div>
           {/if}
-          <div class="fs-row fs-facing-row">
+          <div class="fs-row fs-facing-row" data-guide="find.facing">
             <span class="fs-name" id="find-facing">Facing</span>
             <div class="fs-facing">
               <div class="fs-compass" role="group" aria-labelledby="find-facing">
@@ -1051,7 +1053,7 @@
     </section>
 
     <div class="fs-more">
-      <button type="button" class="fs-fold" aria-expanded={more} onclick={() => (more = !more)}>
+      <button type="button" class="fs-fold" aria-expanded={more} onclick={() => (more = !more)} data-guide="find.more">
         <Icon name={more ? 'chevronDown' : 'chevronRight'} size={13} />More settings
       </button>
       {#if more}

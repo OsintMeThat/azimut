@@ -7,6 +7,10 @@ describe('catching a routine up', () => {
   it('looks from the first pass read, or a month back for a routine never run', () => {
     expect(catchUpSpan(['2026-10-02', '2026-09-27'], '2026-11-24')).toEqual({ start: '2026-09-27', end: '2026-11-24' });
     expect(catchUpSpan([], '2026-11-24')).toEqual({ start: '2026-10-25', end: '2026-11-24' });
+    // a routine against a fixed day looks from that day, when it comes before what it read
+    expect(catchUpSpan(['2026-11-25'], '2026-11-27', '2026-07-27')).toEqual({ start: '2026-07-27', end: '2026-11-27' });
+    expect(catchUpSpan([], '2026-11-27', '2026-07-27')).toEqual({ start: '2026-07-27', end: '2026-11-27' });
+    expect(catchUpSpan(['2026-06-01'], '2026-11-27', '2026-07-27')).toEqual({ start: '2026-06-01', end: '2026-11-27' });
   });
 
   it('ticks the newer passes the rule would take, and marks the rest', () => {

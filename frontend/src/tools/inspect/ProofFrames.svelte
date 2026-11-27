@@ -188,7 +188,7 @@
 
     <div class="acts">
       <button class="btn btn-ghost btn-sm" disabled={busy} onclick={() => oncancel?.()}>Cancel</button>
-      <button class="btn btn-primary btn-sm" disabled={!ready} onclick={make} title={INSPECT_HELP.proofFramesMake}>
+      <button class="btn btn-primary btn-sm" disabled={!ready} onclick={make} title={INSPECT_HELP.proofFramesMake} data-guide="proof.make">
         {busy ? 'Making…' : 'Make the proof'}
       </button>
     </div>

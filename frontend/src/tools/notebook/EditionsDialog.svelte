@@ -165,7 +165,7 @@
       {#if line !== null}
         <div class="correction">
           <label class="part-head" for="correction-line">What changed, for the next export</label>
-          <textarea id="correction-line" class="input" rows="3" maxlength={MAX_CORRECTION} bind:value={line}></textarea>
+          <textarea id="correction-line" class="input" rows="3" maxlength={MAX_CORRECTION} bind:value={line} data-guide="notebook.correction-line"></textarea>
           <p class="hint"><span class="count">{line.length}/{MAX_CORRECTION}</span> Goes in the What changed line of your next HTML page or web folder, where you can still change it.</p>
         </div>
       {/if}
@@ -192,7 +192,7 @@
               <option value={NOW}>The note now</option>
               {#each choices as choice (choice.sha)}<option value={choice.sha}>{choice.label}</option>{/each}
             </select></label>
-          <button type="button" class="btn btn-primary btn-xs" disabled={!before || before === after} onclick={compare}
+          <button type="button" class="btn btn-primary btn-xs" disabled={!before || before === after} data-guide="notebook.compare" onclick={compare}
             title="Every figure and paragraph that changed between the two">Compare</button>
         </div>
       </section>
@@ -268,10 +268,10 @@
   <div class="actions">
     {#if comparing && comparison && !comparison.error && !comparison.same}
       {#if line === null}
-        <button type="button" class="btn" onclick={writeCorrection}
+        <button type="button" class="btn" data-guide="notebook.correction" onclick={writeCorrection}
           title="Draft the What changed line of the next export from this comparison">Write the correction from this</button>
       {:else if onexport}
-        <button type="button" class="btn btn-primary" disabled={!line.trim()} onclick={useLine}
+        <button type="button" class="btn btn-primary" disabled={!line.trim()} data-guide="notebook.correction-export" onclick={useLine}
           title="Open the export with this line in What changed; nothing is written before you export">Export with this line…</button>
       {/if}
     {/if}

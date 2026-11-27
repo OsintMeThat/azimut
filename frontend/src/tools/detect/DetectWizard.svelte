@@ -362,7 +362,7 @@
   {#if error}<p class="warn" role="alert">{error}</p>{/if}
 
   {#if step === 1}
-    <section class="step" aria-label="Where to look">
+    <section class="step" aria-label="Where to look" data-guide="detect.where">
       <h3>Where to look</h3>
       {#if areas.length || areaGroups.length}
         <input class="area-search" aria-label="Search areas or groups" placeholder="Search areas or groups…"
@@ -487,7 +487,7 @@
       {/if}
     </section>
   {:else if step === 2}
-    <section class="step" aria-label="What to look for">
+    <section class="step" aria-label="What to look for" data-guide="detect.what">
       <h3>What to look for</h3>
       <div class="choices" role="radiogroup" aria-label="Analyzer">
         {#each groups as group (group.label)}
@@ -599,7 +599,7 @@
     {#if step < 4}
       <button class="btn btn-primary grow" disabled={!!needsOf(step)} onclick={() => step++}>Next: {STEPS[step][1]}</button>
     {:else}
-      <button class="btn btn-primary grow" disabled={busy || !!blocked} onclick={() => submit(true)}>
+      <button class="btn btn-primary grow" disabled={busy || !!blocked} data-guide="detect.run-pass" onclick={() => submit(true)}>
         {busy ? 'Starting…' : !routine ? 'Run this pass' : followupId ? 'Save and run' : 'Save and run the first pass'}
       </button>
     {/if}

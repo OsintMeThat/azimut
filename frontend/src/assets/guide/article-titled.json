@@ -1,0 +1,12 @@
+{
+  "width": 1376,
+  "height": 782,
+  "anchors": {
+    "notebook.view-page": {
+      "x": 1003.3,
+      "y": 15,
+      "w": 48,
+      "h": 23.3
+    }
+  }
+}

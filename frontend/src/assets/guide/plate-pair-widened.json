@@ -1,0 +1,12 @@
+{
+  "width": 1036,
+  "height": 642,
+  "anchors": {
+    "plate.legend-columns": {
+      "x": 831,
+      "y": 229.9,
+      "w": 193,
+      "h": 26
+    }
+  }
+}

@@ -276,7 +276,8 @@
       title="Scroll to the slides after" onclick={() => page(1)}>{after || ''}<Icon name="chevronRight" size={12} /></button>
   {/if}
   {/if}
-  <button type="button" class="add" class:said={still} aria-label="Add a slide" title={current ? 'Add a slide after this one' : 'Add a slide to this day, played after it'} onclick={() => onadd?.()}>
+  <button type="button" class="add" class:said={still} aria-label="Add a slide" title={current ? 'Add a slide after this one' : 'Add a slide to this day, played after it'}
+    data-guide="plate.slide-add" onclick={() => onadd?.()}>
     <Icon name="plus" size={14} />{#if still}<span>Slide</span>{/if}</button>
   {#if still}
     <span class="hint">Slides make it a video.</span>

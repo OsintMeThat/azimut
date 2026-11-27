@@ -49,6 +49,8 @@
     readers: HELP.tabReaders, upkeep: HELP.tabUpkeep, yours: HELP.tabYours, wordpress: HELP.tabWordpress,
   };
   const known = (id) => HUB_TABS.some((entry) => entry.id === id);
+  /** The tabs the guide's pictures frame (`lib/guide.js`). */
+  const HUB_GUIDES = { hosting: 'settings.hub-hosting', wordpress: 'settings.hub-wordpress' };
 
   let tab = $state('overview');
   let bar = $state(null);
@@ -158,7 +160,8 @@
     {#each HUB_TABS as entry (entry.id)}
       {#if entry.id === 'wordpress'}<span class="sep" aria-hidden="true"></span>{/if}
       <button type="button" role="tab" id="hub-tab-{entry.id}" class="tab" class:on={tab === entry.id} aria-selected={tab === entry.id}
-        aria-controls="hub-panel-{entry.id}" tabindex={tab === entry.id ? 0 : -1} title={HOVER[entry.id]} onclick={() => show(entry.id)}
+        aria-controls="hub-panel-{entry.id}" tabindex={tab === entry.id ? 0 : -1} title={HOVER[entry.id]} data-guide={HUB_GUIDES[entry.id]}
+        onclick={() => show(entry.id)}
         onkeydown={arrows}>
         {entry.label}{#if entry.id === 'articles' && read && !read.truncated}<span class="count" aria-label="{read.items.length} on the site">{read.items.length}</span>{/if}
       </button>

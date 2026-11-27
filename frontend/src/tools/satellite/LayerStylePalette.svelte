@@ -180,7 +180,7 @@
   {#each namedHere as entry (entry.colour)}{@render namedChip(entry)}{/each}
   {#each near as [hex, where] (hex)}{@render swatch(hex, where)}{/each}
   {#if bare}{#each rest as [hex, where] (hex)}{@render swatch(hex, where)}{/each}{/if}
-  <button type="button" class="more-colours" aria-label="More colours" aria-expanded={allColours}
+  <button type="button" class="more-colours" aria-label="More colours" aria-expanded={allColours} data-guide="layer.style-more"
     title={allColours ? 'Fewer colours' : namedElsewhere.length ? 'The colours other layers use, the plain ones, and a code'
       : 'The plain colours, those picked lately, and a code typed or pasted'}
     onclick={() => (allColours = !allColours)}><Icon name={allColours ? 'minus' : 'plus'} size={11} /></button>
@@ -202,7 +202,7 @@
 {/if}
 {#if point}
   <p class="fm-head">Icon{#if iconMeaning}<span class="meant">{` · ${iconMeaning}`}</span>{/if}</p>
-  <input type="search" class="find" aria-label={`${label} find icon`} bind:value={query} placeholder="Find an icon" />
+  <input type="search" class="find" aria-label={`${label} find icon`} bind:value={query} placeholder="Find an icon" data-guide="layer.style-find" />
   {#if themes.length > 1}
     <div class="themes" role="group" aria-label={`${label} icon groups`}>
       {#each themes as theme (theme.id)}<button type="button" class="theme-chip" title={`Go to ${theme.name}`} onclick={() => goTo(theme.id)}>{theme.name}</button>{/each}
@@ -237,7 +237,7 @@
     {#each sections as section (section.group)}
       {#if section.group}<p class="theme" data-theme={`app:${section.group}`}>{section.group}</p>{/if}
       {#each section.items as choice (choice.id)}
-        <button type="button" class:chosen={!mixed && !icon && choice.id === symbol} title={choice.label}
+        <button type="button" class:chosen={!mixed && !icon && choice.id === symbol} title={choice.label} data-guide="layer.style-icon"
           aria-label={`${label} ${choice.label} icon`} aria-pressed={!mixed && !icon && choice.id === symbol}
           onclick={() => onpick?.(own ? { symbol: choice.id, icon: '' } : { symbol: choice.id })}>
           <MarkerSymbol symbol={choice.id} {colour} size={24} />

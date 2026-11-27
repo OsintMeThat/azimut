@@ -209,6 +209,8 @@ class BubbleView {
       press.type = 'button';
       press.className = `cm-bubble-button cm-bubble-${item.id}`;
       press.dataset.action = item.id;
+      if (item.id === 'internal') press.dataset.guide = 'notebook.bubble-internal';
+      if (item.id === 'link') press.dataset.guide = 'notebook.bubble-link';
       press.title = buttonTitle(item);
       press.setAttribute('aria-label', item.label);
       if (item.icon) press.append(iconSvg(item.icon, 14));

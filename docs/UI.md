@@ -236,9 +236,12 @@ presses *Read the guide* on it, which opens the guide on its start page.
   **Start here** and the **Capture extension** (in tabs of its own: installing it, its
   capture over a map, its tools drawn over a map, and a table of where it works, Street
   View included), then **journeys** (a goal walked across
-  the tools: a photo geolocated from its import to the published thread, an analyzer
-  of your own built in Detect, from the library to its checks and its save, and a search
-  with Find on the 1901 photo of Half Dome, each mark set for a reason),
+  the tools, from first steps to the advanced: a photo or a video geolocated from its
+  import to the published thread, through the scene it is marked as, the To-do, the pill
+  and the leads on the map; a layer of your own drawn, a proof put on it and shared; a
+  Map plate from its ground to its export; an article written with its map and
+  published; a search with Find on the 1901 photo of Half Dome; and an analyzer of your
+  own built in Detect, proved on two passes, run once or as a routine),
   then the **workspaces** with their tools as tabs, then the
   **reference**: every key by where it is pressed, Settings (a tab per section of its
   screen), and what to do when something does not work, symptom by symptom, ending on
@@ -261,9 +264,32 @@ presses *Read the guide* on it, which opens the guide on its start page.
 - **A number can lead to the next screen.** A control that opens something (a menu,
   the right-click menu of the map, Details beside a row, the Go to palette) carries a
   chevron on its number; pressing it shows the picture of what opens, with its own numbers
-  and a trail back. A journey's step shows only that step's frames, on the picture of
-  the tool it happens in, or on one of its own when the moment needs it (the photo held
-  over the map in a reference window). A journey ends on a **Result**: what it made.
+  and a trail back.
+- **A journey plays over the screens it happens on**, and fills the guide (its menu
+  folds away behind *Guide*). Each step shows the picture of its tool large, the control
+  to press lit and the rest dimmed, and a bubble saying what to press, one action after
+  another (`components/JourneyStage.svelte`). On a stage wide enough the bubble stands in
+  a column left of the picture, level with the control, and covers none of it; on a
+  narrow one it stands over the picture, off the control and, over a film, off where the
+  film moves (`guide/motion.mjs` writes that into the film's JSON). A journey with a start
+  per kind of file says on every step which way is read, *A photo* or *A video*. *Next*
+  (*Done* on a field to fill) brings the next step in under a line saying where the press landed: the To-do on the
+  right, Satellite with the photo beside the map. A question (*Where?*, *Does it match?*) is asked
+  over its screen, blurred, its answers as cards; what may be skipped is marked
+  optional, and a step's tip stands in the bubble from its first action. A screen can
+  play a short film in place of its picture (Horizon's photo fading into the terrain, leads
+  dropped on the map, a passage dragged on Inspect's bar, boxes drawn on a proof). Under the stage, a trail
+  (`components/JourneyTrail.svelte`): a waypoint per step with its tool's icon (numbered
+  when the journey stays in one tool), the detours dotted, a branch that ends before the
+  others on a flag of its own, the way the reader went in amber and the step being read
+  filled in. On the practice case it reads where the case
+  stands instead, ticks what it did and pins *You are here* (`lib/journeyHere.js`),
+  where the journey opens. *Show me* in
+  the bubble closes the guide on the step's tool and rings that control in the app
+  (`lib/showInApp.svelte.js`). *Practise on a real photo* files a public-domain photo of
+  the Port of Los Angeles in a case of its own (`lib/practiceCase.js`); the result then
+  says how far the proof's point is from where it was taken. A journey ends on a
+  **Result**: what it made.
   Search with Find's plays the photo and the terrain in turn, the slider walked by
   itself, and its *Try this search* files the same setup in a case of its own
   (`lib/findExample.js`), ready to press Search.
@@ -275,7 +301,8 @@ presses *Read the guide* on it, which opens the guide on its start page.
   `guide/photos/CREDITS.md`, the same port in public-domain USGS imagery, Horizon on a
   mountain), stages each picture with the clicks an analyst would make (`stages.mjs`)
   and writes `src/assets/guide/<shot>.webp` with the rectangle of every `data-guide`
-  anchor drawn on it, and a `<shot>.webm` for a stage that has a film; the search it runs
+  anchor drawn on it, and a `<shot>.webm` for a stage that has a film, the grid of where
+  it moves beside its rectangles; the search it runs
   also writes what *Try this search* files (`lib/findExample.json`). The case is true where it can be: where and when each photo was
   taken is its own, and only the accounts that posted them are made up. The
   extension's pictures come from a second browser with the extension loaded, over
@@ -4314,7 +4341,7 @@ restores the saved eye states from before the review.
 
 **Catch up** lists the passes a routine missed. Nothing is asked of Copernicus
 until **Look for passes**, one catalogue request over its areas from the first
-pass it read. Passes newer than the last one read are ticked when the newest-pass
+pass it read, or from its fixed reference day when that comes first. Passes newer than the last one read are ticked when the newest-pass
 rule would take them (under the cloud ceiling, the whole area covered, a radar
 pass on its track); cloudier ones, partial ones and gaps between two passes read
 stay listed to tick by hand, each saying why it was not ticked. **Read N passes**

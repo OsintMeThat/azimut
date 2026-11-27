@@ -17,6 +17,9 @@
 
   let { anchor, placing = null, template = false, onadd, onclose } = $props();
 
+  /** The tiles the pictured guide frames on their own (lib/guide.js). */
+  const ADD_GUIDES = { label: 'plate.add-label', number: 'plate.add-number', arrow: 'plate.add-arrow' };
+
   let query = $state('');
   let field = $state(null);
   let grid = $state(null);
@@ -100,7 +103,8 @@
 
 {#snippet tile(group, [kind, label, icon])}
   <button type="button" class="tile" class:on={placing?.kind === kind || placing?.preset === kind} class:first={!!query && kind === first}
-    title={group.note ? `${label}: ${group.note.toLowerCase()}` : `Add ${label.toLowerCase()}`} onclick={() => pick(kind)} onkeydown={tileKey}>
+    title={group.note ? `${label}: ${group.note.toLowerCase()}` : `Add ${label.toLowerCase()}`} data-guide={ADD_GUIDES[kind]}
+    onclick={() => pick(kind)} onkeydown={tileKey}>
     <Icon name={icon} size={17} /><span>{label}</span></button>
 {/snippet}
 

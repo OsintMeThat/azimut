@@ -139,6 +139,10 @@
 
   /** Whether the steps to a Copernicus account are shown under the locked Sentinel-2 ground. */
   let copernicusShown = $state(false);
+  /** The grounds the pictured guide frames on their own (lib/guide.js). */
+  const GROUND_GUIDES = { [WAYBACK_ID]: 'plate.ground-wayback', 'plain-grey': 'plate.ground-grey' };
+  /** The words of the ready plates' source lines and figure, which the guide frames apart from a title's (lib/guide.js). */
+  const TEXT_GUIDES = { source: 'plate.source-text', cartouche: 'plate.cartouche-text', figure: 'plate.figure-text' };
   const name = (map) => mapName(spec, map);
   /** What More holds beyond the usual, said while it is folded: a turn, a strength, words spaced their own way. */
   function moreSaid(item) {
@@ -518,7 +522,7 @@
 
     {#if overflow.has(element.id)}
       <p class="warn">{['legend', 'table', 'key'].includes(element.kind) ? 'The rows run past the box.' : 'The words run past the box.'}
-        {#if fits(element)}<button type="button" class="text-act" onclick={fitBox}>Fit the box</button>{/if}</p>
+        {#if fits(element)}<button type="button" class="text-act" data-guide="plate.fit" onclick={fitBox}>Fit the box</button>{/if}</p>
     {/if}
 
     {#if element.kind === 'map'}
@@ -558,7 +562,7 @@
       <div class="grounds" role="radiogroup" aria-label="Ground">
         {#each grounds as [id, label] (id)}
           <button type="button" class="ground-tile" role="radio" aria-checked={element.basemap === id} title={label}
-            onclick={() => setGround(id)}><GroundSwatch {id} width={58} height={38} /><span>{label}</span></button>
+            data-guide={GROUND_GUIDES[id]} onclick={() => setGround(id)}><GroundSwatch {id} width={58} height={38} /><span>{label}</span></button>
         {/each}
         {#if !grounds.some(([id]) => id === SENTINEL_ID)}
           <button type="button" class="ground-tile locked" aria-expanded={copernicusShown} title="Needs a free Copernicus account"
@@ -748,16 +752,16 @@
         <span class="key">Title</span><input aria-label="Legend title" bind:value={element.text} placeholder="Legend" maxlength="120" />
         <span class="key">Of</span>
         <select aria-label="Legend of" bind:value={element.of}>{#each maps as map (map.id)}<option value={map.id}>{name(map)}</option>{/each}</select>
-        <span class="key">Columns</span><input type="number" aria-label="Columns" min="1" max="4" step="1" bind:value={element.columns} />
+        <span class="key">Columns</span><input type="number" aria-label="Columns" data-guide="plate.legend-columns" min="1" max="4" step="1" bind:value={element.columns} />
         <span class="key">Frame</span><input type="checkbox" aria-label="Legend frame" bind:checked={element.border} />
       </div>
       <PlateWords {element} theme={spec.theme} />
       <label class="check"><input type="checkbox" bind:checked={element.offmap} /> List what the layers hold off the map too</label>
       <PlateSection title="Rows" summary={`${rowsOf.filter((entry) => !entry.off).length}`}>
-      {#each rowsOf.filter((entry) => !entry.off) as entry (entry.key)}
+      {#each rowsOf.filter((entry) => !entry.off) as entry, index (entry.key)}
         <div class="legend-row">
           <span class="dot" style:background={entry.colour}></span>
-          <input class="rename" aria-label={`Name of ${entry.said}`} placeholder={entry.said} maxlength="200" value={element.names?.[entry.key] ?? ''}
+          <input class="rename" aria-label={`Name of ${entry.said}`} data-guide={index ? undefined : 'plate.legend-name'} placeholder={entry.said} maxlength="200" value={element.names?.[entry.key] ?? ''}
             onchange={(event) => renameRow(entry.key, event.currentTarget.value)} />
           <button type="button" class="icon-act small" aria-label={`Move ${entry.said} up`} title="Up" onclick={() => moveLegendRow(entry.key, -1)}><Icon name="chevronUp" size={11} /></button>
           <button type="button" class="icon-act small" aria-label={`Move ${entry.said} down`} title="Down" onclick={() => moveLegendRow(entry.key, 1)}><Icon name="chevronDown" size={11} /></button>
@@ -819,7 +823,7 @@
             </select>
           </div>
         {/if}
-        <textarea aria-label="Text" rows={element.kind === 'label' ? 2 : 4} bind:value={element.text} maxlength="4000" bind:this={words}
+        <textarea aria-label="Text" rows={element.kind === 'label' ? 2 : 4} bind:value={element.text} maxlength="4000" bind:this={words} data-guide={TEXT_GUIDES[element.id] ?? 'plate.text'}
           oninput={() => { if (element.kind === 'label') element.box = labelBox(element, measure); }}></textarea>
         {#if element.kind === 'text'}
           <div class="tokens" role="group" aria-label="Words filled in">
@@ -964,7 +968,7 @@
       </div>
     {:else if element.kind === 'image'}
       <div class="tools wide">
-        <button type="button" class="btn btn-xs" title="A picture of the case, or a proof on the map pointing at its place" onclick={openPictures}><Icon name="image" size={12} /> From the case</button>
+        <button type="button" class="btn btn-xs" title="A picture of the case, or a proof on the map pointing at its place" data-guide="plate.from-case" onclick={openPictures}><Icon name="image" size={12} /> From the case</button>
         <button type="button" class="btn btn-xs" title="A picture kept inside the plate, so a template keeps it too" onclick={() => fileInput?.click()}><Icon name="upload" size={12} /> From this computer</button>
         <button type="button" class="btn btn-xs" title="The badge set in Settings → Signature" onclick={() => { element.src = SIGNATURE; element.data = null; }}>Signature</button>
       </div>
@@ -1192,7 +1196,7 @@
       </div>
       <p class="fm-label">Pictures of the case</p>
     {/if}
-    <div class="pictures">
+    <div class="pictures" data-guide="plate.case-pictures">
       {#each pictures as item (item.path)}
         <button type="button" class="picture" title={item.title || item.path}
           onclick={() => { element.src = item.path; element.data = null; picking = false; }}>

@@ -154,6 +154,7 @@ export function scratchCards(onPick) {
     card.type = 'button';
     card.dataset.kind = kind;
     card.dataset.scratch = 'true';
+    if (kind === 'timeline') card.dataset.guide = 'notebook.chart-timeline';
     card.setAttribute('aria-label', `${form.label}, from scratch: ${form.needs.toLowerCase()}`);
     card.title = `A form for a ${form.label.toLowerCase()} chart: ${form.needs.toLowerCase()}`;
     const words = element('span', 'cf-scratch-words');
@@ -1236,6 +1237,7 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
       })));
     }
     const fill = button('cf-fill-open', { label: 'Fill from the case…', iconName: 'download', title: FILL_TITLES[form.family] });
+    fill.dataset.guide = 'notebook.chart-fill';
     fill.setAttribute('aria-expanded', String(filling));
     fill.hidden = !caseId;
     pressable(fill, () => toggleFill());
@@ -1251,6 +1253,7 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
     });
     delete input.dataset.field;
     input.dataset.source = 'true';
+    row.dataset.guide = 'notebook.chart-source';
     row.append(element('span', 'cf-hint', 'Source'), input);
     after.replaceChildren(row);
   }
@@ -1361,6 +1364,7 @@ export function chartForm(panel, { state, write, caseId = '', palette = layerPal
   function fillFoot(label, run) {
     const foot = element('div', 'cf-fill-foot');
     const go = button('cf-go', { label });
+    go.dataset.guide = 'notebook.fill-add';
     const cancel = button('cf-link', { label: 'Cancel' });
     foot.append(pressable(go, run), pressable(cancel, () => {
       toggleFill(false);

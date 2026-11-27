@@ -36,7 +36,9 @@
 
   const radar = $derived(sensor === 'sentinel1');
   const maxcc = $derived(radar ? 100 : Number(detail?.area_dates?.[0]?.b?.maxcc ?? detail?.b?.maxcc ?? 100));
-  const span = $derived(catchUpSpan(readDays));
+  /** The fixed day a routine compares every pass with, none for one that compares with the pass before. */
+  const since = $derived(single || detail?.date_rule === 'latest_previous' ? '' : (detail?.area_dates?.[0]?.a?.date ?? detail?.a?.date ?? ''));
+  const span = $derived(catchUpSpan(readDays, undefined, since));
   let rows = $state(null);
   let ticked = $state(new Set());
   let looking = $state(false);
@@ -86,7 +88,8 @@
   <section class="lead">
     <h3>Catch up on missed passes</h3>
     <p>
-      {readDays.length ? `Passes over its areas since ${shortDay(span.start, true)}, the first one it read.` : `Passes over its areas in the last month.`}
+      {since && span.start === since ? `Passes over its areas since ${shortDay(since, true)}, the day each one compares with.`
+        : readDays.length ? `Passes over its areas since ${shortDay(span.start, true)}, the first one it read.` : `Passes over its areas in the last month.`}
       Each pass you tick is read as one run, oldest first. {reference}
     </p>
     {#if !rows}
@@ -140,7 +143,7 @@
       </div>
       {#if truncated}<p class="fine">The catalogue cut the list short: older passes are not shown.</p>{/if}
       <div class="go">
-        <button class="btn btn-primary" disabled={busy || !chosen.length} onclick={() => onqueue(chosen)}>
+        <button class="btn btn-primary" disabled={busy || !chosen.length} data-guide="detect.catch-read" onclick={() => onqueue(chosen)}>
           {chosen.length ? `Read ${passCount(chosen.length)}` : 'Tick the passes to read'}
         </button>
         {#if chosen.length}

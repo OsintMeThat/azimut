@@ -21,6 +21,10 @@
  * The Extension tabs are taken in a second browser with the capture extension loaded
  * (extension.mjs), over OpenStreetMap's own tiles.
  *
+ * A stage marked `online` reads Copernicus for real, a routine's passes over time, so it
+ * is taken only by a run started with `GUIDE_DETECT_ONLINE=1` on an account that agreed to
+ * spend; any other run keeps its picture as the last such run left it.
+ *
  * Needs `uv` for the backend, ffmpeg on PATH for the demo video, and the network for the
  * public imagery and the map tiles the pictures are drawn from. Horizon draws 3D, so the
  * browser asks for the GPU and falls back to software where there is none. Run it
@@ -38,6 +42,7 @@ import { build, createServer, loadConfigFromFile, mergeConfig, preview } from 'v
 import { copyPasses } from './airbase.mjs';
 import { buildDemo, CHANNEL, IMAGERY } from './demo.mjs';
 import { openExtension } from './extension.mjs';
+import { motionOf } from './motion.mjs';
 import { DEFAULT_WINDOW, STAGES } from './stages.mjs';
 
 const frontend = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -320,6 +325,9 @@ async function run() {
     browser = await chromium.launch({
       channel: 'chromium',
       args: ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist', '--enable-gpu', '--disable-accelerated-2d-canvas'],
+      // Chromium draws a date field's placeholder from the process locale, not the
+      // context's: without these it reads jj/mm/aaaa on a French machine
+      env: { ...process.env, LANG: 'en_GB.UTF-8', LANGUAGE: 'en_GB', LC_ALL: 'en_GB.UTF-8' },
     });
     const demo = await buildDemo({ call, scratch });
     say(`demo case filed: ${demo.caseId}`);
@@ -329,6 +337,9 @@ async function run() {
       deviceScaleFactor: 2,
       colorScheme: 'dark',
       reducedMotion: 'reduce',
+      // the pictures read in the guide's own English, whatever this machine's language:
+      // a date field's placeholder follows the browser's locale
+      locale: 'en-GB',
     });
     // the tour, this version's What's new and Find's beta notice would cover every
     // picture: the workspace has taken the one and read the others (components/Onboarding.svelte)
@@ -352,8 +363,14 @@ async function run() {
     };
     mkdirSync(OUT, { recursive: true });
 
+    const online = process.env.GUIDE_DETECT_ONLINE === '1';
     for (const stage of STAGES) {
       if (!take.has(stage.shot)) continue;
+      if (stage.online && !online) {
+        say(`${stage.shot}  kept: it reads Copernicus (GUIDE_DETECT_ONLINE=1)`);
+        made.push(stage.shot);
+        continue;
+      }
       const clip = stage.clip ?? CLIP;
       // the extension's pictures are taken in its own browser, on the map tab
       const outside = stage.browser === 'extension';
@@ -396,11 +413,14 @@ async function run() {
         if (problems.length) throw new Error(problems.join('; '));
         const picture = await photograph(shooter, cut);
         writeFileSync(join(OUT, `${stage.shot}.webp`), picture);
-        writeFileSync(
-          join(OUT, `${stage.shot}.json`),
-          `${JSON.stringify({ width: Math.round(cut.width), height: Math.round(cut.height), anchors: rects }, null, 2)}\n`
-        );
-        if (stage.film) await film(shooter, cut, stage.film, join(OUT, `${stage.shot}.webm`), scratch);
+        const map = { width: Math.round(cut.width), height: Math.round(cut.height), anchors: rects };
+        if (stage.film) {
+          const out = join(OUT, `${stage.shot}.webm`);
+          await film(shooter, cut, stage.film, out, scratch);
+          // where it moves, which the journey's bubble keeps clear of
+          map.moves = motionOf(out);
+        }
+        writeFileSync(join(OUT, `${stage.shot}.json`), `${JSON.stringify(map, null, 2)}\n`);
         made.push(stage.shot);
         say(`${stage.shot}.webp  ${Math.round(picture.length / 1024)} kB, ${Object.keys(rects).length} frames`);
       } catch (error) {

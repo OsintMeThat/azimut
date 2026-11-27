@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { drawPage, partOf, smoothThrough, wrap } from './draw.js';
-import { PX_PER_MM, houseLayout } from './page.js';
+import { PX_PER_MM, houseLayout, labelBox } from './page.js';
 import world from './world.json';
 
 /** A canvas context that records what is written and drawn, measuring a character as 5 pixels. */
@@ -82,6 +82,24 @@ describe('drawing a plate page', () => {
     expect(said({ at: '2026-10-01' })).toContain('Shelling reported');
     expect(said({ at: '2026-10-02' })).not.toContain('Shelling reported');
     expect(said({ at: '2026-10-02', editing: true, ghosts: true })).toContain('Shelling reported');
+  });
+
+  it('never says a label sized for its words runs past its box, however large the page is drawn', () => {
+    // the box was sized at one line spacing and the words drawn at another, so every
+    // label placed fresh was flagged as overflowing on screen
+    const spec = houseLayout({ view: { lat: 0, lon: 0, zoom: 4, bearing: 0 } });
+    for (const [id, style] of [['bubble', 'bubble'], ['plain', 'plain']]) {
+      const label = { id, kind: 'label', of: 'map', at: [2.36, 48.86], box: [40, 40, 1, 1], text: 'Main Channel', size: 9, style };
+      // a width the drawing cannot run past, so only the height is judged
+      label.box = labelBox(label, () => 0);
+      label.box[2] = 80;
+      spec.elements.push(label);
+    }
+    for (const scale of [3, 6, 12]) {
+      const ran = drawPage(recorder(), spec, { scale, views: {}, legend: {}, credits: {} });
+      expect(ran.has('bubble'), `scale ${scale}`).toBe(false);
+      expect(ran.has('plain'), `scale ${scale}`).toBe(false);
+    }
   });
 
   it('says which boxes their words run past, and never cuts the credits', () => {

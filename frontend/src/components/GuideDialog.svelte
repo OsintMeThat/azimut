@@ -10,6 +10,15 @@
    * the tool it happens in, and ends on what it made. A page can come in tabs of its
    * own, as the extension's does. The pages and their pictures are `lib/guide.js`.
    *
+   * A journey fills the guide, its menu folded away: each step plays over its screen
+   * (components/JourneyStage.svelte), what to press lit one action at a time, and a
+   * trail of its steps runs under it (components/JourneyTrail.svelte). A journey that
+   * reads the case pins the step the open case has reached (`lib/journeyHere.js`) and
+   * opens on it. Show me closes the guide on the step's tool with the control being read
+   * ringed in the app (`lib/showInApp.svelte.js`). The geolocation journey can also be
+   * practised on a real photo whose place is known (`lib/practiceCase.js`), and its
+   * result then says how close the answer came.
+   *
    * `detached` is the same guide in a tab of its own (`lib/guideWindow.js`), opened on
    * `place`: it fills the tab, keeps its place in the address, and what it would do to
    * the app it asks of the tab that detached it.
@@ -18,22 +27,34 @@
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
   import GuideShot from './GuideShot.svelte';
-  import { toast, uiState } from '../lib/state.svelte.js';
+  import JourneyStage from './JourneyStage.svelte';
+  import JourneyTrail, { stepIcon } from './JourneyTrail.svelte';
+  import { caseState, prefs, toast, uiState } from '../lib/state.svelte.js';
   import { openIssueReport, openTour } from '../lib/navigate.js';
   import { askApp, guideHash, openGuideTab } from '../lib/guideWindow.js';
   import { openFindExample } from '../lib/findExample.js';
+  import { gatherFacts, hereOn } from '../lib/journeyHere.js';
+  import { showInApp } from '../lib/showInApp.svelte.js';
+  import { checkAnswer, isPractice, openPractice } from '../lib/practiceCase.js';
+  import { formatDistance } from '../lib/measure.js';
   import {
     EXTENSION_SITES,
     FIXES,
+    JOURNEY_CAVEAT,
     JOURNEYS,
     KEYMAP,
     MENU,
     MENU_ITEMS,
     PAGES,
+    journeyEdges,
+    journeyNodes,
+    journeyResult,
     journeysThrough,
     landingFor,
+    markShot,
     opensFrom,
     shotOf,
+    stepAs,
     stepMarks,
     stepShot,
     tabLabel,
@@ -49,16 +70,58 @@
   let active = $state(null);
   /** The screens opened from a number, deepest last. Empty on the page itself. */
   let trail = $state(landing.opens ? [opensFrom(landing.tool, landing.opens)].filter(Boolean) : []);
+  /** A photo or a video, as the reader picked a journey's start; else as the case says. */
+  let chosenKind = $state(null);
+  /** Where the open case stands on the journey (`lib/journeyHere.js`), or null. */
+  let where = $state(null);
+  // a reader who already chose a step is not moved to where the case stands
+  let moved = landing.step > 0;
+  /** A journey opens on its welcome: what it walks, and that it is one example. */
+  let welcome = $state(String(landing.item ?? '').startsWith('journey:') && !(landing.step > 0));
+  /** The action of the step being read, the steps read before it, and where the last press landed. */
+  let act = $state(0);
+  let behind = $state([]);
+  let landed = $state(null);
+  /** A journey fills the guide; the menu comes back on the way out. */
+  let menuShown = $state(false);
 
   const item = $derived(MENU_ITEMS.find((entry) => entry.id === itemId) ?? MENU_ITEMS[0]);
   const journey = $derived(
     item.kind === 'journey' ? JOURNEYS.find((one) => `journey:${one.id}` === item.id) : null
   );
+  const nodes = $derived(journey ? journeyNodes(journey) : []);
+  const kind = $derived(chosenKind ?? where?.kind ?? null);
+  /** The start being read on, where a journey has one per kind of file: a photo's unless a video's was picked. */
+  const branch = $derived.by(() => {
+    if (!nodes.some((node) => node.kind)) return null;
+    const start = nodes.find((node) => node.at[0] === 0 && (node.kind ?? 'photo') === (kind ?? 'photo'));
+    return start ? { icon: stepIcon(start), label: start.label } : null;
+  });
+  const practising = $derived(isPractice(caseState.current));
+
+  // read once a journey that reads the case opens on the practice case, from the tab the
+  // app runs in: elsewhere the trail follows the reader alone
+  $effect(() => {
+    const caseId = caseState.current?.id;
+    const reads = journey?.reads && isPractice(caseState.current);
+    where = null;
+    if (!reads || detached || !caseId) return;
+    let gone = false;
+    untrack(() => gatherFacts(caseId))
+      .then((facts) => {
+        if (gone) return;
+        // the proved scene's point stays with the facts, for the practice case's answer
+        where = { ...hereOn(facts), point: facts.point };
+        const at = untrack(() => nodes.findIndex((node) => node.id === where.here));
+        if (!moved && at >= 0) step = at;
+      })
+      // a case that cannot be read leaves the map showing only the way
+      .catch(() => {});
+    return () => (gone = true);
+  });
 
   /** The step past a journey's last one, where what it made is shown. */
   const resultStep = $derived(journey?.result ? journey.steps.length : null);
-  /** The furthest a journey's Next goes: its result, or its last step. */
-  const lastStep = $derived(journey ? (resultStep ?? journey.steps.length - 1) : 0);
   /** The tab of a tabbed page that holds the table of where the extension works. */
   const sites = $derived(item.kind === 'tabs' && tool === 'extension-sites');
 
@@ -68,21 +131,32 @@
     if (item.kind === 'workspace' && tool) return pageView(PAGES[tool], toolLabel(tool));
     // a page's own tabs explain the page, and open no tool
     if (item.kind === 'tabs' && PAGES[tool]) return { ...pageView(PAGES[tool], tabLabel(tool)), tool: null };
-    if (journey && step === resultStep) {
-      return { lead: journey.result.text, shot: journey.result.shot, marks: [], tips: [], tool: null, example: journey.result.example };
-    }
-    if (journey) {
-      const current = journey.steps[step];
-      return {
-        lead: current.text,
-        shot: stepShot(current),
-        // a step reads one control at a time, so its numbers lead nowhere else
-        marks: stepMarks(current).map(({ opens, ...mark }) => mark),
-        tips: [],
-        tool: current.tool,
-      };
-    }
     return null;
+  });
+
+  /** The journey's step being played: its screen, and each control to press on it in order. */
+  const stage = $derived.by(() => {
+    if (!journey) return null;
+    if (welcome) {
+      const made = journeyResult(journey, kind);
+      // the tools it goes through, in the order it meets them
+      const tools = [...new Set(journey.steps.map((one) => one.tool))].map((id) => ({ id, label: toolLabel(id), icon: stepIcon({ tool: id }) }));
+      const starts = nodes.filter((node) => node.at[0] === 0).map((node) => ({ id: node.id, label: node.label, icon: stepIcon(node) }));
+      return { id: 'welcome', welcome: true, shot: made.shot, title: journey.title, lead: journey.lead, tools, starts, marks: [] };
+    }
+    if (step === resultStep) {
+      // the step the reader came from picks the ending, where a journey has more than one
+      const made = journeyResult(journey, kind, idOf(behind.at(-1)));
+      return { id: 'result', result: true, label: resultLabel, shot: made.shot, text: made.text, example: made.example, marks: [] };
+    }
+    const current = stepAs(journey.steps[step], kind);
+    return {
+      ...current,
+      id: nodes[step].id,
+      shot: stepShot(current),
+      // a step reads one control at a time, so its numbers lead nowhere else
+      marks: stepMarks(current).map(({ opens, ...mark }) => ({ ...mark, shot: markShot(current, mark) })),
+    };
   });
 
   function pageView(page, title) {
@@ -93,6 +167,22 @@
   }
 
   const picture = $derived(view ? shotOf(view.shot) : null);
+  /** Where a step leads once its last control is pressed: the first way out, or the result after the last. */
+  const onward = $derived.by(() => {
+    if (!stage || stage.result || stage.ask) return null;
+    const out = journeyEdges(journey).find((edge) => edge.from === stage.id);
+    return out?.to ?? (journey.result ? 'result' : null);
+  });
+  const resultLabel = $derived(journey?.practice && practising ? 'Your answer' : 'Result');
+  /** The id of a journey's step by its place, its result past the last. */
+  const idOf = (index) => (index === resultStep ? 'result' : nodes[index]?.id);
+  const pickedId = $derived(journey && !welcome ? idOf(step) : null);
+  /** How close the practice case's proof came to where the photo was taken. */
+  const answer = $derived.by(() => {
+    if (!practising || !where?.point) return null;
+    const { metres, right } = checkAnswer(where.point);
+    return { right, said: `Your point is ${formatDistance(metres, prefs.units)} from where the photo was taken.` };
+  });
   const through = $derived(item.kind === 'workspace' && tool ? journeysThrough(tool) : []);
 
   function reset() {
@@ -102,8 +192,13 @@
 
   function choose(entry) {
     itemId = entry.id;
+    welcome = entry.kind === 'journey';
     tool = entry.tools[0] ?? null;
     step = 0;
+    act = 0;
+    behind = [];
+    landed = null;
+    menuShown = false;
     reset();
   }
 
@@ -113,14 +208,66 @@
   }
 
   function goStep(index) {
+    welcome = false;
+    if (index !== step) behind.push(step);
     step = index;
+    act = 0;
+    moved = true;
+    landed = null;
     reset();
+  }
+
+  /** A step of the journey: a start sets the kind of file walked with, the result ends it. */
+  function pickNode(id) {
+    if (id === 'result') return goStep(resultStep);
+    const at = nodes.findIndex((node) => node.id === id);
+    if (at < 0) return;
+    // a journey with a start per kind of file reads on as the start picked
+    if (nodes.some((node) => node.kind) && nodes[at].at[0] === 0) chosenKind = nodes[at].kind ?? 'photo';
+    goStep(at);
+  }
+
+  /**
+   * Past the welcome, on the start pressed: a journey with a start per kind of file reads
+   * on as that one. A step the case already stands at is kept (`where`).
+   */
+  function begin(id) {
+    welcome = false;
+    const at = nodes.findIndex((node) => node.id === id);
+    if (at < 0) return;
+    if (nodes.some((node) => node.kind)) chosenKind = nodes[at].kind ?? 'photo';
+    if (nodes[step]?.at[0] === 0) step = at;
+    act = 0;
+  }
+
+  /** The step's last control pressed: on to where it leads, saying where that landed. */
+  function pressed() {
+    const then = stage.then;
+    if (!onward) return;
+    pickNode(onward);
+    if (then) landed = { text: then };
+  }
+
+  /** Back the way the reader came, on the last action of that step. */
+  function stepBack() {
+    const before = behind.pop();
+    if (before === undefined) return;
+    step = before;
+    landed = null;
+    act = Math.max(0, (stage?.marks.length ?? 1) - 1);
   }
 
   function openJourney(id, at = 1) {
     itemId = `journey:${id}`;
+    welcome = at <= 1;
     tool = null;
     step = at - 1;
+    act = 0;
+    behind = [];
+    landed = null;
+    moved = at > 1;
+    chosenKind = null;
+    menuShown = false;
     reset();
   }
 
@@ -146,6 +293,39 @@
     if (detached) return askApp({ open: id });
     uiState.tool = id;
     onclose();
+  }
+
+  /** The step's tool, the control being read pointed at in the app itself. */
+  function showMe(mark) {
+    // a press made on another tool's screen (Media before Inspect) is shown there
+    const ask = {
+      tool: mark.tool ?? stage.tool,
+      anchor: mark.anchor,
+      label: mark.title,
+      press: mark.text,
+      ...(stage.sidebar ? { sidebar: stage.sidebar } : {}),
+      ...(mark.settings ? { settings: mark.settings } : {}),
+    };
+    if (detached) return askApp({ show: ask });
+    onclose();
+    showInApp(ask);
+  }
+
+  // ← and → walk a journey's actions, as a press on the bubble does
+  function onkey(event) {
+    if (!stage || stage.ask || stage.result || event.target.closest?.('input, textarea')) return;
+    if (event.key === 'ArrowRight' && act < stage.marks.length - 1) act += 1;
+    else if (event.key === 'ArrowRight' && onward) pressed();
+    else if (event.key === 'ArrowLeft' && act > 0) act -= 1;
+    else if (event.key === 'ArrowLeft') stepBack();
+    else return;
+    event.preventDefault();
+  }
+
+  /** The practice case: a real photo whose place is known, filed in a case of its own. */
+  function practise() {
+    onclose();
+    openPractice();
   }
 
   /** The newcomer's tour, over the app this guide was opened from (components/Onboarding.svelte). */
@@ -224,7 +404,8 @@
 {/snippet}
 
 {#snippet content()}
-  <div class="guide">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="guide" class:immersed={journey && !menuShown} onkeydown={journey ? onkey : undefined}>
     <nav class="menu" aria-label="Guide pages">
       {#each MENU as group, index (index)}
         {#if group.title}<p class="group">{group.title}</p>{/if}
@@ -244,10 +425,31 @@
 
     <section class="page" aria-label={item.label}>
       <header class="head">
+        {#if journey}
+          <button class="btn btn-ghost btn-sm menu-toggle" onclick={() => (menuShown = !menuShown)} title={menuShown ? 'Hide the guide’s menu' : 'The guide’s menu'}>
+            <Icon name={menuShown ? 'chevronLeft' : 'list'} size={14} /> Guide
+          </button>
+        {/if}
         <div class="titles">
-          <h2>{item.label}</h2>
+          <h2>{item.label}{#if journey}<span class="caveat-mark" title={JOURNEY_CAVEAT} aria-label={JOURNEY_CAVEAT}><Icon name="info" size={15} /></span>{/if}</h2>
           {#if item.kind !== 'page' && item.lead}<p class="sub">{item.lead}</p>{/if}
         </div>
+        {#if journey?.practice && !detached}
+          {#if practising}
+            <div class="case-chip">
+              <Icon name="pin" size={14} />
+              <strong>{caseState.current.name}</strong>
+              {#if where?.scene}<span>{where.scene}</span>{/if}
+              {#each where?.facts ?? [] as fact (fact.text)}
+                <span class="fact" class:ok={fact.ok}>{#if fact.ok}<Icon name="check" size={11} />{/if}{fact.text}</span>
+              {/each}
+            </div>
+          {:else}
+            <button class="practice" onclick={practise} title="A real photo whose place is known, in a case of its own">
+              <Icon name="pin" size={13} /> Practise on a real photo
+            </button>
+          {/if}
+        {/if}
         {#if !detached}
           <div class="head-acts">
             <button class="btn btn-ghost btn-sm" onclick={detach} aria-label="Open in a new tab" title="Open in a new tab, to follow on another screen">
@@ -273,44 +475,35 @@
             </button>
           {/each}
         </div>
-      {:else if journey}
-        <ol class="steps">
-          {#each journey.steps as one, index (index)}
-            <li>
-              <button
-                class="step"
-                class:on={index === step}
-                class:done={index < step}
-                aria-current={index === step ? 'step' : undefined}
-                onclick={() => goStep(index)}
-              >
-                <span class="num">{index + 1}</span>
-                {one.label ?? toolLabel(one.tool)}
-              </button>
-              {#if index < lastStep}<Icon name="chevronRight" size={13} />{/if}
-            </li>
-          {/each}
-          {#if resultStep !== null}
-            <li>
-              <button
-                class="step result"
-                class:on={step === resultStep}
-                aria-current={step === resultStep ? 'step' : undefined}
-                onclick={() => goStep(resultStep)}
-              >
-                <Icon name="flag" size={13} />
-                Result
-              </button>
-            </li>
-          {/if}
-        </ol>
+      {/if}
+
+      {#if stage}
+        <JourneyStage
+          step={stage}
+          {act}
+          {nodes}
+          landing={landed}
+          here={where}
+          {answer}
+          canBack={behind.length > 0}
+          showable={Boolean(stage.tool)}
+          onact={(next) => (act = next)}
+          onpressed={pressed}
+          onback={stepBack}
+          onchoose={pickNode}
+          onshow={showMe}
+          onexample={tryExample}
+          onbegin={begin}
+          {branch}
+        />
+        <JourneyTrail {journey} picked={pickedId} here={where} walked={behind.map(idOf)} result={resultLabel} onpick={pickNode} />
       {/if}
 
       {#if view && picture}
         <div class="body">
           <div class="picture">
             {@render trailBar(view.title)}
-            <p class="lead" class:instruction={Boolean(journey)}>{view.lead}</p>
+            <p class="lead">{view.lead}</p>
             <GuideShot shot={picture} marks={view.marks} bind:active onopen={follow} />
             {#if view.tips.length}
               <section class="tips" aria-label="Tips">
@@ -355,31 +548,12 @@
                 {/each}
               </div>
             {/if}
-            {#if journey}
-              <div class="walk">
-                <button class="btn btn-sm" disabled={step === 0} onclick={() => goStep(step - 1)}>
-                  <Icon name="chevronLeft" size={13} /> Back
-                </button>
-                <button class="btn btn-sm" disabled={step === lastStep} onclick={() => goStep(step + 1)}>
-                  Next <Icon name="chevronRight" size={13} />
-                </button>
-              </div>
-            {/if}
             <!-- the tour plays over the app, so a guide in a tab of its own leaves it out -->
             {#if item.id === 'start' && !trail.length && !detached}
               <button class="btn btn-primary go" onclick={takeTour}>
                 Take the tour
                 <Icon name="arrowRight" size={14} />
               </button>
-            {/if}
-            {#if view.example}
-              <div class="example">
-                <button class="btn btn-primary go" onclick={tryExample}>
-                  Try this search
-                  <Icon name="arrowRight" size={14} />
-                </button>
-                <p>Puts the photo and every line in a case of their own, ready to search.</p>
-              </div>
             {/if}
             {#if view.tool}
               <button class="btn btn-primary go" onclick={() => openTool(view.tool)}>
@@ -485,6 +659,71 @@
     grid-template-columns: 216px minmax(0, 1fr);
     height: min(860px, calc(100vh - 96px));
   }
+  /* a journey fills the guide: the menu folds away until asked for */
+  .guide.immersed {
+    grid-template-columns: 0 minmax(0, 1fr);
+  }
+  .guide.immersed .menu {
+    visibility: hidden;
+    padding: 0;
+    border: 0;
+  }
+  .menu-toggle {
+    flex-shrink: 0;
+    gap: 5px;
+    margin-top: 1px;
+  }
+  .case-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px 10px;
+    flex-wrap: wrap;
+    margin-left: auto;
+    max-width: 58%;
+    padding: 6px 8px 6px 11px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: var(--bg-0);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+  }
+  .case-chip > :global(svg) {
+    color: var(--accent);
+  }
+  .case-chip strong {
+    color: var(--text-1);
+    font-weight: 600;
+  }
+  .case-chip .fact {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+  }
+  .case-chip .fact.ok {
+    color: var(--ok);
+  }
+  .case-chip .fact:not(.ok)::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .practice {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    padding: 5px 12px;
+    border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  .practice:hover {
+    background: color-mix(in srgb, var(--accent) 26%, transparent);
+  }
   .detached {
     height: 100vh;
     background: var(--bg-1);
@@ -551,13 +790,20 @@
     font-size: var(--fs-xl);
     font-weight: 700;
   }
+  /* one example, not all there is: said on hover by the journey's title */
+  .caveat-mark {
+    display: inline-flex;
+    vertical-align: middle;
+    margin-left: 8px;
+    color: var(--text-3);
+    cursor: help;
+  }
   .sub {
     margin-top: 3px;
     color: var(--text-2);
     font-size: var(--fs-sm);
   }
-  .tabs,
-  .steps {
+  .tabs {
     display: flex;
     flex-wrap: wrap;
     gap: 2px;
@@ -578,49 +824,6 @@
     color: var(--text-1);
     border-bottom-color: var(--text-1);
   }
-  .steps {
-    list-style: none;
-    margin: 0;
-    padding-bottom: 10px;
-    align-items: center;
-    gap: 6px;
-    color: var(--text-3);
-  }
-  .steps li {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .step {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 5px 10px 5px 6px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    font-size: var(--fs-sm);
-    color: var(--text-2);
-  }
-  .step:hover {
-    color: var(--text-1);
-  }
-  .step.on {
-    border-color: var(--text-2);
-    color: var(--text-1);
-    background: var(--bg-2);
-  }
-  .step .num {
-    width: 20px;
-    height: 20px;
-  }
-  .step.done .num {
-    background: var(--bg-3);
-    color: var(--text-2);
-  }
-  .step.result {
-    padding-left: 10px;
-  }
-
   .body {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 272px;
@@ -656,9 +859,6 @@
   /* the height a picture may take: the dialog's, less its header, tabs and lead */
   .picture {
     --shot-room: calc(min(860px, 100vh - 96px) - 200px);
-  }
-  .lead.instruction {
-    color: var(--text-1);
   }
   /* Tips read as one note under the picture, in the info colour, rather than as more
      cards: framed like the picture's controls, they passed for part of the screen. */
@@ -713,16 +913,6 @@
   }
   .more:hover {
     text-decoration: underline;
-  }
-  .example {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .example p {
-    margin: 0;
-    color: var(--text-3);
-    font-size: var(--fs-xs);
   }
   .side {
     display: flex;
@@ -827,10 +1017,6 @@
     flex-shrink: 0;
     font-size: var(--fs-xs);
     color: var(--text-3);
-  }
-  .walk {
-    display: flex;
-    gap: 8px;
   }
   .go {
     align-self: flex-start;
