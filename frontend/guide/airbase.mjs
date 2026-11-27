@@ -19,6 +19,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { PORT_PASSES } from './demo.mjs';
 
 /** The two passes the check compares. */
 export const PASSES = ['2026-09-15', '2026-09-25'];
@@ -72,13 +73,14 @@ export const MARKS = [
 /** The case's routine over the four areas, whose runs and dashboard the journey shows as they are. */
 export const ROUTINE = { id: '1181df4f2f3f', title: 'Al Udeid Air Base Routine' };
 
-/** Every day the journey reads: the check's two passes, the reference and the routine's. */
-const DAYS = [...new Set([...PASSES, REFERENCE, ...ROUTINE_PASSES])];
+/** Every day the pictures read: the check's two passes, the reference, the routine's, and the port's pair. */
+const DAYS = [...new Set([...PASSES, REFERENCE, ...ROUTINE_PASSES, ...PORT_PASSES])];
 
 /**
  * Copy those days from an Azimut home's tile cache into the run's workspace, every
- * Sentinel-2 layer and band read of them. Says how many tile sets it copied: none means
- * the pictures of the journey cannot be made without spending quota.
+ * Sentinel-2 layer and band read of them, the port's pair for Compare and the Map plate
+ * among them. Says how many tile sets it copied: none means those pictures cannot be made
+ * without spending quota.
  */
 export function copyPasses(home, source = process.env.GUIDE_CACHE_HOME ?? join(homedir(), 'Azimut')) {
   const from = join(source, '.azimut/cache/tiles');

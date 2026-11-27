@@ -1,52 +1,52 @@
 {
   "width": 1376,
-  "height": 1014,
+  "height": 1024,
   "anchors": {
     "settings.nav": {
       "x": 0,
-      "y": 28,
+      "y": 50.2,
       "w": 168,
-      "h": 985.8
+      "h": 973.8
     },
     "settings.appearance": {
       "x": 186,
-      "y": 34,
+      "y": 56.2,
       "w": 604,
       "h": 123.7
     },
     "settings.coordinates": {
       "x": 186,
-      "y": 157.7,
+      "y": 179.9,
       "w": 604,
       "h": 170
     },
     "settings.units": {
       "x": 186,
-      "y": 327.7,
+      "y": 349.9,
       "w": 604,
       "h": 144.8
     },
     "settings.home-view": {
       "x": 186,
-      "y": 472.4,
+      "y": 494.6,
       "w": 604,
       "h": 144.7
     },
     "settings.map-tabs": {
       "x": 186,
-      "y": 617.1,
+      "y": 639.3,
       "w": 604,
       "h": 123.7
     },
     "settings.quality-3d": {
       "x": 186,
-      "y": 740.8,
+      "y": 763,
       "w": 604,
       "h": 107.6
     },
     "settings.reverse": {
       "x": 186,
-      "y": 848.4,
+      "y": 870.5,
       "w": 604,
       "h": 123.7
     }

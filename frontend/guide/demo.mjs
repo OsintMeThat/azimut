@@ -37,6 +37,15 @@ export const IMAGERY = {
  * tower, the west tower out of frame. `TERMINAL` is the crane on that line.
  */
 export const CHANNEL = { lat: 33.7455, lon: -118.274 };
+/**
+ * Two cloudless Sentinel-2 passes over the channel, read from the Copernicus catalogue: the
+ * oldest clear one the free archive offers here, and one of this autumn. Compare and the Map
+ * plate's before and after are photographed on them, credited to Copernicus, since Esri's
+ * dated archive may not be shown in a picture (photos/CREDITS.md).
+ */
+export const PORT_PASSES = ['2017-05-19', '2026-10-24'];
+/** The comparison of those two passes, framed on the whole port at Sentinel-2's own scale. */
+export const PORT_PAIR = 'Main Channel, May 2017 and October 2026';
 export const CAMERA = { lat: 33.74168, lon: -118.27946 };
 export const TERMINAL = { lat: 33.7477, lon: -118.27093 };
 export const BRIDGE = { lat: 33.7497, lon: -118.2716 };
@@ -294,16 +303,18 @@ export async function buildDemo({ call, scratch }) {
     colour: '#38bdf8',
     geometry: { type: 'Polygon', coordinates: [WATCHED] },
   });
+  const pass = (date) => ({ present: true, provider: 'sentinel2', overlays: [], sentinel: { layer: 'TRUE_COLOR', date, maxcc: 100 } });
   await call('POST', at('/compare/sessions'), {
-    title: 'Main Channel, imagery against the map',
+    title: PORT_PAIR,
     spec: {
       version: 2,
-      camera: { ...CHANNEL, zoom: 16, bearing: 0 },
-      mode: 'swipe',
+      camera: { ...CHANNEL, zoom: 14, bearing: 0 },
+      // side by side, so each pass shows the whole port
+      mode: 'side',
       divider: 50,
       opacity: 50,
-      a: { present: true, provider: IMAGERY.id, overlays: [] },
-      b: { present: true, provider: 'opentopomap', overlays: [] },
+      a: pass(PORT_PASSES[0]),
+      b: pass(PORT_PASSES[1]),
     },
   });
   await call('POST', at('/map-plates'), {

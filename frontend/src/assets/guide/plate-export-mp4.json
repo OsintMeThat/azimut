@@ -1,10 +1,10 @@
 {
-  "width": 1200,
-  "height": 824,
+  "width": 1190,
+  "height": 785,
   "anchors": {
     "plate.export-hold": {
-      "x": 477,
-      "y": 644.2,
+      "x": 472,
+      "y": 605.7,
       "w": 70,
       "h": 26
     }

@@ -21,7 +21,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 
-import { CAMERA, CAMERA_PLACE, CHANNEL, GLACIER_POINT, TERMINAL } from './demo.mjs';
+import { CAMERA, CAMERA_PLACE, CHANNEL, GLACIER_POINT, PORT_PAIR, TERMINAL } from './demo.mjs';
 import { AIRBASE, AREAS, MARKS, MAX_CLOUD, PASSES, REFERENCE, ROUTINE } from './airbase.mjs';
 import { liftAnchors } from './extension.mjs';
 
@@ -35,7 +35,7 @@ const TALL = { width: 1400, height: 880 };
 /** Settings with every section of a tab on screen. */
 const SETTINGS = { width: 1440, height: 900 };
 /** General, the longest tab, with its 3D views row too: still wider than tall. */
-const GENERAL = { width: 1440, height: 1080 };
+const GENERAL = { width: 1440, height: 1068 };
 /** Wide enough for Board's Details to open beside the rows rather than over them. */
 const ROOMY = { width: 1360, height: 800 };
 
@@ -853,15 +853,6 @@ async function drawFilm(page, frame, tool, corners, end) {
 // -- a plate laid out from a place in the Map (the make-a-plate journey) -------------
 
 /**
- * The Copernicus id of the guide's workspace, put away while the plate's grounds are
- * read as a reader starting out has them, Sentinel-2 locked, and put back after.
- */
-let copernicusHeld = '';
-
-/** What the journey's comparison is called: the channel on two Wayback releases. */
-let pairTitle = '';
-
-/**
  * The survey layer tracked over time, the case's dated sightings in it, as the layer
  * pictures leave it: done here when those pictures were not taken in the same run.
  */
@@ -882,27 +873,90 @@ async function surveyTracked(page, demo) {
  * A comparison of the channel on two Wayback releases, as Compare saves one: the oldest
  * release of 2014 against the newest, which Before and after is laid on.
  */
-async function waybackPair(page, demo) {
-  const { releases } = await route(page, 'GET', '/api/satellite/wayback/releases');
-  const newest = releases[0];
-  const older = releases.filter((one) => String(one.date).startsWith('2014')).at(-1) ?? releases.at(-1);
-  pairTitle = `Main Channel, ${String(older.date).slice(0, 4)} and ${String(newest.date).slice(0, 4)}`;
-  const side = (release) => ({ present: true, provider: 'esri-wayback', overlays: [], wayback_release: release.release });
-  await route(page, 'POST', `/api/cases/${demo.caseId}/compare/sessions`, {
-    title: pairTitle,
-    spec: { version: 2, camera: { ...CHANNEL, zoom: 16, bearing: 0 }, mode: 'swipe', divider: 50, opacity: 50, a: side(older), b: side(newest) },
-  });
-}
-
 /**
  * Esri's imagery left out of every picture of the plate (photos/CREDITS.md): its tiles,
  * asked one at a time or in a batch (lib/map/tileBatch.js), are asked of the public USGS
- * imagery instead, so a map on World Imagery or Wayback shows a real ground under its
- * frame, its layers and its day, never Esri's pixels. The guide's words say so.
+ * imagery instead, so a map on World Imagery shows a real ground under its frame, its
+ * layers and its day, never Esri's pixels. A dated map is drawn on Sentinel-2 instead.
  */
 const ESRI_TILES = /\/api\/tiles\/(?:batch\/)?esri/;
 const usgsForEsri = (route) =>
   route.continue({ url: route.request().url().replace(/\/api\/tiles\/(batch\/)?esri[^/?]*/, '/api/tiles/$1usgs-imagery') });
+
+/**
+ * World Imagery named for what those pictures draw in its place: USGS's name and USGS's
+ * credit, so a map, the name of its ground and the credits printed on the page all say the
+ * one source whose pixels they show. The guide's words say the app offers Esri there.
+ */
+const PROVIDERS = '**/api/satellite/providers';
+const usgsNamed = async (route) => {
+  const list = await (await route.fetch()).json();
+  const usgs = Array.isArray(list) ? list.find((entry) => entry.id === 'usgs-imagery') : null;
+  if (!usgs) return route.fulfill({ json: list });
+  return route.fulfill({
+    json: list.map((entry) => (entry.id === 'esri-world-imagery' ? { ...entry, label: usgs.label, attribution: usgs.attribution } : entry)),
+  });
+};
+
+/**
+ * The Copernicus catalogue's passes over the channel in the months of the port's pair, as it
+ * answered on 27 November 2026: a pass calendar opened in a picture is answered from here and
+ * asks nothing, and a pass picked there is said to cover the point.
+ */
+const PORT_CATALOGUE = {
+  '2017-05': [
+    { date: '2017-05-29', cloud: 75.4, granules: 1 },
+    { date: '2017-05-24', cloud: 75.4, granules: 1 },
+    { date: '2017-05-19', cloud: 0, granules: 1 },
+    { date: '2017-05-14', cloud: 29.8, granules: 1 },
+    { date: '2017-05-09', cloud: 70.1, granules: 1 },
+    { date: '2017-05-04', cloud: 34, granules: 1 },
+  ],
+  '2026-10': [
+    { date: '2026-10-29', cloud: 85.8, granules: 1 },
+    { date: '2026-10-24', cloud: 0, granules: 1 },
+    { date: '2026-10-19', cloud: 0.4, granules: 1 },
+    { date: '2026-10-16', cloud: 2.8, granules: 1 },
+    { date: '2026-10-14', cloud: 0, granules: 1 },
+    { date: '2026-10-09', cloud: 0.5, granules: 1 },
+    { date: '2026-10-04', cloud: 0, granules: 1 },
+  ],
+  // the month a pass calendar opens on, today's
+  '2026-11': [
+    { date: '2026-11-25', cloud: 12.2, granules: 1 },
+    { date: '2026-11-23', cloud: 8.8, granules: 1 },
+    { date: '2026-11-18', cloud: 44.7, granules: 1 },
+    { date: '2026-11-13', cloud: 52.2, granules: 1 },
+    { date: '2026-11-08', cloud: 3, granules: 1 },
+    { date: '2026-11-05', cloud: 44.9, granules: 1 },
+    { date: '2026-11-03', cloud: 56.3, granules: 1 },
+  ],
+};
+const PASS_DATES = '**/api/satellite/sentinel/dates?*';
+const PASS_COVERAGE = '**/api/satellite/sentinel/coverage?*';
+const passesAnswered = (route) => {
+  const month = (new URL(route.request().url()).searchParams.get('start') ?? '').slice(0, 7);
+  return route.fulfill({ json: { dates: PORT_CATALOGUE[month] ?? [] } });
+};
+const coverageAnswered = (route) => route.fulfill({ json: { available: true } });
+/** The account's layers, as a set-up account lists them: the standard ones, read from no instance. */
+const PASS_LAYERS = '**/api/satellite/sentinel/layers?check=true';
+const layersAnswered = async (route) => {
+  const answer = await (await route.fetch({ url: route.request().url().replace('?check=true', '') })).json();
+  return route.fulfill({ json: { layers: answer.layers, source: 'instance' } });
+};
+/** The port's passes answered on the page, as the catalogue gave them. */
+async function portCatalogue(page, on = true) {
+  if (on) {
+    await page.route(PASS_DATES, passesAnswered);
+    await page.route(PASS_COVERAGE, coverageAnswered);
+    await page.route(PASS_LAYERS, layersAnswered);
+  } else {
+    await page.unroute(PASS_DATES, passesAnswered);
+    await page.unroute(PASS_COVERAGE, coverageAnswered);
+    await page.unroute(PASS_LAYERS, layersAnswered);
+  }
+}
 
 /**
  * The Map drawing the case's observations and not the survey, switched by the eyes of
@@ -1041,11 +1095,9 @@ const PLATE_STAGES = [
       await go('satellite');
       await stopHeld(page);
       await surveyTracked(page, demo);
-      await waybackPair(page, demo);
-      const { api_keys: keys } = await route(page, 'GET', '/api/settings');
-      copernicusHeld = keys?.sentinelhub ?? '';
-      await route(page, 'PUT', '/api/settings/keys', { sentinelhub: '' });
       await page.route(ESRI_TILES, usgsForEsri);
+      await page.route(PROVIDERS, usgsNamed);
+      await portCatalogue(page);
       await go(`satellite?ll=${CHANNEL.lat},${CHANNEL.lon}&z=16&p=usgs-imagery`);
       await mapDrawsObservations(page);
     },
@@ -1075,8 +1127,6 @@ const PLATE_STAGES = [
     },
   },
   inDialog('plate-new', 'plate-go-home', async ({ page }) => {
-    // the plate read the grounds it offers as it opened: the workspace's id goes back
-    await route(page, 'PUT', '/api/settings/keys', { sentinelhub: copernicusHeld });
     await seen(page, '[data-guide="plate.new"]').click();
     await page.getByRole('dialog', { name: 'New plate' }).waitFor();
     await page.waitForTimeout(600);
@@ -1143,7 +1193,7 @@ const PLATE_STAGES = [
     await seen(page, '[data-guide="plate.source-text"]').waitFor();
   }),
   onPlate('plate-geo-sourced', 'plate-geo-source', async ({ page }) => {
-    await seen(page, '[data-guide="plate.source-text"]').fill('Posted by @harbor_watch · geolocated by {handle}');
+    await seen(page, '[data-guide="plate.source-text"]').fill('Photo posted by @harbor_watch');
     await page.waitForTimeout(300);
     await plateUnpicked(page);
   }, { settle: 3000 }),
@@ -1177,7 +1227,7 @@ const PLATE_STAGES = [
     await seen(page, '[data-guide="plate.from-pair"]').waitFor();
   }),
   inDialog('plate-new-paired', 'plate-new-change', async ({ page }) => {
-    await seen(page, 'select[aria-label="From a comparison"]').selectOption({ label: pairTitle });
+    await seen(page, 'select[aria-label="From a comparison"]').selectOption({ label: PORT_PAIR });
     await page.waitForTimeout(400);
   }),
   inDialog('plate-new-paired-ticked', 'plate-new-paired', async ({ page }) => {
@@ -1364,19 +1414,7 @@ const PLATE_STAGES = [
     await grounds.waitFor();
     await grounds.evaluate((node) => node.scrollIntoView({ block: 'center' }));
   }, { settle: 3000 }),
-  onPlate('plate-wayback', 'plate-ground', async ({ page }) => {
-    await seen(page, '[data-guide="plate.ground-wayback"]').click();
-    const release = seen(page, '[data-guide="plate.wayback-release"]');
-    await release.waitFor();
-    await release.evaluate((node) => node.scrollIntoView({ block: 'center' }));
-  }, { settle: 4000 }),
-  onPlate('plate-wayback-dated', 'plate-wayback', async ({ page }) => {
-    // the release nearest the page's day of 2009: Wayback's first
-    const release = seen(page, '[data-guide="plate.wayback-release"]');
-    await release.selectOption(await release.locator('option').last().getAttribute('value'));
-    await page.waitForTimeout(500);
-  }, { settle: 3000 }),
-  onPlate('plate-grey', 'plate-wayback-dated', async ({ page }) => {
+  onPlate('plate-grey', 'plate-ground', async ({ page }) => {
     const grounds = seen(page, '[role="radiogroup"][aria-label="Ground"]');
     await grounds.evaluate((node) => node.scrollIntoView({ block: 'center' }));
     await seen(page, '[data-guide="plate.ground-grey"]').click();
@@ -1615,6 +1653,8 @@ const PLATE_STAGES = [
     async after({ page }) {
       await pageAlone(page, false);
       await page.unroute(ESRI_TILES, usgsForEsri);
+      await page.unroute(PROVIDERS, usgsNamed);
+      await portCatalogue(page, false);
     },
   },
 ];
@@ -1700,7 +1740,8 @@ export const STAGES = [
   {
     shot: 'settings',
     window: GENERAL,
-    focus: ['[data-guide="settings.nav"]'],
+    // the whole window, its title at the top and General's last section at the foot
+    crop: 'full',
     async run({ go }) {
       await go('settings');
     },
@@ -1718,7 +1759,7 @@ export const STAGES = [
     from: 'settings',
     window: SETTINGS,
     after: false,
-    focus: ['[data-guide="settings.nav"]'],
+    focus: ['[data-guide="settings.nav"]', '.tool-header'],
     async run({ page }) {
       // the demo workspace is a throwaway folder named by the environment: shown as a
       // reader's own installation would be
@@ -1748,6 +1789,8 @@ export const STAGES = [
   })),
   {
     shot: 'media',
+    // wide enough for the whole filter row, Unused at its end
+    window: ROOMY,
     crop: 'full',
     async run({ go }) {
       await go('media');
@@ -2090,12 +2133,14 @@ export const STAGES = [
   },
   {
     shot: 'compare',
-    window: WIDE,
+    // wide enough for the whole toolbar and both sides' search boxes
+    window: ROOMY,
+    crop: 'full',
     map: true,
     async run({ go, page }) {
       await go(`compare?${CHANNEL_VIEW}`);
       await page.locator('.canvas-body button', { hasText: 'Open' }).filter({ visible: true }).first().click();
-      await page.getByText('Main Channel, imagery against the map').filter({ visible: true }).first().click();
+      await page.getByText(PORT_PAIR).filter({ visible: true }).first().click();
       // the empty comparison it opened on counts as unsaved work
       const discard = page.getByRole('button', { name: 'Discard changes' });
       if (await discard.isVisible().catch(() => false)) await discard.click();
@@ -3770,9 +3815,8 @@ export const STAGES = [
     },
   },
   {
-    // Compare on the channel, both sides on the public imagery: Esri's dated archive may
-    // not be shown in a picture (photos/CREDITS.md), so the case's own comparison of the
-    // spot is opened and its map side set to the imagery too
+    // Compare on the channel's two Sentinel-2 passes, saved in the case: Esri's dated archive
+    // may not be shown in a picture (photos/CREDITS.md), so the dated pair is Copernicus's
     shot: 'compare-scene',
     window: LARGE,
     clip: '.shell',
@@ -3782,23 +3826,11 @@ export const STAGES = [
       await go(`compare?${CHANNEL_VIEW}`);
       await stopHeld(page);
       await page.locator('.canvas-body button', { hasText: 'Open' }).filter({ visible: true }).first().click();
-      await page.getByText('Main Channel, imagery against the map').filter({ visible: true }).first().click();
+      await page.getByText(PORT_PAIR).filter({ visible: true }).first().click();
       const discard = page.getByRole('button', { name: 'Discard changes' });
       if (await discard.isVisible().catch(() => false)) await discard.click();
-      const sides = page.locator('[data-guide="compare.source"]').filter({ visible: true });
-      await sides.first().waitFor();
-      await page.waitForTimeout(2000);
-      const names = sides.locator('button[aria-label="Imagery provider"] .name');
-      for (let tries = 0; tries < 4; tries += 1) {
-        const off = (await names.allTextContents()).findIndex((name) => name.trim() !== 'USGS Imagery');
-        if (off < 0) break;
-        await useImagery(sides.nth(off), 'USGS Imagery');
-        await page.waitForTimeout(2000);
-      }
-      const shown = await names.allTextContents();
-      if (shown.length < 2 || shown.some((name) => name.trim() !== 'USGS Imagery')) {
-        throw new Error(`Compare still shows ${shown.join(' and ')}: no Esri picture is kept`);
-      }
+      await seen(page, '[data-guide="compare.source"]').waitFor();
+      await page.waitForTimeout(3000);
       await page.mouse.move(1, 1);
     },
   },

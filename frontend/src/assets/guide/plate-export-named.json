@@ -1,10 +1,10 @@
 {
-  "width": 1200,
-  "height": 824,
+  "width": 1190,
+  "height": 785,
   "anchors": {
     "plate.export-go": {
-      "x": 744,
-      "y": 745.7,
+      "x": 739,
+      "y": 707.2,
       "w": 67,
       "h": 31.2
     }

@@ -1,9 +1,9 @@
 {
-  "width": 1200,
-  "height": 824,
+  "width": 1190,
+  "height": 785,
   "anchors": {
     "plate.export-name": {
-      "x": 541,
+      "x": 536,
       "y": 103.5,
       "w": 270,
       "h": 33.2

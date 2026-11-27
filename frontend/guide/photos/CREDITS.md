@@ -38,14 +38,14 @@ could recognise, metadata stripped, and a line here.
 
 | Where it shows | What it is | Credit |
 |---|---|---|
-| Satellite, Compare, Detect, Horizon's ground, the proof's capture, the Map plate's imagery | USGS The National Map orthoimagery | Public domain |
-| Create your analyzer: the Al Udeid Air Base passes of 27 July and 30 September 2026 | Copernicus Sentinel-2, read through Sentinel Hub | Contains modified Copernicus Sentinel data 2026. Free and open under the Copernicus data policy |
+| Satellite, Detect, Horizon's ground, the proof's capture, the Map plate's imagery, named and credited as USGS where the app offers Esri's World Imagery | USGS The National Map orthoimagery | Public domain |
+| Create your analyzer: the Al Udeid Air Base passes of July to November 2026 | Copernicus Sentinel-2, read through Sentinel Hub | Contains modified Copernicus Sentinel data 2026. Free and open under the Copernicus data policy |
+| Compare and the Map plate's before and after: the Port of Los Angeles passes of 19 May 2017 and 24 October 2026 | Copernicus Sentinel-2, read through Sentinel Hub | Contains modified Copernicus Sentinel data 2017 and 2026. Free and open under the Copernicus data policy |
 | The capture extension's pictures, the analyzer library's map | OpenStreetMap tiles | © OpenStreetMap contributors, ODbL |
-| Compare's map side | OpenTopoMap | Map data © OpenStreetMap contributors, SRTM; map style © OpenTopoMap (CC-BY-SA) |
 | Place and peak names, the plate's ground | OpenFreeMap | © OpenMapTiles, data © OpenStreetMap contributors |
 | Horizon's terrain | Mapterhorn elevation | © Mapterhorn, as the app credits it |
 
 The Sentinel-2 passes are not fetched when the pictures are made: they are copied
-from the tile cache of an Azimut that already read them, for the Detect tutorial
-film (`airbase.mjs`). No base map with restrictive terms (Esri, Google) is shown in
-a picture.
+from the tile cache of an Azimut that already read them (`airbase.mjs`), and the
+port's pass calendar is the catalogue's answer, kept in `stages.mjs`. No base map
+with restrictive terms (Esri, Google) is shown in a picture.
