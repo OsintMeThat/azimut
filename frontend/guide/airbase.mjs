@@ -16,7 +16,7 @@
  * `photos/CREDITS.md` and on the map itself.
  */
 
-import { cpSync, existsSync, readdirSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -69,6 +69,9 @@ export const MARKS = [
   { point: [51.3145763, 25.1373515], expect: 'empty' },
 ];
 
+/** The case's routine over the four areas, whose runs and dashboard the journey shows as they are. */
+export const ROUTINE = { id: '1181df4f2f3f', title: 'Al Udeid Air Base Routine' };
+
 /** Every day the journey reads: the check's two passes, the reference and the routine's. */
 const DAYS = [...new Set([...PASSES, REFERENCE, ...ROUTINE_PASSES])];
 
@@ -87,4 +90,37 @@ export function copyPasses(home, source = process.env.GUIDE_CACHE_HOME ?? join(h
     copied += 1;
   }
   return copied;
+}
+
+/**
+ * Copy the case's routine into the demo case of the run, as the case keeps it: the routine,
+ * the four areas it watches and every run it made, each with what it kept. The journey's
+ * routine pictures show those runs and their dashboard rather than reading the passes
+ * again. Read from the owner's US airports case (or `GUIDE_DETECT_CASE`), never written
+ * to. Says how many runs it copied: none means the routine's pictures cannot be made.
+ */
+export function copyRoutine(home, source = process.env.GUIDE_DETECT_CASE ?? join(homedir(), 'Azimut', 'US airports')) {
+  const from = join(source, 'azimut', '.analysis');
+  const followup = join(from, `followups-${ROUTINE.id}.json`);
+  if (!existsSync(followup)) return 0;
+  const demo = readdirSync(home)
+    .map((name) => join(home, name, 'azimut'))
+    .find((dir) => existsSync(join(dir, 'case.json')) && JSON.parse(readFileSync(join(dir, 'case.json'), 'utf8')).name === 'Demo case');
+  if (!demo) return 0;
+  const to = join(demo, '.analysis');
+  mkdirSync(to, { recursive: true });
+  cpSync(followup, join(to, `followups-${ROUTINE.id}.json`));
+  for (const { area_id: area } of JSON.parse(readFileSync(followup, 'utf8')).area_dates) {
+    if (existsSync(join(from, `areas-${area}.json`))) cpSync(join(from, `areas-${area}.json`), join(to, `areas-${area}.json`));
+  }
+  let runs = 0;
+  for (const name of readdirSync(from).filter((one) => /^runs-.*\.json$/.test(one))) {
+    const run = JSON.parse(readFileSync(join(from, name), 'utf8'));
+    if ((run.input?.followup_id ?? run.followup_id) !== ROUTINE.id) continue;
+    cpSync(join(from, name), join(to, name));
+    const assets = name.replace(/\.json$/, '.assets');
+    if (existsSync(join(from, assets))) cpSync(join(from, assets), join(to, assets), { recursive: true });
+    runs += 1;
+  }
+  return runs;
 }

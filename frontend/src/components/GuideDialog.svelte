@@ -82,8 +82,8 @@
   let act = $state(0);
   let behind = $state([]);
   let landed = $state(null);
-  /** A journey fills the guide; the menu comes back on the way out. */
-  let menuShown = $state(false);
+  /** The menu beside a journey, kept as the reader left it: shown until Guide folds it. */
+  let menuShown = $state(true);
 
   const item = $derived(MENU_ITEMS.find((entry) => entry.id === itemId) ?? MENU_ITEMS[0]);
   const journey = $derived(
@@ -198,7 +198,6 @@
     act = 0;
     behind = [];
     landed = null;
-    menuShown = false;
     reset();
   }
 
@@ -267,7 +266,6 @@
     landed = null;
     moved = at > 1;
     chosenKind = null;
-    menuShown = false;
     reset();
   }
 

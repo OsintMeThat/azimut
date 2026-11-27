@@ -4045,7 +4045,7 @@ export const JOURNEYS = [
           'detect.when': 'Press A fixed picture, then each area’s Date A and Enter a date, and type 24/07/2026. Then press Next.',
           'detect.run-pass': 'Name it and press Save and run the first pass. It reads the newest pass against July.',
           'detect.catch-up': 'Press Catch up, then Look for passes to list every pass since 24 July with its cloud.',
-          'detect.catch-read': 'Tick a few passes weeks apart and press Read. Each runs once, oldest first.',
+          'detect.catch-read': 'Tick the passes it has not read yet and press Read. Each runs once, oldest first.',
           'detect.glance': 'The bars show the candidates of each pass. Press Dashboard for the full view.',
         },
       },
