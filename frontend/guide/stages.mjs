@@ -22,7 +22,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 
 import { CAMERA, CAMERA_PLACE, CHANNEL, GLACIER_POINT, TERMINAL } from './demo.mjs';
-import { AIRBASE, AREAS, MARKS, MAX_CLOUD, PASSES, REFERENCE, ROUTINE_PASSES } from './airbase.mjs';
+import { AIRBASE, AREAS, MARKS, MAX_CLOUD, PASSES, REFERENCE, ROUTINE } from './airbase.mjs';
 import { liftAnchors } from './extension.mjs';
 
 const TOOLS = { width: 1000, height: 700 };
@@ -573,10 +573,13 @@ async function areaDates(page, { a, b = '' }) {
   await page.mouse.move(1, 1);
 }
 
-/** Every run of the routine finished: Run routine is offered again. */
-async function routineIdle(page) {
-  await page.getByRole('button', { name: /Run routine/ }).filter({ visible: true }).first().waitFor({ timeout: 1_200_000 });
-  await page.waitForTimeout(1500);
+/** The case's routine opened from Detect's Routines tab, its own panel in the dock. */
+async function openRoutine(page) {
+  // the Routines tab takes the dock home, out of whatever it showed
+  await seen(page, '[data-guide="detect.tabs"] [aria-label="Routines"]').click();
+  await page.locator('button.title[title="Open this routine"]', { hasText: ROUTINE.title }).first().click();
+  await seen(page, '[data-guide="detect.catch-up"]').waitFor({ timeout: 30_000 });
+  await page.mouse.move(1, 1);
 }
 
 /** The four areas the owner's routine watches, saved in the case as Areas saves a drawn one. */
@@ -2347,15 +2350,14 @@ export const STAGES = [
       if (failed) throw new Error(`the pass did not run: ${await page.locator('[data-guide="detect.run"]').innerText()}`);
     },
   },
-  // The case's routine over the same four areas, read for real on the owner's account
-  // (`online`): each pass compared with the July reference, the newest first, then the
-  // passes the case read caught up, so its dashboard has a history to draw
+  // The case's routine over the same four areas: the wizard as it is filled in, then the
+  // routine itself as the owner's case keeps it (airbase.mjs `copyRoutine`), its runs and
+  // its dashboard shown as they are rather than read again
   {
     shot: 'detect-routine-where',
     window: FILM,
     map: true,
     crop: 'full',
-    online: true,
     after: false,
     async run({ go, page, demo }) {
       await newDetection(go, page, demo, 'Routine');
@@ -2368,7 +2370,6 @@ export const STAGES = [
     window: FILM,
     map: true,
     crop: 'full',
-    online: true,
     after: false,
     async run({ page }) {
       await page.getByRole('button', { name: /^Next: What/ }).filter({ visible: true }).first().click();
@@ -2391,7 +2392,6 @@ export const STAGES = [
     window: FILM,
     map: true,
     crop: 'full',
-    online: true,
     after: false,
     async run({ page }) {
       await page.getByRole('button', { name: /^Next: When/ }).filter({ visible: true }).first().click();
@@ -2405,7 +2405,6 @@ export const STAGES = [
     window: FILM,
     map: true,
     crop: 'full',
-    online: true,
     after: false,
     async run({ page }) {
       await page.getByRole('button', { name: /^Next: Start/ }).filter({ visible: true }).first().click();
@@ -2414,66 +2413,56 @@ export const STAGES = [
     },
   },
   {
-    // the first pass read: the routine's own panel, Run routine and Catch up
+    // the routine's own panel, Run routine and Catch up: the case's routine, its runs read
     shot: 'detect-routine-saved',
     from: 'detect-routine-start',
     window: FILM,
     map: true,
     crop: 'full',
-    online: true,
     after: false,
     settle: 5000,
     async run({ page }) {
-      await page.getByRole('button', { name: /Save and run the first pass/ }).filter({ visible: true }).first().click();
-      await routineIdle(page);
+      await openRoutine(page);
     },
   },
   {
-    // Catch up: the passes since the July reference looked up, the case's own ticked
+    // Catch up: the passes since the July reference, the ones the routine read ticked as read
     shot: 'detect-routine-catchup',
     from: 'detect-routine-saved',
     window: FILM,
     map: true,
     crop: 'full',
-    online: true,
     after: false,
+    // the catalogue asked for real, one request: the passes since July with their cloud
+    online: true,
     async run({ page }) {
       await seen(page, '[data-guide="detect.catch-up"]').click();
       await page.getByRole('button', { name: /Look for passes/ }).filter({ visible: true }).first().click();
       await page.locator('.catch .pass').first().waitFor({ timeout: 60_000 });
-      await page.locator('.catch .summary button', { hasText: 'None' }).first().click();
-      // the passes the case's routine read, as far as the catalogue lists them
-      for (const day of ROUTINE_PASSES) {
-        const tick = page.locator(`.catch input[aria-label="Read ${day}"]:not([disabled])`);
-        if (await tick.count()) await tick.first().check();
-      }
       await seen(page, '[data-guide="detect.catch-read"]').scrollIntoViewIfNeeded();
     },
   },
   {
-    // the passes read, one run each: the routine's bars, pass after pass
+    // back on the routine: its passes in bars, candidates per pass
     shot: 'detect-routine-read',
     from: 'detect-routine-catchup',
     window: FILM,
     map: true,
     crop: 'full',
-    online: true,
     after: false,
     settle: 5000,
     async run({ page }) {
-      await seen(page, '[data-guide="detect.catch-read"]').click();
-      await routineIdle(page);
+      await openRoutine(page);
       await seen(page, '[data-guide="detect.glance"]').waitFor({ timeout: 60_000 });
     },
   },
   {
-    // the dashboard: candidates per pass since July
+    // the dashboard: candidates per pass since July, the spots that came and went
     shot: 'detect-routine-dashboard',
     from: 'detect-routine-read',
     window: FILM,
     clip: 'body',
     crop: 'full',
-    online: true,
     settle: 4000,
     async run({ page }) {
       await seen(page, '[data-guide="detect.glance"]').click();

@@ -39,7 +39,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build, createServer, loadConfigFromFile, mergeConfig, preview } from 'vite';
 
-import { copyPasses } from './airbase.mjs';
+import { copyPasses, copyRoutine } from './airbase.mjs';
 import { buildDemo, CHANNEL, IMAGERY } from './demo.mjs';
 import { openExtension } from './extension.mjs';
 import { motionOf } from './motion.mjs';
@@ -331,6 +331,9 @@ async function run() {
     });
     const demo = await buildDemo({ call, scratch });
     say(`demo case filed: ${demo.caseId}`);
+    // the analyzer journey's routine as the owner's US airports case keeps it (airbase.mjs)
+    const routineRuns = copyRoutine(home);
+    say(routineRuns ? `${routineRuns} runs of the airbase routine copied` : 'no airbase routine to copy: its pictures will fail');
 
     const context = await browser.newContext({
       viewport: DEFAULT_WINDOW,
