@@ -235,10 +235,71 @@ test('reads a shadow only when asked: the hour it was cast, how tall, and the sl
   await hour.click();
   await expect(slider).toHaveValue('18');
 
+  // the tip taken and dragged: it follows the hand all the way, and is read again where it lands
+  const tip = page.locator('.path-handle[title="Drag to move the tip of the shadow"]');
+  const from = await tip.boundingBox();
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2, { steps: 3 });
+  await page.mouse.down();
+  await page.mouse.move(box.x + 680, box.y + 380, { steps: 10 });
+  await page.mouse.up();
+  const to = await tip.boundingBox();
+  expect(to.y).toBeGreaterThan(from.y + 60);
+  await expect.poll(() => asked.length).toBe(2);
+  expect(Number(asked.at(-1).bearing)).toBeLessThan(260);
+
   // taken off, the panel offers it again and the map forgets it
   await page.getByRole('button', { name: 'Remove the shadow' }).click();
   await expect(page.locator('.measure-word.use')).toHaveCount(0);
   await expect(page.locator('.sun-panel .shadow')).toHaveText('Read a shadow');
+});
+
+test('a shadow takes the sun to its foot and reads by the hand; one no hour casts is read the other way round', async ({ page }) => {
+  const fixture = await installAppFixture(page);
+  const asked = [];
+  // that day's shadows fall west: drawn east, no hour casts one
+  await page.route('**/api/geo/shadow?**', async (route) => {
+    const query = Object.fromEntries(new URL(route.request().url()).searchParams);
+    asked.push(query);
+    const sun = (Number(query.bearing) + 180) % 360;
+    const west = Number(query.bearing) > 180;
+    await route.fulfill({
+      json: {
+        date: query.date, zone: 'Europe/Zurich', sun_azimuth: sun,
+        falls: { from: 200, to: 340, middle: 270, whole: false },
+        moments: west ? [{ local: `${query.date}T07:10:00+02:00`, utc: `${query.date}T05:10:00Z`, abbreviation: 'CEST', sun_azimuth: sun, sun_altitude: 20, height_m: 12 }] : [],
+      },
+    });
+  });
+  await page.goto('/#satellite');
+  await awaitMapReady(page);
+  await page.getByRole('button', { name: 'Sun and moon' }).click();
+  await expect.poll(() => fixture.skyQueries.length).toBe(2);
+  const box = await page.locator('.map').boundingBox();
+  const anchor = page.locator('.sun-panel .anchor .mono');
+  const planted = await anchor.textContent();
+
+  await page.getByRole('button', { name: 'Read a shadow' }).click();
+  await page.mouse.click(box.x + 600, box.y + 300);
+  // the sun's path is drawn from the foot now
+  await expect(anchor).not.toHaveText(planted);
+  // aimed west, the hand reads the hour off the day's curve, and nothing is asked yet
+  await page.mouse.move(box.x + 560, box.y + 300, { steps: 3 });
+  await page.mouse.move(box.x + 520, box.y + 300, { steps: 3 });
+  await expect(page.locator('.shadow-aim')).toContainText('06:00 · ≈');
+  await expect(page.locator('.path-handle.shadow-tip.live')).toHaveCount(1);
+  expect(asked).toHaveLength(0);
+
+  // put down east instead: no hour, the way that day's shadows fall, and a way out
+  await page.mouse.move(box.x + 680, box.y + 300, { steps: 4 });
+  await page.mouse.click(box.x + 680, box.y + 300);
+  const panel = page.locator('.sun-panel .shadow');
+  await expect(panel).toContainText('No hour of');
+  await expect(panel).toContainText('That day, shadows fall between 200° and 340°, through west.');
+  await expect(page.locator('.shadow-aim')).toHaveCount(0);
+  await expect(page.locator('.path-handle.shadow-tip:not(.live)')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Swap the ends' }).click();
+  await expect(page.locator('.sun-panel .moment')).toContainText('07:10 CEST');
+  expect(Number(asked.at(-1).bearing)).toBeGreaterThan(260);
 });
 
 test('drops the sky layer when the mode closes', async ({ page }) => {

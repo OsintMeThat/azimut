@@ -3023,6 +3023,7 @@
                 onclearshadow={() => sky.clearShadow()}
                 onmoment={(i) => sky.showMoment(i)}
                 oncopyshadow={() => copyText(sky.shadowText())}
+                onswapshadow={() => sky.swapShadow()}
               />
             {:else if armedMode === 'footprint'}
               <FootprintPanel

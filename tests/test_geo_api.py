@@ -559,6 +559,11 @@ def test_a_shadow_no_hour_could_throw_has_no_moment(client):
         "lat": 48.8584, "lon": 2.2945, "date": "2024-06-21", "bearing": 180, "length": 50,
     }).json()
     assert answer["moments"] == []
+    # and says which way that day's shadows do fall: round through north, never south
+    falls = answer["falls"]
+    assert falls["whole"] is False
+    assert min(falls["middle"], 360 - falls["middle"]) < 5
+    assert (180 - falls["from"]) % 360 > (falls["to"] - falls["from"]) % 360
 
 
 @pytest.mark.parametrize("params", [

@@ -150,3 +150,70 @@ export function shadowSentence(shadow, units) {
   const also = second ? `, or ${formatHeight(second.height_m, units)} at ${clockOf(second)}` : '';
   return `${height} (${when}${also})`;
 }
+
+const turn = (degrees) => ((degrees % 360) + 360) % 360;
+/** How far `azimuth` lies past `wanted`, in [-180, 180). */
+const gapTo = (azimuth, wanted) => turn(azimuth - wanted + 180) - 180;
+const wallClock = (minutes) => {
+  const whole = ((Math.round(minutes) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(whole / 60)).padStart(2, '0')}:${String(whole % 60).padStart(2, '0')}`;
+};
+
+/**
+ * When the day's sun stood opposite a shadow cast along `bearing`, read off the
+ * curve the sky already holds: a preview while the hand aims or drags, before
+ * the backend places it to the second. Each moment carries its wall clock, the
+ * sun's altitude, and the sample nearest it, for the slider.
+ *
+ * @param {{ minutes: number[], clock: string[], sun_azimuth: number[], sun_altitude: number[] }} curve
+ * @param {number} bearing the shadow's, from its foot to its tip
+ */
+export function shadowOnCurve(curve, bearing) {
+  const wanted = turn(bearing + 180);
+  const { sun_azimuth: azimuth, sun_altitude: altitude } = curve;
+  const found = [];
+  for (let i = 0; i + 1 < azimuth.length; i++) {
+    if (altitude[i] <= 0 && altitude[i + 1] <= 0) continue;
+    const before = gapTo(azimuth[i], wanted);
+    const after = gapTo(azimuth[i + 1], wanted);
+    // a sample right on it is the start of the next pair, not the end of this one
+    if (after === 0 && i + 2 < azimuth.length) continue;
+    if (before !== 0 && Math.sign(before) === Math.sign(after)) continue;
+    // the gap jumping by a turn is the sun crossing the opposite azimuth
+    if (Math.abs(after - before) > 180) continue;
+    const t = before === after ? 0 : before / (before - after);
+    const up = altitude[i] + (altitude[i + 1] - altitude[i]) * t;
+    if (up <= 0) continue;
+    const minutes = minutesOf(curve.clock[i]) + t * (curve.minutes[i + 1] - curve.minutes[i]);
+    found.push({ clock: wallClock(minutes), altitude: up, index: t < 0.5 ? i : i + 1 });
+  }
+  return found;
+}
+
+const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+
+/** A bearing as the side of the sky it points to, in words. */
+export function compassWord(bearing) {
+  return COMPASS[Math.round(turn(bearing) / 45) % 8];
+}
+
+/**
+ * Which way a day's shadows fall (`/api/geo/shadow`'s `falls`), for a shadow no
+ * hour casts: the way out is to see it was drawn the wrong way round.
+ */
+export function fallsSentence(falls) {
+  if (!falls) return 'The sun stays down all that day.';
+  if (falls.whole) return '';
+  return `That day, shadows fall between ${formatBearing(falls.from)} and ${formatBearing(falls.to)}, through ${compassWord(falls.middle)}.`;
+}
+
+/**
+ * Whether the shadow drawn the other way round has an hour. Its bearing is the
+ * sun's azimuth the answer asked about, so it only has to lie in the day's arc.
+ */
+export function castsReversed(answer) {
+  const falls = answer?.falls;
+  if (!falls || !Number.isFinite(answer.sun_azimuth)) return false;
+  if (falls.whole) return true;
+  return turn(answer.sun_azimuth - falls.from) <= turn(falls.to - falls.from);
+}

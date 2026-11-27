@@ -699,3 +699,35 @@ def shadow_moments(
             "sun_altitude": altitude,
         })
     return found
+
+
+def shadow_falls(
+    lat: float, lon: float, start: datetime, end: datetime
+) -> dict[str, Any] | None:
+    """The bearings one day's shadows sweep while the sun is up.
+
+    The arc runs clockwise from ``from`` to ``to``, and ``middle`` lies inside it,
+    so a reader can name the side the shadows fall on. The sun's azimuth is
+    unwrapped over the whole day before the up minutes are kept, so a sweep
+    through north stays one piece. A shadow drawn outside the arc was drawn the
+    wrong way round or on the wrong day. ``whole`` marks a midnight sun, whose
+    shadows go all the way round, and None a day the sun never rises.
+    """
+    jd = _grid(start, end, 60)
+    values = _positions(lat, lon, jd)
+    up = values["sun_apparent_altitude"] > 0
+    if not up.any():
+        return None
+    away = np.degrees(np.unwrap(np.radians(values["sun_azimuth"] + 180.0)))[up]
+    low = float(away.min())
+    high = float(away.max())
+    # a sun that never sets turns once round the sky, a whisker short of 360° in
+    # a local day, and its shadows with it
+    if up.all() or high - low >= 360.0:
+        return {"from": 0.0, "to": 0.0, "middle": 0.0, "whole": True}
+    return {
+        "from": round(low % 360.0, 1),
+        "to": round(high % 360.0, 1),
+        "middle": round(((low + high) / 2) % 360.0, 1),
+        "whole": False,
+    }

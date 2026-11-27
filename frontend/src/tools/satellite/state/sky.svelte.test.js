@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushSync } from 'svelte';
 import { createSkyState, usableDate } from './sky.svelte.js';
 
 /**
@@ -465,10 +466,36 @@ describe('a shadow, read only when asked for', () => {
     expect(tip.title).toBe('Drag to move the tip of the shadow');
     const moved = { lat: 48.8501, lon: 2.3502 };
     tip.onDrag(moved);
-    expect(shadowLayer().patch).toHaveBeenCalledWith('shadow', { points: [FOOT, moved] });
+    expect(shadowLayer().patch).toHaveBeenCalledWith('shadow', expect.objectContaining({ points: [FOOT, moved] }));
     tip.onDragEnd();
     await vi.waitFor(() => expect(shadowAsked()).toHaveLength(2));
     expect(Number(query(shadowAsked()[1]).get('bearing'))).toBeLessThan(90);
+  });
+
+  it('keeps its ends under the hand while one is dragged, whatever effect redraws the sky', async () => {
+    const s = shadowStore();
+    await traced(s);
+    // the map's redraw, as Satellite runs it: on the day, the hour and the point
+    const stop = $effect.root(() => {
+      $effect(() => {
+        s.on;
+        s.sky;
+        s.index;
+        s.anchor;
+        s.draw();
+      });
+    });
+    flushSync();
+    const laid = shadowLayer().set.mock.calls.length;
+    const tip = shadowLayer().set.mock.calls.at(-1)[0].find((shape) => shape.id === 'shadow-end-1');
+    tip.onDrag({ lat: 48.8501, lon: 2.3502 });
+    // due north of the foot: the fixture's noon, so the hour moves and the sky is drawn again
+    tip.onDrag({ lat: 48.8502, lon: 2.35 });
+    flushSync();
+    expect(s.index).toBe(12);
+    // laid again, the handle held would be torn down and the drag would stop
+    expect(shadowLayer().set).toHaveBeenCalledTimes(laid);
+    stop();
   });
 
   it('follows the pointer from the foot while the tip is aimed', () => {
@@ -480,7 +507,102 @@ describe('a shadow, read only when asked for', () => {
     s.follow(TIP);
     expect(shadowLayer().set.mock.calls.at(-1)[0].find((shape) => shape.id === 'shadow-live').points).toEqual([FOOT, TIP]);
     s.follow(FOOT);
-    expect(shadowLayer().patch).toHaveBeenCalledWith('shadow-live', { points: [FOOT, FOOT] });
+    expect(shadowLayer().patch).toHaveBeenCalledWith('shadow-live', expect.objectContaining({ points: [FOOT, FOOT] }));
+  });
+
+  const NORTH = { lat: 48.8501, lon: 2.35 }; // about 11 m north: the fixture's sun is due south at noon
+  const SOUTH = { lat: 48.8499, lon: 2.35 }; // toward a sun that never stands north
+  const aimed = () => made[2].set.mock.calls.at(-1)[0][0].html;
+  const lastShapes = () => shadowLayer().set.mock.calls.at(-1)[0];
+  const turned = (bearing, to) => Math.abs(((bearing - to + 540) % 360) - 180) < 1;
+
+  it('moves the sun to the foot at the hour it was on, so its ray and the shadow make one line', async () => {
+    const s = shadowStore();
+    s.open(KYIV);
+    await s.load();
+    s.draw();
+    s.setIndex(15);
+    s.traceShadow();
+    s.place(FOOT);
+    expect(s.anchor).toEqual(FOOT);
+    await s.load();
+    expect(query(asked.at(-1)).get('lat')).toBe('48.85');
+    expect(s.index).toBe(15);
+  });
+
+  it('reads the hour and the height by the hand while the tip is aimed, the sun swinging to it', async () => {
+    const s = shadowStore();
+    s.open(FOOT);
+    await s.load();
+    s.draw();
+    s.traceShadow();
+    s.place(FOOT);
+    s.follow(NORTH);
+    // the fixture's noon: the sun due south, 60° up, so 11 m of shadow stand 19 m tall
+    expect(aimed()).toContain('12:00 · ≈ 19 m tall');
+    expect(s.index).toBe(12);
+    const arrow = lastShapes().find((shape) => shape.id === 'shadow-live-tip');
+    expect(arrow.className).toContain('shadow-tip live');
+    expect(turned(arrow.rotation, 0)).toBe(true);
+    s.follow(SOUTH);
+    expect(aimed()).toContain('No hour of the day');
+    expect(shadowLayer().patch).toHaveBeenCalledWith('shadow-live', expect.objectContaining({ style: expect.objectContaining({ stroke: '#9b9b9b' }) }));
+    expect(s.index).toBe(12); // nowhere to swing to
+    // the backend is asked at the click, not as the hand moves
+    expect(shadowAsked()).toEqual([]);
+    s.place(NORTH);
+    expect(made[2].clear).toHaveBeenCalled();
+  });
+
+  it('draws the tip as an arrow away from the foot, grey when no hour casts it', async () => {
+    const s = shadowStore();
+    await traced(s);
+    let tip = lastShapes().find((shape) => shape.id === 'shadow-end-1');
+    expect(tip.className).toContain('shadow-tip');
+    expect(turned(tip.rotation, 90)).toBe(true);
+    expect(tip.html).toContain('#f5a623');
+    answer = { date: '2026-06-21', sun_azimuth: 270, moments: [], falls: { from: 240, to: 120, middle: 0, whole: false } };
+    s.clearShadow();
+    await traced(s);
+    tip = lastShapes().find((shape) => shape.id === 'shadow-end-1');
+    expect(tip.html).toContain('#9b9b9b');
+    expect(lastShapes().find((shape) => shape.id === 'shadow').style.stroke).toBe('#9b9b9b');
+  });
+
+  it('says which way that day’s shadows fall, and reads it the other way round when that has an hour', async () => {
+    answer = { date: '2026-06-21', sun_azimuth: 270, moments: [], falls: { from: 240, to: 120, middle: 0, whole: false } };
+    const s = shadowStore();
+    await traced(s);
+    expect(s.shadow.falls).toBe('That day, shadows fall between 240° and 120°, through north.');
+    expect(s.shadow.swappable).toBe(true);
+    answer = { date: '2026-06-21', moments: [MOMENT] };
+    s.swapShadow();
+    await vi.waitFor(() => expect(s.shadow.moments).toHaveLength(1));
+    expect(turned(Number(query(shadowAsked().at(-1)).get('bearing')), 270)).toBe(true);
+    // the sun went with the foot
+    expect(s.anchor).toEqual(TIP);
+    expect(s.shadow.falls).toBe('');
+    expect(s.shadow.swappable).toBe(false);
+  });
+
+  it('offers no swap when the shadow the other way round has no hour either', async () => {
+    answer = { date: '2026-06-21', sun_azimuth: 270, moments: [], falls: { from: 300, to: 60, middle: 0, whole: false } };
+    const s = shadowStore();
+    await traced(s);
+    expect(s.shadow.swappable).toBe(false);
+  });
+
+  it('reads it again when the sky comes back in another zone', async () => {
+    const s = shadowStore();
+    await traced(s);
+    const read = api.get;
+    api.get = vi.fn(async (path) => {
+      const one = await read(path);
+      return path.startsWith('/api/geo/sky') ? { ...one, zone: { name: 'Europe/Berlin', abbreviation: 'CEST' } } : one;
+    });
+    await s.load();
+    await vi.waitFor(() => expect(shadowAsked()).toHaveLength(2));
+    expect(query(shadowAsked()[1]).get('zone')).toBe('Europe/Berlin');
   });
 
   it('says so when no hour of the day casts it', async () => {

@@ -9,7 +9,8 @@
   //
   // A shadow is read only when Shadow is pressed: the foot of something, then
   // the tip of its shadow, and the panel says the hour and how tall it stands.
-  // An hour pressed there puts the slider on it.
+  // An hour pressed there puts the slider on it. A shadow no hour casts says
+  // which way that day's shadows fall, and offers its ends the other way round.
   import Icon from '../../components/Icon.svelte';
   import MoonGlyph from '../../components/MoonGlyph.svelte';
   import DateField from '../../components/DateField.svelte';
@@ -33,6 +34,8 @@
     /** The slider on the hour of the shadow's moment `i`. */
     onmoment,
     oncopyshadow,
+    /** Read the shadow with its foot and its tip the other way round. */
+    onswapshadow,
   } = $props();
 
   const curve = $derived(sky?.curve ?? null);
@@ -209,6 +212,12 @@
         <p class="failed">{shadow.error}</p>
       {:else if shadow.answered && !shadow.moments.length}
         <p class="answer">No hour of {shadow.date} casts this shadow</p>
+        {#if shadow.falls}<p class="note">{shadow.falls}</p>{/if}
+        {#if shadow.swappable}
+          <button class="btn btn-sm btn-primary" onclick={onswapshadow} title="Read it with the foot and the tip the other way round">
+            <Icon name="swap" size={13} /> Swap the ends
+          </button>
+        {/if}
       {:else if shadow.answered}
         {#each shadow.moments as moment, i (i)}
           <button class="moment" onclick={() => onmoment(i)} title={`Set the hour to ${moment.clock}`}>
@@ -331,7 +340,7 @@
     font-size: var(--fs-xs);
     color: var(--text-3);
   }
-  /* the shadow is read on demand, under the anchor it does not move */
+  /* the shadow is read on demand, and the anchor moves to its foot */
   .shadow {
     display: flex;
     flex-direction: column;
