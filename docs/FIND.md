@@ -37,8 +37,8 @@ Yosemite, in 1901.
   a little longer, so ×1 and ×2–3.
 - **The search.** An area of about 85 km² round the valley, a point every 50 m.
 
-Find put Glacier Point first, about 300 m from where the photographer stood, facing the
-right way with nearly the right lens. The best place explained 81% of the trace and the
+Find put Glacier Point first, about 200 m from where the photographer stood, facing the
+right way with nearly the right lens. The best place explained 76% of the trace and the
 next 56%. With the same photo traced roughly and no marks, on a smaller area, Find also
 put it first, but the next place came within a few points of it. The marks are what set
 the true place apart.
