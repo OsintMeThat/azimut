@@ -337,6 +337,7 @@ stops making sense.
 - **Signed PDFs:** sign the finished file (PAdES, an incremental CMS update, e.g. pyHanko once its wheels are checked on the three OSes) with an X.509 key the analyst holds, kept 0600; a self-signed key proves only that the file is unchanged since it was signed, while a reader-trusted identity needs a CA certificate and a timestamp server, a network call.
 - **A report from a period:** every geolocation of a period written into a note through a per-item layout (card, table, one per page).
 - **Interactive map plate:** a map of a period's located videos, each point playing its clip, made without drawing it by hand.
+- **A chronology and a link chart on a plate:** two Map plate elements built by click and drop from the case's events, people and places, plus free cards that stay on the plate until filed in the case.
 - **More on the home page:** the case's own notes beside the tiles, and panels the analyst arranges rather than a fixed grid. Each has to earn its place there rather than beside Board, Graph and Timeline, which already read the case.
 - **Radar damage from a stack of passes:** the pixel-wise t-test (PWTT) over a year of passes before and weeks after, which two passes cannot match.
 - **Oil slicks by radar:** dark patches on the sea near anchorages and lanes, which Sentinel-1 shows through cloud.
