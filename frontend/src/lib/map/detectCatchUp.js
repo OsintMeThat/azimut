@@ -17,9 +17,13 @@ export const MAX_CATCH_UP = 30;
 /** How far back the list looks for a routine that has never read a pass. */
 export const FIRST_LOOKBACK = 30;
 
-/** The days to look between: from the first pass the routine read, or a month back, to today. */
-export function catchUpSpan(readDays, today = new Date().toISOString().slice(0, 10)) {
-  const first = [...(readDays ?? [])].filter(Boolean).sort()[0];
+/**
+ * The days to look between: from the first pass the routine read, or a month back, to
+ * today. A routine that compares every pass with one fixed day (`since`) looks from that
+ * day, when it comes first: each pass since is a change it can read.
+ */
+export function catchUpSpan(readDays, today = new Date().toISOString().slice(0, 10), since = '') {
+  const first = [...(readDays ?? []), since].filter(Boolean).sort()[0];
   if (first) return { start: first, end: today };
   const start = new Date(Date.parse(`${today}T00:00:00Z`) - FIRST_LOOKBACK * 86400000).toISOString().slice(0, 10);
   return { start, end: today };
