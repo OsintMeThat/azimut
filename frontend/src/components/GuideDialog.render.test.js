@@ -176,10 +176,15 @@ describe('a journey', () => {
   const build = JOURNEYS.find((journey) => journey.id === 'create-an-analyzer');
   const step = (id, kind) => stepAs(geolocate.steps.find((one) => one.id === id), kind);
 
-  it('fills the guide, its menu folded away until asked for', async () => {
+  it('keeps its menu beside it, folded away and back by Guide', async () => {
     await open(`journey:${build.id}`);
+    expect(document.querySelector('.guide.immersed')).toBeNull();
+    press(document.querySelector('.menu-toggle'));
     expect(document.querySelector('.guide.immersed')).not.toBeNull();
     press(document.querySelector('.menu-toggle'));
+    expect(document.querySelector('.guide.immersed')).toBeNull();
+    // another journey picked from the menu keeps it shown
+    press(entry(JOURNEYS[0].title));
     expect(document.querySelector('.guide.immersed')).toBeNull();
     press(entry('Sources'));
     expect(document.querySelector('.guide.immersed')).toBeNull();
