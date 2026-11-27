@@ -326,9 +326,10 @@ describe('journeys', () => {
     expect(stepMarks(step('geolocate')).map((mark) => mark.anchor)).toEqual(['toast.action', 'todo.go', 'geo.pill']);
     expect(step('geolocate').tip).toMatch(/case panel/);
     expect(step('mark').then).toMatch(/notice/);
-    // the camera's spot is found, not guessed: a line through two things that line up
-    expect(stepMarks(step('spot')).map((mark) => mark.anchor)).toEqual(['map.measure-from', 'map.ground', 'map.drop-lead']);
-    expect(step('spot').does['map.measure-from']).toMatch(/east tower[\s\S]*Evergreen cranes/);
+    // the camera's spot is found, not guessed: Align runs a line through two things that line up
+    expect(stepMarks(step('spot')).map((mark) => mark.anchor)).toEqual(['map.align-tool', 'map.ground', 'map.drop-lead']);
+    expect(step('spot').does['map.align-tool']).toMatch(/east tower[\s\S]*Evergreen cranes/);
+    expect(step('spot').does['map.ground']).toMatch(/Past B/);
     expect(stepMarks(stepAs(step('spot'), 'video')).map((mark) => mark.anchor)).toEqual(['sat.place']);
   });
 

@@ -2903,8 +2903,9 @@ export const STAGES = [
     },
   },
   {
-    // a right-click on the bridge's east tower
-    shot: 'tower-menu',
+    // Align pressed on the rail; the film clicks the bridge's east tower, then the cranes it
+    // stands behind in the photo, runs the line on past them and folds the panel
+    shot: 'tower-line',
     from: 'satellite-port',
     after: false,
     window: LARGE,
@@ -2912,22 +2913,7 @@ export const STAGES = [
     crop: 'full',
     map: true,
     async run({ page }) {
-      const { x, y } = await onMap(page, MEASURE_VIEW, EAST_TOWER);
-      await page.mouse.click(x, y, { button: 'right' });
-      await seen(page, '[data-guide="map.measure-from"]').waitFor();
-    },
-  },
-  {
-    // Measure from here pressed; the film draws the line through the cranes to the bank
-    shot: 'tower-line',
-    from: 'tower-menu',
-    after: false,
-    window: LARGE,
-    clip: '.shell',
-    crop: 'full',
-    map: true,
-    async run({ page }) {
-      await seen(page, '[data-guide="map.measure-from"]').click();
+      await seen(page, '[data-guide="map.align-tool"]').click();
       await page.mouse.move(1, 1);
       await page.waitForTimeout(800);
     },
@@ -2936,16 +2922,21 @@ export const STAGES = [
       async play({ page, frame }) {
         const { frames, take } = filmFrames(frame);
         await take(20);
+        const tower = await onMap(page, MEASURE_VIEW, EAST_TOWER);
         const cranes = await onMap(page, MEASURE_VIEW, TERMINAL);
-        const end = await onMap(page, MEASURE_VIEW, LINE_END);
-        await page.mouse.click(cranes.x, cranes.y);
+        await page.mouse.click(tower.x, tower.y);
         await page.mouse.move(1, 1);
         await page.waitForTimeout(500);
         await take(20);
-        await page.mouse.dblclick(end.x, end.y);
+        await page.mouse.click(cranes.x, cranes.y);
         await page.mouse.move(1, 1);
         await page.waitForTimeout(800);
-        await take(35);
+        await take(25);
+        // the camera stands on the side of the nearer thing: the line runs on past the cranes
+        await seen(page, '[data-guide="map.align"]').getByRole('button', { name: 'Past B' }).click();
+        await page.mouse.move(1, 1);
+        await page.waitForTimeout(800);
+        await take(30);
         // folded to one line, the panel gives the photo back
         await seen(page, '[title="Fold the panel to one line"]').click();
         await page.mouse.move(1, 1);
@@ -2965,7 +2956,7 @@ export const STAGES = [
     crop: 'full',
     map: true,
     async run({ page }) {
-      // just beside the line, on the bank: a click on the line itself is the measure's
+      // just beside the line, on the bank: a click on the line itself is the alignment's
       const { x, y } = await onMap(page, MEASURE_VIEW, LEADS[0]);
       await page.mouse.click(x - 8, y, { button: 'right' });
       await seen(page, '[data-guide="map.drop-lead"]').waitFor();

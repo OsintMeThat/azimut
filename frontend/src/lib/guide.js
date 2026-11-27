@@ -43,9 +43,9 @@ export const FIND_DOC = 'https://github.com/OsintMeThat/azimut/blob/main/docs/FI
 export const WORKSPACE_LEADS = {
   collect: 'Everything the case is built from lands here, hashed, deduplicated and carrying where it came from.',
   examine: 'Inspect reads one image or one video closely. Collage lays out frames and images from any number of files.',
-  map: 'Where a finding gets a coordinate, and where a coordinate gets a picture.',
+  map: 'Find where something is on imagery, relief and other maps, compare dates and watch a place change.',
   compose: 'The ways work leaves a case: a proof, a thread, a map plate, a note.',
-  case: 'Four readings of one case, and the first three share the same question.',
+  case: 'The whole case at once: its events in time, its subjects and claims, how they link, and its tables.',
 };
 
 /** @type {Record<string, Page & { title?: string, icon?: string }>} */
@@ -54,7 +54,7 @@ export const PAGES = {
   start: {
     title: 'Start here',
     icon: 'compass',
-    lead: 'Azimut is a toolkit for open-source investigations, strongest at geolocation. Each investigation is a case: a folder on your disk where everything you do is filed.',
+    lead: 'Azimut is a toolkit for open-source investigations: bring in a photo or a video, find where and when it was taken on maps, imagery and relief, then make it a proof, a post, a map or an article. Each investigation is a case, a folder on your disk where everything you do is filed.',
     shot: 'start',
     marks: [
       { anchor: 'start.home', title: 'Home', text: 'The open case at a glance: recent work, what waits for you, its to-do lists.' },
@@ -77,14 +77,16 @@ export const PAGES = {
       { anchor: 'start.sidebar', title: 'The case sidebar', text: 'The case’s folders, to-do lists and recent work, beside every tool.' },
     ],
     tips: [
+      { title: 'Your first time', text: 'Walk Geolocate a photo or a video, last in this menu. Its Practise on a real photo button opens a case whose answer is known. With no case open, Home also offers the tour and an example case with every kind of note filled in.' },
       { title: 'Install the capture extension first', text: 'It files what you see on other map sites into the case, and the Capture extension page sets it up.' },
       { title: 'You do not need a case to start', text: 'The first tool that saves something opens a scratch session, and Keep as case names it later.' },
       { title: 'A note on the side', text: 'The note in the top bar pins a case note on the right, open as you switch tools.' },
-      { title: 'One scene at a time', text: 'While a scene is geolocated, a pill in the top bar follows it from tool to tool.' },
+      { title: 'Scenes', text: 'A scene is a photo, a video or a passage of one that you mark to geolocate. While one is open, a pill in the top bar follows it from tool to tool.' },
       { title: 'Tip, with the heart', text: 'It opens Support & feedback: a tip on Ko-fi, a vote on what comes next, an idea, the Discord or a problem to report.' },
       { title: 'Light or dark', text: 'The button at the foot of the rail switches the theme.' },
-      { title: 'The folder is half yours', text: 'Azimut owns the azimut/ directory inside a case and leaves the rest of the folder alone.' },
-      { title: 'The network waits for you', text: 'Only an action that needs it reaches out, plus a check of GitHub and PyPI for new versions at start, which Settings turns off.' },
+      { title: 'Where your files live', text: 'Azimut owns the azimut/ directory inside a case and leaves the rest of the folder alone.' },
+      { title: 'Share a case', text: 'In the case menu, Export this case… writes one file, with a password if you want, and Import case… opens one. Azimut is for one person on one computer, so a case moves between people as that file.' },
+      { title: 'What reaches the internet', text: 'Only an action that needs it reaches out, plus a check at start for new versions, of Azimut on GitHub and of the two downloaders on PyPI, which Settings turns off.' },
     ],
   },
   // The extension's page comes in tabs (EXTENSION_TABS): setting it up, then using it.
@@ -311,7 +313,7 @@ export const PAGES = {
     ],
     tips: [
       { title: 'Most of the app needs no key', text: 'Esri, its Wayback archive, Sentinel-2 cloudless, OpenStreetMap and OpenTopoMap work without one.' },
-      { title: 'Free is not free of terms', text: 'Free imagery says what each provider lets you publish, Esri’s limits included.' },
+      { title: 'What you may publish', text: 'Free imagery says what each provider lets you publish, Esri’s limits included.' },
       { title: 'Copernicus is free', text: 'Sentinel-2 and radar need a free Copernicus account, and the tools that use them explain the setup field by field.' },
       { title: 'Layers of your own', text: 'The Sentinel Hub card keeps the Copernicus layers you add, a radar one included.' },
     ],
@@ -346,14 +348,19 @@ export const PAGES = {
       { anchor: 'settings.export-folders', title: 'Export folders', text: 'Where each kind of export is written, the case’s exports folder until you choose.' },
       { anchor: 'settings.backup', title: 'Settings backup', text: 'Settings, keys, templates, icons, your logo and signature in one file. It holds your keys, so keep it private.' },
     ],
-    tips: [{ title: 'Moving to another computer', text: 'Import backup on the new one, and the cases follow with the workspace folder.' }],
+    tips: [
+      {
+        title: 'Moving to another computer',
+        text: 'Copy the workspace folder across and pick it under Workspace folder, then Import backup for the settings and keys. One case alone travels with Export this case… in the case menu.',
+      },
+    ],
   },
   'settings-system': {
     lead: 'The version, the updates, and what to do when something breaks.',
     shot: 'settings-system',
     marks: [
       { anchor: 'settings.about', title: 'Azimut', text: 'The version, the ffmpeg in use, and what reaches the network.' },
-      { anchor: 'settings.updates', title: 'Updates', text: 'Says when a new version is out, from GitHub and PyPI, and how to install it.' },
+      { anchor: 'settings.updates', title: 'Updates', text: 'Says when a new version of Azimut is out on GitHub, and how to install it.' },
       { anchor: 'settings.issue', title: 'Report an issue', text: 'Writes a report with the version, the system and the last warnings, your paths and keys removed, and opens it on GitHub.' },
       { anchor: 'settings.downloaders', title: 'Downloaders', text: 'The tools that fetch media links, updated here when a link stops resolving.' },
     ],
@@ -421,7 +428,7 @@ export const PAGES = {
     ],
     tips: [
       { title: 'Search reads inside notes', text: 'The sidebar matches labels, and this search also reads what notes say.' },
-      { title: 'Nothing is lost at once', text: 'A delete says first what it touches, and the item waits in the case trash with its links until you empty it.' },
+      { title: 'The case trash', text: 'A delete says first what it touches, and the item waits in the case trash with its links until you empty it.' },
       { title: 'The view is kept', text: 'Small, Large or List is remembered, for Files and for Media apart.' },
       { title: 'Keys', text: 'Space shows the selected picture or video, F2 renames it, and Delete removes it after asking.' },
     ],
@@ -431,7 +438,7 @@ export const PAGES = {
     shot: 'reverse',
     marks: [
       { anchor: 'reverse.picture', title: 'The picture', text: 'As it will be sent, adjustments included.' },
-      { anchor: 'reverse.adjust', title: 'Adjust', text: 'Brightness and contrast before searching, so a dark frame still matches.' },
+      { anchor: 'reverse.adjust', title: 'Adjust', text: 'Brightness, contrast, saturation and greyscale before searching, so a dark frame still matches.' },
       { anchor: 'reverse.engines', title: 'Engines', text: 'Each says how it takes the picture: opened with it, pasted, or dragged in.' },
       { anchor: 'reverse.change', title: 'Another file', text: 'Pick a different picture or video from the case.' },
     ],
@@ -473,7 +480,7 @@ export const PAGES = {
           shot: 'inspect-analyze',
           lead: 'Analyze reads a frame or a picture, and the searches that start from it.',
           marks: [
-            { anchor: 'inspect.analyze', title: 'Readings', text: 'Error levels are laid over the picture, brightest where a JPEG was changed most.' },
+            { anchor: 'inspect.analyze', title: 'Readings', text: 'Error levels are laid over the picture, brightest where a JPEG was changed most. A hint where to look, never a proof of editing.' },
           ],
         },
       },
@@ -508,7 +515,7 @@ export const PAGES = {
       {
         anchor: 'collage.add',
         title: 'Add pieces',
-        text: 'Videos plays one in a rail to take frames from. Images puts the case’s pictures on in one press.',
+        text: 'Videos plays one in a rail to take frames from. Images adds a picture of the case in one press.',
         opens: {
           shot: 'collage-rail',
           lead: 'A video picked under Videos plays in a rail under the canvas, or beside it for a clip filmed upright.',
@@ -533,10 +540,10 @@ export const PAGES = {
     ],
     tips: [
       { title: 'A document of its own', text: 'Each collage keeps its layout, so it reopens from the Collage tab and edits.' },
-      { title: 'The seams hold', text: 'Straighten bends the whole collage without opening its seams.' },
+      { title: 'Straighten keeps the seams', text: 'Straighten bends the whole collage without opening its seams.' },
       { title: 'Cut the saved picture', text: 'Cut frames what the export keeps, and Trim edges cuts to the largest frame the pieces fill.' },
       { title: 'A panorama has a place', text: 'Mark to geolocate in its panel keeps the stretch of video its pieces span as a scene.' },
-      { title: 'Never over the last one', text: 'A new export is filed beside the previous one rather than replacing it.' },
+      { title: 'Exports never overwrite', text: 'A new export is filed beside the previous one rather than replacing it.' },
     ],
   },
 
@@ -687,8 +694,12 @@ export const PAGES = {
       { title: 'A map of your own', text: 'New layer under My layers puts drawing tools on the map: pick, drag, draw, merge.' },
       { title: 'Your places and media are layers', text: 'Places and Media switch on and off like the others, and Names writes each name under its pin.' },
       { title: 'Your footage on the map', text: 'Photos and videos stand where a relation, their GPS or a proof puts them. Press a mark to play what was filed there.' },
-      { title: 'Leads', text: 'Numbered pins in the scene’s colour, kept with it and erased once it is proved. Click one and press Delete to remove it.' },
-      { title: 'The map tabs look at one place', text: 'Satellite, Compare and Detect open where you last looked, and Settings, General turns that off.' },
+      { title: 'Leads', text: 'A lead is a spot you suspect but have not proved: a numbered pin in the scene’s colour, kept with it and erased once it is proved. Click one and press Delete to remove it.' },
+      {
+        title: 'Imagery dates',
+        text: 'A Wayback release is the day Esri published the picture, so it was taken on or before that day. Imagery history here, on the right-click menu, lists the releases that changed under the point. Sentinel-2 is dated to the day but coarse, 10 m a pixel.',
+      },
+      { title: 'The map tabs look at one place', text: 'Satellite, Compare, Detect and Horizon open where you last looked, and Settings, General turns that off.' },
       { title: 'A place card', text: 'Move place picks the pin up, a colour sets it apart, and Trace footprint draws what it really covers.' },
       { title: 'Captures with their layers', text: 'Tick Layers on the map in the capture settings to keep the map as drawn, each source credited.' },
       { title: 'Layers travel', text: 'A layer of your own downloads as KMZ, KML or GeoJSON.' },
@@ -936,7 +947,7 @@ export const PAGES = {
       { title: 'Keys', text: 'The arrows walk and turn, Page Up and Down tilt, N faces north and T traces the skyline.' },
       { title: 'Buildings stand up', text: 'In a city, buildings rise from open sources, and a saved view keeps them.' },
       { title: 'Reference windows here too', text: 'Add reference holds a picture of the case over the view, as on the map.' },
-      { title: 'Fit makes no promise', text: 'Explains 80% says how much of the trace fits, not how likely the place is.' },
+      { title: 'Explains is not a probability', text: 'In Find, Explains 80% says how much of the trace a place fits, not how likely it is.' },
     ],
   },
   coordinates: {
@@ -975,7 +986,7 @@ export const PAGES = {
       { title: 'Numbers count per picture', text: 'Each picture counts from 1 in each colour, so one number marks one point on two pictures.' },
       { title: 'Paste a screenshot', text: 'Ctrl+V lays a picture over the proof, and it stays in this proof only.' },
       { title: 'Made from the scene', text: 'Make the proof, in the Geolocating pill, lays out the frames and the captures the scene gathered.' },
-      { title: 'It keeps gathering', text: 'While the proof is open, saved or not, a capture or a frame the scene gathers next joins it. The pill then reads Open the proof.' },
+      { title: 'Captures join the open proof', text: 'While the proof is open, saved or not, a capture or a frame the scene gathers next joins it. The pill then reads Open the proof.' },
       { title: 'The point becomes a place', text: 'Saving files its coordinates as a place on the map, proves the scene and erases its leads.' },
       { title: 'A house style', text: 'A template made in Settings, Templates gives every proof the same look.' },
       { title: 'Right-click the page', text: 'Brings forward, sends back, duplicates or deletes the mark under the cursor.' },
@@ -1013,7 +1024,8 @@ export const PAGES = {
       { title: 'Thread styles', text: 'Settings, Templates holds the structures a post can follow, for each kind of post.' },
       { title: 'Counted for the site', text: 'Each post counts its characters against the limit of the site picked.' },
       { title: 'See it before it goes out', text: 'Preview, over the posts, shows the thread as X or Bluesky will, with its pictures and its counts.' },
-      { title: 'The point, every way', text: 'The geolocation post gives the point in decimal, DMS and plus code, with links to the maps.' },
+      { title: 'The point, every way', text: 'Under Coordinates, the point in decimal, DMS and plus code, each copied in one press, with links that open it on the maps.' },
+      { title: 'Before you publish', text: 'Check what each imagery provider lets you publish, under Settings, Imagery, and leave out faces, names and places that would put someone at risk.' },
     ],
   },
   plate: {
@@ -1046,7 +1058,7 @@ export const PAGES = {
           ],
         },
       },
-      { anchor: 'plate.slides', title: 'Slides', text: '+ Slide adds a picture played after the page. Once it plays, the end of the bar says what the video holds and how long it runs.' },
+      { anchor: 'plate.slides', title: 'Slides', text: '+ Slide adds a slide to the day shown, the page held with marks of its own and played after it. Once it plays, the end of the bar says what the video holds and how long it runs.' },
       { anchor: 'plate.page', title: 'The page', text: 'A drag on a map moves its frame. A double click, or the frame button on its bar, goes into it to move its ground.' },
       { anchor: 'plate.inspector', title: 'Inspector', text: 'Paper, fonts and colours, or the settings of the element picked. A section folds by its title, and its ⓘ says what it is for.' },
       { anchor: 'plate.looks', title: 'Looks', text: 'A whole look in one press: Press, Night, Newsroom, Humanitarian, Tactical and more.' },
@@ -1123,7 +1135,7 @@ export const PAGES = {
       { title: 'On your site', text: 'Export, Web folder, then Publish to GitHub Pages puts the note online, once Settings, Website is set up. A web map its words link to goes up first, on the same press, when the site lacks it.' },
       { title: 'Sources on a web page', text: 'The words that cite a source open its card, and the list at the end groups the sources by kind.' },
       { title: 'Steps from a layer', text: 'In a note map’s Time tab, From a layer makes one step a day of a layer’s dated marks.' },
-      { title: 'Remote images say so', text: 'An image from the web contacts its host each time the note opens, and the note warns you.' },
+      { title: 'Images from the web', text: 'An image from the web contacts its host each time the note opens, and the note warns you.' },
     ],
   },
 
@@ -1143,6 +1155,7 @@ export const PAGES = {
       { title: 'Shapes say how sure the date is', text: 'A point is an instant, a bracket a day, month or year, a dashed line a moment between two dates, a bar a period.' },
       { title: 'Keys', text: '+ and - zoom, Home shows everything, and Alt with an arrow walks a track.' },
       { title: 'Correct a date', text: 'Right-click an entry and choose Correct this date.' },
+      { title: 'Take it out', text: 'Export writes the window as an SVG, a PNG or a copied picture.' },
       { title: 'How far apart', text: 'Ctrl-click a second entry to measure the time between the two, or its range when a date is broad.' },
       { title: 'The files’ own dates', text: 'File dates shows what the files themselves say, when you ask for it.' },
     ],
@@ -1170,7 +1183,6 @@ export const PAGES = {
       { title: 'The count is a proportion', text: '23 of 1204 keeps the whole case as the denominator, so it never shrinks with the answer.' },
       { title: 'One table', text: 'Group: None shows everything as a single table.' },
       { title: 'Keep a reading', text: 'Views keeps the question and its columns, live or frozen as a snapshot.' },
-      { title: 'Take it out', text: 'Export writes the reading as an SVG, a PNG or a copied picture.' },
     ],
   },
   graph: {
@@ -1188,6 +1200,7 @@ export const PAGES = {
       { title: 'The case proposes links', text: 'Who posted a file and points under 300 m apart are proposed, and N proposed lists them to confirm or drop.' },
       { title: 'Keys', text: '1, 2 and 3 light the hops around the selected node, and the arrows nudge it.' },
       { title: 'Lenses', text: 'Everything, Subjects, Ground, Claims and My work read the same case differently.' },
+      { title: 'Take it out', text: 'Export writes the drawing as an SVG, a PNG or a copied picture.' },
     ],
   },
   sheet: {
@@ -1247,7 +1260,13 @@ export const JOURNEYS = [
         marks: [
           { anchor: 'rail.collect', title: 'Sources' },
           { anchor: 'media.link', title: 'Paste a link', typed: true },
-          { anchor: 'media.viewer', shot: 'media-viewer', title: 'The photo', look: true },
+          {
+            anchor: 'media.viewer',
+            shot: 'media-viewer',
+            title: 'The photo',
+            look: true,
+            tip: 'No name to search? Narrow the area from what it shows: the script and language of signs, number plates, road markings, the side traffic drives on, plants, the coast or the relief, and the poster’s other posts.',
+          },
         ],
         does: {
           'rail.collect': 'Press Sources on the left rail, then the Media tab.',
@@ -1269,7 +1288,13 @@ export const JOURNEYS = [
         marks: [
           { anchor: 'rail.collect', title: 'Sources' },
           { anchor: 'media.link', title: 'Paste a link', typed: true },
-          { anchor: 'media.viewer', shot: 'media-viewer-video', title: 'The video', look: true },
+          {
+            anchor: 'media.viewer',
+            shot: 'media-viewer-video',
+            title: 'The video',
+            look: true,
+            tip: 'No name to search? Narrow the area from what it shows: the script and language of signs, number plates, road markings, the side traffic drives on, plants, the coast or the relief, and the poster’s other posts.',
+          },
         ],
         does: {
           'rail.collect': 'Press Sources on the left rail, then the Media tab.',
@@ -1551,16 +1576,16 @@ export const JOURNEYS = [
         tool: 'satellite',
         icon: 'pin',
         label: 'Camera spot',
-        shot: 'tower-menu',
+        shot: 'satellite-port',
         text: 'Two features that line up in the photo put the camera somewhere on one line.',
         marks: [
-          { anchor: 'map.measure-from', title: 'Measure from here' },
+          { anchor: 'map.align-tool', title: 'Align' },
           { anchor: 'map.ground', shot: 'tower-line', title: 'The line' },
           { anchor: 'map.drop-lead', shot: 'lead-menu', title: 'Drop a lead here' },
         ],
         does: {
-          'map.measure-from': 'In the photo, the bridge’s east tower stands right behind the green Evergreen cranes. On the map, the tower sits where the deck meets the east bank. Right-click it and press Measure from here.',
-          'map.ground': 'Click the green crane just south of the bridge on the east bank, then double-click in town past the west bank. The angle at the crane must read 180°, or the line is bent. Fold the Measure panel with its arrow at the top right to see your photo again.',
+          'map.align-tool': 'In the photo, the bridge’s east tower stands right behind the green Evergreen cranes. Press Align on the map’s rail, the line through two dots.',
+          'map.ground': 'Click the tower, where the deck meets the east bank, then the green crane just south of the bridge. Press Past B, so the line runs on past the cranes and across the channel. Fold the Align panel with its arrow at the top right to see your photo again.',
           'map.drop-lead': 'The camera stood somewhere on this line, and high up, since the photo looks down on a car park and palms. Right-click where the line leaves the car park for the first buildings, then press Drop a lead here. No need to press Keep; the lead holds the spot.',
         },
         then: 'Satellite, lead 1 on the line, in your scene’s colour. The pill counts it.',
@@ -1738,7 +1763,7 @@ export const JOURNEYS = [
             anchor: 'proof.new-pov',
             shot: 'proof-camera-named',
             title: 'The eye icon',
-            tip: 'To put a point on one of your layers, linked to this proof, use Layers and more, the ⋯ at the end of its row.',
+            tip: 'To put a point on one of your layers, linked to this proof, press Layers and more, the layers icon on its row.',
           },
         ],
         does: {
@@ -1765,7 +1790,7 @@ export const JOURNEYS = [
               anchor: 'proof.new-pov',
               shot: 'proof-video-named',
               title: 'The eye icon',
-              tip: 'To put a point on one of your layers, linked to this proof, use Layers and more, the ⋯ at the end of its row.',
+              tip: 'To put a point on one of your layers, linked to this proof, press Layers and more, the layers icon on its row.',
             },
           ],
           does: {
@@ -2091,7 +2116,7 @@ export const JOURNEYS = [
             anchor: 'layer.link-add',
             shot: 'layer-link',
             title: 'Add',
-            tip: 'Next time, do it from Geo Proof as you go, with Add to a layer in a point row’s ⋯ menu.',
+            tip: 'Next time, do it from Geo Proof as you go, with Add to a layer under the layers icon of a point’s row.',
           },
         ],
         does: {
@@ -2255,7 +2280,7 @@ export const JOURNEYS = [
     ],
     result: {
       shot: 'layer-made-tracked',
-      text: 'Your layer, kept under My layers. Open it to add more; a new proof goes on it from Geo Proof, with Add to a layer in a point’s ⋯ menu.',
+      text: 'Your layer, kept under My layers. Open it to add more; a new proof goes on it from Geo Proof, with Add to a layer under the layers icon of a point’s row.',
     },
   },
   {
@@ -3959,7 +3984,7 @@ export const JOURNEYS = [
         shot: 'find-look',
         text: 'A true place meets every peak and notch. A look-alike misses one somewhere.',
         marks: [
-          { anchor: 'horizon.overlay', title: 'Photo and terrain', typed: true, tip: 'Fit, at the top right, judges the skyline alone. A higher Fit does not make a better place.' },
+          { anchor: 'horizon.overlay', title: 'Photo and terrain', typed: true, tip: 'The Gap at the top right reads the skyline alone. A small gap does not make the place right.' },
           { anchor: 'horizon.legend', title: 'The colours', look: true },
           { anchor: 'horizon.satellite', title: 'Satellite', look: true },
           {
@@ -4275,7 +4300,7 @@ export const JOURNEYS = [
     ],
     result: {
       shot: 'detect-routine-dashboard',
-      text: 'The routine’s dashboard: candidates over the four areas pass after pass since July, and the spots that came and went.',
+      text: 'The routine’s dashboard: candidates over the four areas pass after pass, and the spots that came and went.',
       after: {
         once: { shot: 'detect-once-done', text: 'The pass read over the four areas, each candidate on the map with its two passes side by side, to keep, dismiss or pin.' },
       },
@@ -4389,6 +4414,8 @@ export const KEYMAP = [
       { combo: 'T', does: 'traces the skyline on a photo laid over the view, or stops' },
       { combo: 'B', does: 'blinks between the photo and the terrain' },
       { combo: 'L', does: 'locks the photo to the terrain, or lets it go' },
+      { combo: 'M', does: 'snaps a traced line to the nearest edge, or stops; Alt does it once' },
+      { combo: 'W', does: 'reshapes a photo by its corners and edges, or stops' },
       { combo: 'H / D', does: 'hides the trace, or shows its details' },
       { combo: '0', does: 'shows the whole photo again' },
       { combo: 'Ctrl+Z', does: 'takes the last stroke of the trace back' },
@@ -4426,7 +4453,7 @@ export const KEYMAP = [
   {
     where: 'Timeline',
     keys: [
-      { combo: 'Arrows', does: 'pans the window' },
+      { combo: '← / →', does: 'pans the window' },
       { combo: 'Page Up / Down', does: 'pans most of a screen' },
       { combo: '+ / -', does: 'narrows and widens the window' },
       { combo: 'Home', does: 'shows the whole filtered extent' },
@@ -4524,9 +4551,8 @@ export const KEYMAP = [
       { combo: 'C', does: 'captures the frame on screen' },
       { combo: 'R', does: 'draws a zone of the picture to search on the engines, or closes it' },
       { combo: 'S', does: 'keeps a scene to geolocate at the frame on screen' },
-      { combo: 'Shift+S', does: 'ends the last scene at the frame on screen' },
+      { combo: 'Shift+S', does: 'ends the open scene, or the last one, at the frame on screen' },
       { combo: 'Drag on the bar', does: 'after Mark to geolocate\'s Passage, keeps the passage dragged as a scene; Escape calls it off' },
-      { combo: 'S / Shift+S', does: 'with a scene\'s time open, moves the start or the end of the passage in hand to the frame on screen' },
       { combo: '↑ / ↓', does: 'in a scene\'s time, nudges it a frame, Shift for a second' },
       { combo: 'Escape', does: 'lets go of a scene\'s time, then closes the scenes' },
       { combo: 'Ctrl+Z / Ctrl+Shift+Z', does: 'takes a scene or a mark back, or puts it back' },
@@ -4541,6 +4567,10 @@ export const KEYMAP = [
     where: 'Collage',
     keys: [
       { combo: 'Ctrl+A', does: 'takes every piece in hand' },
+      { combo: 'Space', does: 'plays or pauses the rail’s video, once you have clicked in the rail' },
+      { combo: '← / →', does: 'steps the rail’s video a frame, Shift for a second' },
+      { combo: 'J / L', does: 'slows it down or speeds it up' },
+      { combo: 'C', does: 'adds the frame on screen beside the last piece' },
       { combo: 'Arrows', does: 'nudge the pieces in hand a pixel, Shift for ten' },
       { combo: 'Delete', does: 'removes the selected pieces' },
       { combo: 'Ctrl+Z', does: 'undoes the last change' },
@@ -4550,7 +4580,7 @@ export const KEYMAP = [
   {
     where: 'Media',
     keys: [
-      { combo: 'Enter', does: 'opens the picture, video or sound under the cursor' },
+      { combo: 'Enter', does: 'opens the picture, video or sound whose card has the focus' },
       { combo: '← / →', does: 'walks the viewer through the list' },
       { combo: 'Escape or Space', does: 'closes the viewer' },
     ],
@@ -4581,7 +4611,7 @@ export const KEYMAP = [
 export const FIXES = [
   {
     symptom: 'A download answers "This link needs a login"',
-    fix: 'The site wants a session. Pick a browser you are signed in to there, or give an exported cookies.txt.',
+    fix: 'The site wants a session. In that dialog, Use cookies from picks a browser you are signed in to there, or Use a cookies.txt file takes an exported one. On Windows, quit a Chrome-family browser first or pick Firefox.',
   },
   {
     symptom: 'A video has no thumbnail, and frames will not export',
@@ -4593,11 +4623,11 @@ export const FIXES = [
   },
   {
     symptom: 'A map provider draws nothing',
-    fix: 'Five providers need no key. The rest use yours, entered in Settings, Imagery, and the tab says which ones are missing one.',
+    fix: 'Each provider stops at its own zoom, so zoom out a step. A keyed provider shows only once its key is in Settings, Imagery, and leaves the list if its key fails. Offline, only tiles already seen are drawn.',
   },
   {
     symptom: 'The app opens on "Another Azimut has this workspace"',
-    fix: 'Close the other Azimut and reload, or press "Take it anyway" if it is already gone.',
+    fix: 'The line under it says where the other one runs. Open that address, or close that Azimut and press Reload. Take it anyway only if it is gone.',
   },
   {
     symptom: 'The 3D globe or Horizon stutters',
