@@ -66,10 +66,10 @@
         <h5>{name(map)}</h5>
         {#if onsettings}
           <button type="button" class="mini" aria-label={`Settings of ${name(map)}`} title="Its ground, framing and look, in the inspector"
-            onclick={() => onsettings(map)}><Icon name="settings" size={12} /></button>
+            data-guide="plate.map-settings" onclick={() => onsettings(map)}><Icon name="settings" size={12} /></button>
         {/if}
       </div>
-      <p class="ground" title={ground.undated ? 'Stitched from pictures of several days, so it says no day' : ground.drawn ? 'Drawn from map data, so it has no day of its own' : 'The day its picture was taken'}>
+      <p class="ground" data-guide="plate.map-ground" title={ground.undated ? 'Stitched from pictures of several days, so it says no day' : ground.drawn ? 'Drawn from map data, so it has no day of its own' : 'The day its picture was taken'}>
         <span class="key">Ground</span> {ground.name}{#if ground.when}{' · '}<strong>{ground.when}</strong>{:else if ground.undated}{' · '}<span class="quiet">several days</span>{/if}
       </p>
       {#if imageryDay(map, { releases }) && !template}
@@ -82,7 +82,7 @@
       {:else if !rows.length}
         <p class="note">The case has no map layers yet. Make one in the Map, in My layers, or here.</p>
       {:else}
-        <ul class="layers" aria-label={`Layers ${name(map)} draws`}>
+        <ul class="layers" aria-label={`Layers ${name(map)} draws`} data-guide="plate.map-layers">
           {#each listed(map) as row (row.name)}
             {@const entry = (map.layers ?? []).find((item) => item.name === row.name)}
             <li class:drawn={!!entry}>
@@ -124,7 +124,7 @@
         <div class="acts">
           {#if onnewlayer}
             <button type="button" class="btn btn-xs" title="A new layer of the case, drawn on this map and opened in the Map to draw in"
-              onclick={() => onnewlayer(map)}><Icon name="plus" size={11} /> New layer here</button>
+              data-guide="plate.new-layer" onclick={() => onnewlayer(map)}><Icon name="plus" size={11} /> New layer here</button>
           {/if}
           {#if onkeepdrawn && drawn}
             <button type="button" class="btn btn-xs" title="Makes what was drawn by hand on this map a layer of the case"

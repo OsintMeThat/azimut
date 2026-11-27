@@ -38,7 +38,7 @@
   ];
 </script>
 
-<section class="group">
+<section class="group" data-guide="settings.appearance">
   <h3>Appearance</h3>
   <div class="row">
     <div class="row-label">

@@ -32,7 +32,7 @@
   } = $props();
 </script>
 
-<div class="grid-panel card" class:collapsed>
+<div class="grid-panel card" class:collapsed data-guide="map.grid">
   <div class="grid-head">
     <button
       class="grid-collapse"

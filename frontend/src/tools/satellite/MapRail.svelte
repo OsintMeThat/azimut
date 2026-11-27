@@ -31,6 +31,14 @@
     /** The strip's own height, for whatever is stacked beneath it. */
     height = $bindable(0),
   } = $props();
+
+  /** The seats the pictured guide frames on their own (lib/guide.js). */
+  const RAIL_GUIDES = {
+    measure: 'map.measure-tool',
+    align: 'map.align-tool',
+    grid: 'map.grid-tool',
+    sky: 'map.sky-tool',
+  };
 </script>
 
 <div class="rail card" bind:clientHeight={height}>
@@ -43,7 +51,7 @@
         class:on={is.on}
         disabled={is.disabled}
         aria-pressed={entry.kind === 'mode' ? Boolean(is.on) : undefined}
-        data-guide={entry.id === 'measure' ? 'map.measure-tool' : undefined}
+        data-guide={RAIL_GUIDES[entry.id]}
         onclick={() => onpick(entry.id)}
         title={is.title ?? entry.hint ?? entry.label}
         aria-label={entry.label}
