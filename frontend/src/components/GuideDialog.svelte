@@ -23,7 +23,7 @@
    * `place`: it fills the tab, keeps its place in the address, and what it would do to
    * the app it asks of the tab that detached it.
    */
-  import { untrack } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
   import GuideShot from './GuideShot.svelte';
@@ -37,6 +37,8 @@
   import { showInApp } from '../lib/showInApp.svelte.js';
   import { checkAnswer, isPractice, openPractice } from '../lib/practiceCase.js';
   import { formatDistance } from '../lib/measure.js';
+  import { GUIDE_SEARCH_MIN, searchGuide, trailTo } from '../lib/guideSearch.js';
+  import { foldTerms } from '../lib/textFold.js';
   import {
     EXTENSION_SITES,
     FIXES,
@@ -67,9 +69,12 @@
   let itemId = $state(landing.item);
   let tool = $state(landing.tool);
   let step = $state(landing.step);
-  let active = $state(null);
+  const landedTrail = landing.path?.length ? trailTo(landing.tool ?? landing.item, landing.path)
+    : landing.opens ? [opensFrom(landing.tool, landing.opens)].filter(Boolean) : [];
   /** The screens opened from a number, deepest last. Empty on the page itself. */
-  let trail = $state(landing.opens ? [opensFrom(landing.tool, landing.opens)].filter(Boolean) : []);
+  let trail = $state(landedTrail);
+  // a number asked for by name (a search, Ctrl+K) is lit as the guide opens on it
+  let active = $state(landing.mark ? litNumber(landing.tool ?? landing.item, landedTrail, landing.mark) : null);
   /** A photo or a video, as the reader picked a journey's start; else as the case says. */
   let chosenKind = $state(null);
   /** Where the open case stands on the journey (`lib/journeyHere.js`), or null. */
@@ -355,6 +360,47 @@
   }
 
   const toggle = (n) => (active = active === n ? null : n);
+
+  /** Which number of the screen, counted from 1, is `anchor`: the last screen opened, else the page. */
+  function litNumber(page, opened, anchor) {
+    const marks = opened.at(-1)?.marks ?? PAGES[page]?.marks ?? [];
+    const at = marks.findIndex((mark) => mark.anchor === anchor);
+    return at < 0 ? null : at + 1;
+  }
+
+  // -- the search at the top of the menu --------------------------------------------
+  let query = $state('');
+  let guideEl = $state(null);
+  const found = $derived(foldTerms(query).join('').length >= GUIDE_SEARCH_MIN ? searchGuide(query, 30) : null);
+
+  /** Open the guide where a search found the words: the page, the screens to it, the number lit, or the step. */
+  async function goTo(place) {
+    const entry = MENU_ITEMS.find((one) => one.id === place.item);
+    if (!entry) return;
+    query = '';
+    if (entry.kind === 'journey') {
+      openJourney(entry.id.slice('journey:'.length), (place.step ?? 0) + 1);
+      return;
+    }
+    choose(entry);
+    if (place.tool) pick(place.tool);
+    trail = trailTo(place.tool ?? entry.id, place.path ?? []);
+    if (place.mark) active = litNumber(place.tool ?? entry.id, trail, place.mark);
+    await tick();
+    guideEl?.querySelector('.legend li.on')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  /** Enter opens the first answer; Escape empties the box before it closes the guide. */
+  function searchKeys(event) {
+    if (event.key === 'Enter' && found?.length) {
+      event.preventDefault();
+      goTo(found[0].place);
+    } else if (event.key === 'Escape' && query) {
+      event.preventDefault();
+      event.stopPropagation();
+      query = '';
+    }
+  }
 </script>
 
 {#snippet legend(marks)}
@@ -403,22 +449,40 @@
 
 {#snippet content()}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="guide" class:immersed={journey && !menuShown} onkeydown={journey ? onkey : undefined}>
+  <div class="guide" class:immersed={journey && !menuShown} onkeydown={journey ? onkey : undefined} bind:this={guideEl}>
     <nav class="menu" aria-label="Guide pages">
-      {#each MENU as group, index (index)}
-        {#if group.title}<p class="group">{group.title}</p>{/if}
-        {#each group.items as entry (entry.id)}
-          <button
-            class="entry"
-            class:on={entry.id === item.id}
-            aria-current={entry.id === item.id ? 'page' : undefined}
-            onclick={() => choose(entry)}
-          >
-            <Icon name={entry.icon} size={15} />
-            <span>{entry.label}</span>
-          </button>
+      <label class="find" title="Search every page, tip, journey step, shortcut and fix of the guide">
+        <Icon name="search" size={14} />
+        <input type="search" placeholder="Search the guide" aria-label="Search the guide" spellcheck="false" autocomplete="off"
+          bind:value={query} onkeydown={searchKeys} />
+      </label>
+      {#if found}
+        <div class="found" aria-label="Found in the guide">
+          {#each found as hit (hit.id)}
+            <button class="hit" onclick={() => goTo(hit.place)}>
+              <span class="hit-title">{hit.title}</span>
+              <span class="hit-where">{hit.where}</span>
+            </button>
+          {:else}
+            <p class="nothing">Nothing in the guide uses these words. Try another one.</p>
+          {/each}
+        </div>
+      {:else}
+        {#each MENU as group, index (index)}
+          {#if group.title}<p class="group">{group.title}</p>{/if}
+          {#each group.items as entry (entry.id)}
+            <button
+              class="entry"
+              class:on={entry.id === item.id}
+              aria-current={entry.id === item.id ? 'page' : undefined}
+              onclick={() => choose(entry)}
+            >
+              <Icon name={entry.icon} size={15} />
+              <span>{entry.label}</span>
+            </button>
+          {/each}
         {/each}
-      {/each}
+      {/if}
     </nav>
 
     <section class="page" aria-label={item.label}>
@@ -737,6 +801,61 @@
     border-right: 1px solid var(--border);
     background: var(--bg-0);
     overflow-y: auto;
+  }
+  .find {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 2px 6px;
+    padding: 0 9px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-1);
+    color: var(--text-3);
+  }
+  .find:focus-within {
+    border-color: var(--border-strong);
+    color: var(--text-2);
+  }
+  .find input {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 0;
+    border: 0;
+    background: none;
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+    outline: none;
+  }
+  .found {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .hit {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 7px 9px;
+    border-radius: var(--r-md);
+    text-align: left;
+  }
+  .hit:hover,
+  .hit:focus-visible {
+    background: var(--bg-2);
+  }
+  .hit-title {
+    color: var(--text-1);
+    font-size: var(--fs-sm);
+  }
+  .hit-where {
+    color: var(--text-3);
+    font-size: var(--fs-xs);
+  }
+  .nothing {
+    margin: 8px 9px;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
   }
   .group {
     margin: 14px 8px 6px;

@@ -108,6 +108,27 @@ describe('Go to, inside the notes', () => {
   });
 });
 
+describe('Go to, in the guide', () => {
+  it('lists what the guide says and opens the guide there', async () => {
+    uiState.guide = null;
+    await show();
+    await search('share a case');
+    expect(document.querySelector('[aria-label="In the guide"]')).not.toBeNull();
+    const row = option('Share a case');
+    expect(row.textContent).toContain('Guide · Start here · tip');
+    row.click();
+    await settle();
+    expect(uiState.guide).toEqual({ at: null, place: { step: 0, item: 'start', tool: null, path: [] } });
+    uiState.guide = null;
+  });
+
+  it('asks the guide nothing below three letters', async () => {
+    await show();
+    await search('al');
+    expect(document.querySelector('[aria-label="In the guide"]')).toBeNull();
+  });
+});
+
 describe('Go to, the note on the side', () => {
   it('opens the note on the side, found by what it does', async () => {
     setDockOpen(false);
@@ -163,6 +184,8 @@ describe('Go to', () => {
   it('walks results with the arrows and opens with Enter', async () => {
     await show();
     await search('proof');
+    input().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+    await settle();
     input().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }));
     await settle();
     expect(options().filter((node) => node.getAttribute('aria-selected') === 'true')).toHaveLength(1);

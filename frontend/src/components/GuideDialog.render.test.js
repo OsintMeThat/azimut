@@ -171,6 +171,72 @@ describe('a number that leads somewhere', () => {
   });
 });
 
+describe('searching the guide', () => {
+  const box = () => document.querySelector('.find input');
+  const hits = () => [...document.querySelectorAll('.found .hit')];
+  const hit = (title) => hits().find((one) => one.querySelector('.hit-title').textContent === title);
+  function type(text) {
+    box().value = text;
+    box().dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+  }
+  function key(name) {
+    box().dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true }));
+    flushSync();
+  }
+  const lit = () => document.querySelector('.legend li.on .mark strong')?.textContent;
+
+  it('turns the menu into what the guide says, from two letters', async () => {
+    await open('start');
+    type('a');
+    expect(hits()).toHaveLength(0);
+    expect(entry('Start here')).toBeDefined();
+    type('align');
+    expect(hit('Align').querySelector('.hit-where').textContent).toBe('Satellite › Tools');
+    expect(document.querySelector('.menu .entry')).toBeNull();
+    type('zzqq');
+    expect(document.querySelector('.found .nothing')).not.toBeNull();
+  });
+
+  it('opens on the screen a number opens, the number lit, and gives the menu back', async () => {
+    await open('start');
+    type('align');
+    press(hit('Align'));
+    expect(current('.menu .entry')).toBe('Map');
+    expect(current('.tabs .tab')).toBe('Satellite');
+    expect(document.querySelector('nav.trail').textContent).toContain('Tools');
+    expect(lit()).toBe('Align');
+    expect(box().value).toBe('');
+    expect(entry('Start here')).toBeDefined();
+  });
+
+  it('opens a journey on the step found', async () => {
+    await open('start');
+    type('camera spot');
+    press(hit('Camera spot'));
+    expect(document.querySelector('.welcome')).toBeNull();
+    expect(document.querySelector('.trail .point.on .step-name, .trail .point[aria-current] .step-name')?.textContent.trim()).toBe('Camera spot');
+  });
+
+  it('opens the first answer on Enter, and empties the box on Escape before it closes the guide', async () => {
+    await open('start');
+    type('share a case');
+    key('Escape');
+    expect(box().value).toBe('');
+    expect(onclose).not.toHaveBeenCalled();
+    type('share a case');
+    key('Enter');
+    expect(current('.menu .entry')).toBe('Start here');
+  });
+
+  it('opens on a place it is handed, as Go to hands one', async () => {
+    await open(null, { place: { item: 'map', tool: 'satellite', step: 0, path: ['sat.tools'], mark: 'map.align-tool' } });
+    expect(current('.tabs .tab')).toBe('Satellite');
+    expect(document.querySelector('nav.trail').textContent).toContain('Tools');
+    expect(lit()).toBe('Align');
+  });
+});
+
 describe('a journey', () => {
   const geolocate = JOURNEYS.find((journey) => journey.id === 'geolocate');
   const build = JOURNEYS.find((journey) => journey.id === 'create-an-analyzer');

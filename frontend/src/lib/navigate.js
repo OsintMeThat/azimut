@@ -377,9 +377,11 @@ export function openInHorizon({ path, kind, title, time }) {
  * From the `?` that is the tool being stood in, since the press means "what is this
  * tab". A tool with no page of its own opens it at the start, which is where somebody
  * with a general question belongs anyway. The tool underneath stays where it is.
+ * `place` opens it on a spot a search found (`lib/guideSearch.js`): a page's tab, the
+ * screens to walk to, the number to light, a journey's step.
  */
-export function openGuide(at) {
-  uiState.guide = { at };
+export function openGuide(at, place = null) {
+  uiState.guide = place ? { at, place: { step: 0, ...place } } : { at };
 }
 
 /** Take the tour again from its first page (components/Onboarding.svelte). */

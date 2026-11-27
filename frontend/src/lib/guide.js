@@ -65,10 +65,10 @@ export const PAGES = {
       {
         anchor: 'start.goto',
         title: 'Go to',
-        text: 'Ctrl+K finds a tool, a setting, a case or a document by name.',
+        text: 'Ctrl+K finds a tool, a setting, a case, a document or what the guide says, by name.',
         opens: {
           shot: 'start-goto',
-          lead: 'Type a few letters: tools, settings, cases and documents answer together.',
+          lead: 'Type a few letters: tools, settings, cases, documents and the guide answer together.',
           marks: [{ anchor: 'palette.search', title: 'One box for everything', text: 'Enter opens the first answer, the arrows walk the rest.' }],
         },
       },

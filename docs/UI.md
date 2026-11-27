@@ -246,6 +246,14 @@ presses *Read the guide* on it, which opens the guide on its start page.
   **reference**: every key by where it is pressed, Settings (a tab per section of its
   screen), and what to do when something does not work, symptom by symptom, ending on
   **Report an issue**, which opens Settings on System where the report is written.
+- **A search box tops the guide's menu** (`lib/guideSearch.js`): from two letters, the
+  menu gives way to every page, number, tip, journey step, shortcut and fix holding all
+  the words typed, titles first, each with where it stands. A press, or Enter on the
+  first, opens the guide there: on its page or tab, through the screens its numbers open,
+  the number lit, or on the journey's step. Escape empties the box before it closes the
+  guide. **Go to** asks the same index from three letters and lists its best four
+  **In the guide**, after the case's own answers so Enter keeps opening those. The index
+  is read from `lib/guide.js` in the page; nothing is asked.
 - **The guide can move to a tab of its own**, to follow on a second screen: the
   button beside the cross opens it on the page being read (`#guide?page=…`,
   `lib/guideWindow.js`, `components/GuidePage.svelte`) and closes the dialog. The tab
@@ -356,8 +364,9 @@ Rules:
 - **Go to** opens from the topbar or `Ctrl+K` (`⌘K` on macOS); on words in a note
   the key opens the note's Link field instead. It starts with
   recently added documents, then searches tools, Horizon's settings, workspace
-  cases, documents in the current case and the words inside its notes, each found
-  note opening on its line, and *Note on the side* opens the note on the side. A Horizon setting opens Horizon with
+  cases, documents in the current case, the words inside its notes, each found
+  note opening on its line, and last what the guide says (see the guide's search
+  below), and *Note on the side* opens the note on the side. A Horizon setting opens Horizon with
   its inspector out, its group unfolded and its row lit a moment. While scenes wait,
   *To geolocate* leads the tools with their count and opens the sidebar on its To-do;
   typed, it is there at any count. Words also find a scene by its label or its file's

@@ -76,6 +76,11 @@ describe('openGuide', () => {
     openGuide('start');
     expect(uiState.guide).toEqual({ at: 'start' });
   });
+
+  it('opens on a spot a search found, from its first step', () => {
+    openGuide(null, { item: 'map', tool: 'satellite', path: ['sat.tools'], mark: 'map.align-tool' });
+    expect(uiState.guide).toEqual({ at: null, place: { step: 0, item: 'map', tool: 'satellite', path: ['sat.tools'], mark: 'map.align-tool' } });
+  });
 });
 
 describe('openInReverseSearch', () => {

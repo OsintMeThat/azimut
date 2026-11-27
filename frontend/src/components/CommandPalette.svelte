@@ -5,7 +5,8 @@
   import { buildCatalogQuery } from '../lib/catalog.js';
   import { entityLabel, entityTypes } from '../lib/entityTypes.svelte.js';
   import { entityIcon, entityKindLabel } from '../lib/entityIcon.js';
-  import { openEntity, openNotebook, openTodo } from '../lib/navigate.js';
+  import { openEntity, openGuide, openNotebook, openTodo } from '../lib/navigate.js';
+  import { searchGuide } from '../lib/guideSearch.js';
   import { matchRuns, paletteActions, paletteScenes, paletteSettings, paletteTools } from '../lib/commandPalette.js';
   import { ensureSceneQueue, holdSceneCount, sceneQueue, scenesWaiting } from '../lib/geolocating.svelte.js';
   import { setDockOpen } from '../lib/notes/noteDock.svelte.js';
@@ -51,6 +52,10 @@
   });
   const sceneRows = $derived(paletteScenes(sceneFiles, loadedQuery));
   const settingRows = $derived(paletteSettings(loadedQuery));
+  // what the guide says about the words, last so the case's own answers keep Enter: read here, nothing asked
+  const guideRows = $derived(loadedQuery.trim().length >= 3 ? searchGuide(loadedQuery, 4).map((hit) => ({
+    kind: 'guide', id: hit.id, label: hit.title, detail: `Guide · ${hit.where}`, icon: 'help', place: hit.place,
+  })) : []);
   const documentRows = $derived(documents.map((entity) => ({
     kind: 'document', id: entity.id, label: entity.label, caseId: documentCase,
     detail: [entityKindLabel(entity, entityLabel(entity.type)), entity.attrs?.folder].filter(Boolean).join(' · '),
@@ -68,7 +73,7 @@
   const groups = $derived(loadedQuery
     ? [{ label: 'Tools', rows: toolRows }, { label: 'Scenes to geolocate', rows: sceneRows },
       { label: 'Horizon settings', rows: settingRows }, { label: 'Documents', rows: documentRows },
-      { label: 'In notes', rows: noteRows }, { label: 'Cases', rows: caseRows }]
+      { label: 'In notes', rows: noteRows }, { label: 'Cases', rows: caseRows }, { label: 'In the guide', rows: guideRows }]
     : [{ label: 'Recently added', rows: documentRows }, { label: 'Tools', rows: toolRows }, { label: 'Cases', rows: caseRows }]);
   const rows = $derived(groups.flatMap((group) => group.rows));
 
@@ -167,6 +172,7 @@
       else if (row.kind === 'setting') { close(); uiState.horizonSetting = row.id; uiState.tool = 'horizon'; }
       else if (row.kind === 'document') { close(); await openEntity(row.entity); }
       else if (row.kind === 'note-line') { close(); openNotebook(row.noteId === 'case' ? null : row.noteId, { line: row.line }); }
+      else if (row.kind === 'guide') { close(); openGuide(null, row.place); }
       else {
         if (row.id !== caseState.current?.id) await openCase(row.id);
         if (caseState.current?.id === row.id) { close(); uiState.tool = 'overview'; }
@@ -205,7 +211,7 @@
       <Icon name="search" size={18} />
       <input
         use:focus bind:value={query} onkeydown={onKeydown}
-        placeholder="Search tools, settings, cases and documents…" aria-label="Search tools, settings, cases and documents"
+        placeholder="Search tools, settings, cases, documents and the guide…" aria-label="Search tools, settings, cases, documents and the guide"
         role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="go-to-results"
         aria-activedescendant={rows[selected] ? `go-to-result-${selected}` : undefined}
         autocomplete="off" spellcheck="false"

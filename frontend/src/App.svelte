@@ -644,7 +644,9 @@
 <MoveDialog />
 <CommandPalette bind:open={paletteOpen} tools={ALL_TOOLS} />
 {#if uiState.guide}
-  <GuideDialog at={uiState.guide.at} onclose={() => (uiState.guide = null)} />
+  {#key uiState.guide}
+    <GuideDialog at={uiState.guide.at} place={uiState.guide.place} onclose={() => (uiState.guide = null)} />
+  {/key}
 {/if}
 {#if supportOpen}
   <SupportDialog onclose={() => (supportOpen = false)} />
