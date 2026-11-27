@@ -320,6 +320,7 @@
   tabindex="-1"
   aria-label="Video"
   data-testid="collage-rail"
+  data-guide="collage.rail"
   style:height={!folded && side === 'bottom' ? `${size}px` : null}
   style:width={!folded && side === 'left' ? `${size}px` : null}
   {onkeydown}

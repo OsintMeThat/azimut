@@ -2,6 +2,30 @@
   "width": 620,
   "height": 360,
   "anchors": {
+    "map.measure-tool": {
+      "x": 16,
+      "y": 55,
+      "w": 30,
+      "h": 30
+    },
+    "map.align-tool": {
+      "x": 16,
+      "y": 87,
+      "w": 30,
+      "h": 30
+    },
+    "map.grid-tool": {
+      "x": 16,
+      "y": 119,
+      "w": 30,
+      "h": 30
+    },
+    "map.sky-tool": {
+      "x": 16,
+      "y": 158,
+      "w": 30,
+      "h": 30
+    },
     "map.ref": {
       "x": 60,
       "y": 50,

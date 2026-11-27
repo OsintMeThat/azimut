@@ -1856,6 +1856,35 @@ export const STAGES = [
     },
   },
   {
+    // the clip picked under Videos, playing in the rail under the canvas, A and B set
+    // round the stretch Panorama would stitch
+    shot: 'collage-rail',
+    window: WIDE,
+    crop: 'full',
+    async run({ go, page }) {
+      await go('collage');
+      await page.locator('.canvas-body').getByText('The bridge from both banks', { exact: true }).first().click();
+      await seen(page, '[data-guide="collage.add"]').getByText('channel_departure', { exact: true }).first().click();
+      const rail = seen(page, '[data-guide="collage.rail"]');
+      const video = rail.locator('video').first();
+      await video.waitFor();
+      await page.waitForFunction(() => document.querySelector('[data-guide="collage.rail"] video')?.readyState >= 2);
+      for (const [at, end] of [[0.4, 'A'], [5.2, 'B']]) {
+        await video.evaluate(
+          (el, time) =>
+            new Promise((done) => {
+              el.addEventListener('seeked', done, { once: true });
+              el.currentTime = time;
+            }),
+          at
+        );
+        await page.waitForTimeout(400);
+        await rail.locator('button.ab', { hasText: end }).first().click();
+      }
+      await page.mouse.move(1, 1);
+    },
+  },
+  {
     shot: 'satellite',
     window: WIDE,
     map: true,
@@ -1957,6 +1986,98 @@ export const STAGES = [
       await opening.fill('30');
       await opening.press('Enter');
     },
+  },
+  {
+    // Align: the bridge's east tower, then the Evergreen cranes it stands right behind in
+    // the photo, the line run on past the cranes to the west bank, loosened by 2°
+    shot: 'satellite-align',
+    window: LARGE,
+    map: true,
+    crop: 'full',
+    async run({ go, page }) {
+      // the camera's spot clear of the panel, the tower clear of the compass
+      const view = { lat: 33.745, lon: -118.2765, zoom: 16 };
+      await go(`satellite?ll=${view.lat},${view.lon}&z=${view.zoom}&p=usgs-imagery`);
+      const hide = page.locator('[data-guide="sat.panel"] [title="Hide the panel"]').filter({ visible: true });
+      if (await hide.count()) await hide.first().click();
+      await page.waitForTimeout(1500);
+      await seen(page, '[data-guide="map.align-tool"]').click();
+      const tower = await onMap(page, view, EAST_TOWER);
+      const cranes = await onMap(page, view, TERMINAL);
+      await page.mouse.click(tower.x, tower.y);
+      await page.waitForTimeout(600);
+      await page.mouse.click(cranes.x, cranes.y);
+      await page.mouse.move(1, 1);
+      const panel = seen(page, '[data-guide="map.align"]');
+      // the camera stands on the side of the nearer thing, past the cranes
+      await panel.getByRole('button', { name: 'Past B' }).click();
+      await panel.locator('input[type="range"]').evaluate((range) => {
+        range.value = '2';
+        range.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+    },
+  },
+  {
+    // Sun and moon over the channel, before Read a shadow is pressed
+    shot: 'satellite-sun',
+    window: WIDE,
+    map: true,
+    crop: 'full',
+    async run({ go, page }) {
+      await go(`satellite?${CHANNEL_VIEW}&p=usgs-imagery`);
+      const hide = page.locator('[data-guide="sat.panel"] [title="Hide the panel"]').filter({ visible: true });
+      if (await hide.count()) await hide.first().click();
+      await page.waitForTimeout(1500);
+      await seen(page, '[data-guide="map.sky-tool"]').click();
+      await seen(page, '[data-guide="map.shadow"]').waitFor();
+      await page.waitForFunction(() => {
+        const range = document.querySelector('[data-guide="map.sky"] input[type="range"]');
+        return range && !range.disabled && Number(range.max) > 0;
+      });
+      // mid-morning, so the sun stands up whatever hour the picture is taken at
+      await seen(page, '[data-guide="map.sky"] input[type="range"]').evaluate((range) => {
+        range.value = String(Math.round(Number(range.max) * 0.42));
+        range.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await page.mouse.move(1, 1);
+    },
+  },
+  {
+    // Grid Search over the terminal east of the channel: a box of 100 m cells, the first
+    // row swept clear and one cell flagged, the way a sweep looks once begun
+    shot: 'satellite-grid',
+    window: WIDE,
+    map: true,
+    crop: 'full',
+    async run({ go, page }) {
+      await go(`satellite?${CHANNEL_VIEW}&p=usgs-imagery`);
+      const hide = page.locator('[data-guide="sat.panel"] [title="Hide the panel"]').filter({ visible: true });
+      if (await hide.count()) await hide.first().click();
+      await page.waitForTimeout(1500);
+      await seen(page, '[data-guide="map.grid-tool"]').click();
+      const panel = seen(page, '[data-guide="map.grid"]');
+      const cell = panel.locator('input[type="number"]');
+      await cell.fill('100');
+      await cell.press('Enter');
+      await panel.getByRole('button', { name: 'Box' }).click();
+      const map = await page.locator('[data-guide="map.ground"]').filter({ visible: true }).first().boundingBox();
+      const at = (x, y) => ({ x: map.x + map.width * x, y: map.y + map.height * y });
+      const [from, to] = [at(0.56, 0.22), at(0.9, 0.82)];
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 6 });
+      await page.mouse.move(to.x, to.y, { steps: 6 });
+      await page.mouse.up();
+      await seen(page, '[data-guide="map.grid"] .grid-cov').waitFor();
+      await page.waitForTimeout(800);
+      // a click clears a cell, a right click flags one
+      const step = (to.x - from.x) / 6;
+      for (let k = 0; k < 4; k += 1) await page.mouse.click(from.x + step * (k + 0.5), from.y + step * 0.5);
+      await page.mouse.click(from.x + step * 1.5, from.y + step * 1.5, { button: 'right' });
+      await page.mouse.move(1, 1);
+      await page.waitForTimeout(600);
+    },
+    // the grid stays in the demo case, where only this panel's Saved grids would list it
   },
   {
     shot: 'compare',

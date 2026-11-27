@@ -108,6 +108,7 @@
 
 <div
   class="sun-panel card"
+  data-guide="map.sky"
   class:loading
   bind:this={panelEl}
   style="transform: translate({offset.x}px, {offset.y}px)"
@@ -182,7 +183,7 @@
 
   <div class="shadow">
     {#if !shadow}
-      <button class="btn btn-sm" onclick={ontraceshadow} title="The hour from a shadow on the imagery, and how tall its caster stands">
+      <button class="btn btn-sm" onclick={ontraceshadow} title="The hour from a shadow on the imagery, and how tall its caster stands" data-guide="map.shadow">
         <Icon name="sun" size={13} /> Read a shadow
       </button>
     {:else if shadow.step}

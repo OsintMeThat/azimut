@@ -117,7 +117,7 @@
   }
 </script>
 
-<div class="measure-panel card" class:folded data-guide={tool.align ? undefined : 'map.measure'}>
+<div class="measure-panel card" class:folded data-guide={tool.align ? 'map.align' : 'map.measure'}>
   <header>
     <span class="title"><Icon name={tool.align ? 'alignment' : 'ruler'} size={13} /> {tool.align ? 'Align' : 'Measure'}</span>
     <div class="segments units" role="group" aria-label="Units">

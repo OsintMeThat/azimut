@@ -1,5 +1,30 @@
 {
   "width": 933,
   "height": 616,
-  "anchors": {}
+  "anchors": {
+    "plate.map-settings": {
+      "x": 172,
+      "y": 139.6,
+      "w": 20,
+      "h": 20
+    },
+    "plate.map-ground": {
+      "x": 19,
+      "y": 164.6,
+      "w": 173,
+      "h": 14.8
+    },
+    "plate.map-layers": {
+      "x": 19,
+      "y": 184.4,
+      "w": 173,
+      "h": 60.8
+    },
+    "plate.new-layer": {
+      "x": 19,
+      "y": 250.2,
+      "w": 110.3,
+      "h": 22.5
+    }
+  }
 }
