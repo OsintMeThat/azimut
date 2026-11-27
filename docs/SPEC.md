@@ -260,7 +260,7 @@ Each version delivers one complete daily workflow. Firm ideas move here from
 
 | Tool | What it does |
 |------|--------------|
-| **One-click update** (urgent, 0.3.4) | The binary installs the next release in one press: it downloads beside itself, checks an Ed25519 signature made outside GitHub, starts the new binary once, swaps by renaming, restarts and keeps the old one to fall back on. Any failure leaves the installed version untouched and links to the release page; a pip install is told its command. Rehearsed on a pre-release before 0.3.5 relies on it. |
+| **One-click update** (urgent, 0.3.4) | The binary installs the next release in one press. A box in the new-version pop-up, also in Settings → System and off by default, has it download and verify each new release in the background; installing always waits for a press on Install and restart. The release's manifest must carry an Ed25519 signature made off GitHub; the new binary is started once, swapped in by renaming, and the old one is kept beside it. Any failure leaves the installed version untouched and offers the manual download; a pip install is told its command. Rehearsed on two branch builds before the tag. |
 | **Long videos, several geolocations** (0.3.4) | One clip holds several scenes, each one a proof: Inspect keeps the scenes still to geolocate, an instant, a passage or several where one place shows again, and lists the proofs resting on the clip, Geo Proof states a scene's period and walks a clip's scenes as slides, and Post threads them in one of four orders, or the order a template lays out, with the whole video or the cut. Nothing about a proof without a period changes. |
 | **Vehicle models on map layers** (after 0.3.4) | The small vehicle models Geo Proof and Compare stamp, offered in My layers' Style palette: seen from above and turned to the marker's bearing on every map, the globe and plates, exported to KMZ with their heading. Today's pictograms keep their pixels. |
 | **Your own Claude, through MCP** (0.3.5) | Azimut serves the case as an MCP server that the analyst's own Claude app connects to, on their subscription, so Azimut holds no key and sends nothing itself. Its tools read the case and file links, events, places and note drafts as proposals the analyst confirms; none deletes or writes past a proposal. Any MCP client, a local model included, connects the same way. |
@@ -583,7 +583,12 @@ stops making sense.
   back and when a backup restores it. A copy that would draw less than its PNG is not kept.
   Accepted risks recorded here: cleartext keys over
   localhost, the WordPress application password and the GitHub token readable by anyone
-  who can read the workspace (as the API keys are), the hash-verified scraper updater, Intel macOS staying on cryptography 48
+  who can read the workspace (as the API keys are), the hash-verified scraper updater,
+  the release signing key (each binary trusts one Ed25519 public key for its own
+  updates and the private half stays with the maintainer, off GitHub, so a forged update
+  needs that key and write access to the repository's releases; a lost key costs users
+  one manual download of a release carrying a new key, and replacing a key that still
+  exists takes a release signed with it that carries the next), Intel macOS staying on cryptography 48
   for want of later wheels (Azimut uses it for AES-GCM only, not the X.509 verifier its
   two open advisories concern), the release workflow's publish job
   running `softprops/action-gh-release` and `pypa/gh-action-pypi-publish` on mutable
@@ -644,7 +649,10 @@ stops making sense.
   rather than queued. Two things reach out on mount and no
   others. The startup update check: opt-out, and read-only against GitHub's
   releases feed plus PyPI's JSON for the two downloaders, both governed by the
-  same switch. And the home page's map of the case, which fetches basemap tiles
+  same switch. With Download new versions automatically ticked (off by default, and
+  greyed while that switch is off), a newer release's signed manifest and this system's
+  binary follow from GitHub's release downloads; nothing installs until the analyst
+  presses Install and restart. And the home page's map of the case, which fetches basemap tiles
   for the points the case already holds — through the same proxy as every other
   map, from the keyless unmetered provider only, so it spends no allowance and
   asks for nothing a case with no saved point would. Release notes are rendered through the Notebook's
