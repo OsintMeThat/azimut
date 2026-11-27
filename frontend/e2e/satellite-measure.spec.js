@@ -252,6 +252,41 @@ test('a corner pressed and let go where it stands starts no measure on it', asyn
   expect(moved.y).toBeGreaterThan(b.y + 60);
 });
 
+test('a corner drags while its ground is read, the chart following the pointer over it', async ({ page }) => {
+  const { at } = await openTool(page);
+  // the ground sampled along the line actually drawn, so the pointer over a handle is over the line
+  await page.route('**/api/terrain/profile', async (route) => {
+    const [a, b] = route.request().postDataJSON().points;
+    const t = Array.from({ length: 41 }, (_, i) => i / 40);
+    await route.fulfill({
+      json: {
+        ...PROFILE,
+        distance_m: t.map((k) => k * 1000),
+        lat: t.map((k) => a.lat + (b.lat - a.lat) * k),
+        lon: t.map((k) => a.lon + (b.lon - a.lon) * k),
+        elevation: t.map(() => 800),
+        sight: { ...PROFILE.sight, visible: true, margin_deg: 0.4, blocked_at_m: null, bulge_m: t.map(() => 0), seen: t.map(() => true) },
+      },
+    });
+  });
+  await page.mouse.click(...at(500, 300));
+  await page.mouse.dblclick(...at(780, 300));
+  await page.getByRole('switch', { name: /Ground/ }).check();
+  await expect(page.getByRole('slider', { name: /Heights along the line/ })).toBeVisible();
+  // folded off the line, the ground still read
+  await page.getByRole('button', { name: 'Fold Ground along measure 1' }).click();
+  // B taken and walked back along the line first: each step reads another sample
+  const b = await page.locator('.path-handle.named').last().boundingBox();
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 3 });
+  await page.mouse.down();
+  await page.mouse.move(...at(740, 300), { steps: 8 });
+  await page.mouse.move(...at(740, 440), { steps: 8 });
+  await page.mouse.up();
+  const moved = await page.locator('.path-handle.named').last().boundingBox();
+  expect(moved.y).toBeGreaterThan(b.y + 100);
+  expect(moved.x).toBeLessThan(b.x - 20);
+});
+
 test('a line used as a viewshed reads the ground in sight from A', async ({ page }) => {
   const { at, asked } = await openTool(page);
   const bare = await mapPicture(page);

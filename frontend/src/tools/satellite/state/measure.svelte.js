@@ -79,6 +79,7 @@ const LINE = { stroke: AMBER, strokeWidth: 2.5, strokeOpacity: 0.95 };
 const QUIET = { stroke: AMBER, strokeWidth: 2, strokeOpacity: 0.7 };
 const CASING = { stroke: '#000', strokeWidth: 6, strokeOpacity: 0.35, interactive: false };
 const DOT = { radius: 4, stroke: '#fff', strokeWidth: 2, fill: AMBER, fillOpacity: 1, interactive: false };
+const READ_ID = 'read-at';
 const READ_AT = { radius: 6, stroke: '#4cc3ff', strokeWidth: 2.5, fill: '#111', fillOpacity: 1, interactive: false };
 const BLOCKED = { radius: 6, stroke: '#fff', strokeWidth: 2, fill: HIDDEN, fillOpacity: 1, interactive: false };
 // what a line is used as, in a bright cyan on a dark casing: apart from the amber line, and read on any ground
@@ -331,7 +332,7 @@ export function createMeasureState({
       onClick: () => copy(coords(crossed.at.lat, crossed.at.lon)),
     }));
     const reading = readPoint();
-    shapes.set([...list, ...meetingShapes(), ...marks, reading && { kind: 'dot', at: reading, style: READ_AT }]);
+    shapes.set([...list, ...meetingShapes(), ...marks, reading && { id: READ_ID, kind: 'dot', at: reading, style: READ_AT }]);
     shapes.visible(on);
     drawWords();
   }
@@ -668,7 +669,20 @@ export function createMeasureState({
   function showReading(index) {
     if (index === readIndex) return;
     readIndex = index;
-    draw();
+    placeReading();
+  }
+
+  /**
+   * The sample read, marked on the line, moved on its own. The pointer reads
+   * the chart over the handles too, and laying every shape again at each move
+   * dropped the handle under it before a drag could begin.
+   */
+  function placeReading() {
+    if (!layers()) return;
+    const at = readPoint();
+    if (!at) shapes.drop([READ_ID]);
+    else if (shapes.has(READ_ID)) shapes.patch(READ_ID, { at });
+    else shapes.add([{ id: READ_ID, kind: 'dot', at, style: READ_AT }]);
   }
 
   return {

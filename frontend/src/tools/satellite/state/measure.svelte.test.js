@@ -30,8 +30,15 @@ function fakeLayer() {
     sets: [],
     patches: [],
     shown: true,
-    set: vi.fn((shapes) => layer.sets.push(shapes.filter(Boolean))),
+    ids: new Set(),
+    set: vi.fn((shapes) => {
+      layer.sets.push(shapes.filter(Boolean));
+      layer.ids = new Set(layer.last.map((shape) => shape.id));
+    }),
     patch: vi.fn((id, patch) => layer.patches.push([id, patch])),
+    add: vi.fn((shapes) => shapes.forEach((shape) => layer.ids.add(shape.id))),
+    drop: vi.fn((ids) => ids.forEach((id) => layer.ids.delete(id))),
+    has: (id) => layer.ids.has(id),
     visible: vi.fn((on) => (layer.shown = on)),
     clear: vi.fn(),
     destroy: vi.fn(),
@@ -413,9 +420,40 @@ describe('the ground under a line', () => {
     await vi.waitFor(() => expect(tool.ground?.answer).toBeTruthy());
     tool.follow({ lat: 46.0005, lon: 7.0099 });
     expect(tool.readIndex).toBe(1);
-    expect(shapes().last.some((shape) => shape.kind === 'dot' && shape.style.stroke === '#4cc3ff')).toBe(true);
+    expect(shapes().add).toHaveBeenCalledWith([expect.objectContaining({ id: 'read-at', kind: 'dot', at: { lat: 46, lon: 7.01 } })]);
+    tool.follow({ lat: 46.0005, lon: 7.0199 });
+    expect(shapes().patches).toContainEqual(['read-at', { at: { lat: 46, lon: 7.02 } }]);
     tool.follow({ lat: 46.5, lon: 7.5 });
     expect(tool.readIndex).toBe(null);
+    expect(shapes().drop).toHaveBeenCalledWith(['read-at']);
+    expect(shapes().has('read-at')).toBe(false);
+  });
+
+  it('keeps the handles under the pointer while it reads the chart along the line', async () => {
+    relief = true;
+    const tool = store();
+    tool.open();
+    drawn(tool, A, B);
+    await vi.waitFor(() => expect(tool.ground?.answer).toBeTruthy());
+    const laid = shapes().sets.length;
+    // over B's handle, then pressed and moved off it: each move reads another sample
+    tool.follow({ lat: 46, lon: 7.0199 });
+    tool.follow({ lat: 46.0002, lon: 7.0099 });
+    tool.follow({ lat: 46, lon: 7.0001 });
+    expect(tool.readIndex).toBe(0);
+    // laid again, the handle pressed would be torn down before the drag begins
+    expect(shapes().sets).toHaveLength(laid);
+  });
+
+  it('keeps the sample read when the line is laid again', async () => {
+    relief = true;
+    const tool = store();
+    tool.open();
+    drawn(tool, A, B);
+    await vi.waitFor(() => expect(tool.ground?.answer).toBeTruthy());
+    tool.follow({ lat: 46.0005, lon: 7.0099 });
+    tool.setUnits('imperial');
+    expect(shapes().last).toContainEqual(expect.objectContaining({ id: 'read-at', at: { lat: 46, lon: 7.01 } }));
   });
 });
 
