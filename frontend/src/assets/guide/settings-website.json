@@ -1,5 +1,5 @@
 {
-  "width": 1316,
+  "width": 1298,
   "height": 834,
   "anchors": {
     "settings.website": {
@@ -8,10 +8,52 @@
       "w": 1084,
       "h": 114.3
     },
-    "settings.website-hub": {
-      "x": 168,
+    "settings.site-checklist": {
+      "x": 186,
+      "y": 538.3,
+      "w": 1084,
+      "h": 295.5
+    },
+    "settings.hub-identity": {
+      "x": 255.8,
       "y": 180.3,
-      "w": 1120,
+      "w": 60.4,
+      "h": 40.2
+    },
+    "settings.hub-hosting": {
+      "x": 316.2,
+      "y": 180.3,
+      "w": 61.1,
+      "h": 40.2
+    },
+    "settings.hub-articles": {
+      "x": 377.3,
+      "y": 180.3,
+      "w": 58.2,
+      "h": 40.2
+    },
+    "settings.hub-categories": {
+      "x": 435.5,
+      "y": 180.3,
+      "w": 78.7,
+      "h": 40.2
+    },
+    "settings.hub-readers": {
+      "x": 514.1,
+      "y": 180.3,
+      "w": 62.9,
+      "h": 40.2
+    },
+    "settings.hub-upkeep": {
+      "x": 577,
+      "y": 180.3,
+      "w": 60.4,
+      "h": 40.2
+    },
+    "settings.hub-yours": {
+      "x": 637.4,
+      "y": 180.3,
+      "w": 95,
       "h": 40.2
     }
   }

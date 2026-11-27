@@ -49,9 +49,18 @@
     readers: HELP.tabReaders, upkeep: HELP.tabUpkeep, yours: HELP.tabYours, wordpress: HELP.tabWordpress,
   };
   const known = (id) => HUB_TABS.some((entry) => entry.id === id);
-  /** The tabs the guide's pictures frame (`lib/guide.js`). */
-  const HUB_GUIDES = { hosting: 'settings.hub-hosting', wordpress: 'settings.hub-wordpress' };
 
+  /** The tabs the guide's pictures frame (`lib/guide.js`), each written whole so the guide's test finds it. */
+  const HUB_GUIDES = {
+    identity: 'settings.hub-identity',
+    hosting: 'settings.hub-hosting',
+    articles: 'settings.hub-articles',
+    categories: 'settings.hub-categories',
+    readers: 'settings.hub-readers',
+    upkeep: 'settings.hub-upkeep',
+    yours: 'settings.hub-yours',
+    wordpress: 'settings.hub-wordpress',
+  };
   let tab = $state('overview');
   let bar = $state(null);
 

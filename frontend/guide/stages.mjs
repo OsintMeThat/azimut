@@ -1737,6 +1737,15 @@ export const STAGES = [
       }
     },
   })),
+  // Settings, Website: each panel of a site set up and read, its answers made up on the page
+  ...['identity', 'hosting', 'articles', 'categories', 'readers', 'upkeep', 'yours'].map((tab) => ({
+    shot: `settings-website-${tab}`,
+    window: SETTINGS,
+    crop: 'full',
+    async run({ go, page }) {
+      await siteHub(go, page, tab);
+    },
+  })),
   {
     shot: 'media',
     crop: 'full',
@@ -4919,6 +4928,90 @@ async function forgetStandIns(page) {
   await page.unroute('**/github/check').catch(() => {});
   await route(page, 'DELETE', '/api/publishing/github').catch(() => {});
   await route(page, 'DELETE', '/api/publishing/wordpress').catch(() => {});
+}
+
+/** The site Settings › Website's panels are pictured with: GitHub set up, nothing reached. */
+const SITE_ADDRESS = 'https://your-name.github.io/notes/';
+const SITE_GITHUB = {
+  account: 'your-name',
+  repo: 'notes',
+  branch: 'main',
+  site: '',
+  token: { set: true, hint: '…k3q9' },
+  website: { title: '', logo: false, counting: '' },
+  categories: ['Ports', 'Shipping'],
+  added: [],
+};
+const siteItem = (folder, title, more = {}) => ({
+  folder,
+  address: `${SITE_ADDRESS}${folder}/`,
+  title,
+  summary: '',
+  date: '2026-11-20',
+  date_label: '20 November 2026',
+  category: '',
+  role: 'article',
+  layout: 'article',
+  image: '',
+  bytes: 2_400_000,
+  deletable: true,
+  ...more,
+});
+/** What Read the site finds on it: three articles, two pages and a draft. */
+const SITE_READ = {
+  ok: true,
+  address: SITE_ADDRESS,
+  home: 'azimut',
+  bar: 'azimut',
+  footer: 'none',
+  items: [
+    siteItem('bridge-from-both-banks', 'The bridge from both banks', { category: 'Ports', date: '2026-11-24', date_label: '24 November 2026', bytes: 6_300_000 }),
+    siteItem('channel-observations', 'Channel observations', { category: 'Ports', layout: 'map', date: '2026-11-22', date_label: '22 November 2026', bytes: 1_100_000 }),
+    siteItem('a-yard-grows', 'A container yard grows', { category: 'Shipping', layout: 'story', date: '2026-11-18', date_label: '18 November 2026' }),
+    siteItem('about', 'About', { role: 'page', date: '2026-11-02', date_label: '2 November 2026', bytes: 40_000 }),
+    siteItem('legal-notice', 'Legal notice', { role: 'page', date: '2026-11-02', date_label: '2 November 2026', bytes: 30_000 }),
+    siteItem('tug-routes', 'Tug routes, a draft', { role: 'unlisted', date: '2026-11-25', date_label: '25 November 2026', bytes: 900_000 }),
+  ],
+  categories: [
+    { name: 'Ports', count: 2, pages: [] },
+    { name: 'Shipping', count: 1, pages: [] },
+  ],
+  marked: [],
+  legal: '',
+  privacy: '',
+  last: { date: '2026-11-25T18:40:00Z', message: 'Publish Tug routes, a draft' },
+  size: { site: 11_200_000, repository: 26_500_000 },
+  old_address: 0,
+  warnings: [],
+};
+
+/**
+ * Settings, Website, on the panel of `tab`, for a site set up and read: GitHub's settings and Read the site
+ * answered on the page, never written to the demo's settings, so no later picture finds GitHub connected.
+ */
+async function siteHub(go, page, tab) {
+  const publishing = async (asked) => {
+    if (asked.request().method() !== 'GET') return asked.fallback();
+    const answer = await (await asked.fetch()).json();
+    return asked.fulfill({ json: { ...answer, github: SITE_GITHUB } });
+  };
+  const read = (asked) => asked.fulfill({ json: SITE_READ });
+  await page.route('**/api/publishing', publishing);
+  await page.route('**/api/publishing/github/site/read', read);
+  try {
+    await go('settings');
+    await page.locator('[data-guide="settings.nav"] button', { hasText: 'Website' }).first().click();
+    await seen(page, '[data-guide="settings.hub-articles"]').click();
+    await seen(page, '#hub-panel-articles').locator('button', { hasText: 'Read the site' }).click();
+    await seen(page, '[data-guide="settings.site-articles"]').waitFor();
+    await seen(page, `[data-guide="settings.hub-${tab}"]`).click();
+    await closeSidebar(page);
+    await page.mouse.move(1, 1);
+    await page.waitForTimeout(800);
+  } finally {
+    await page.unroute('**/api/publishing', publishing);
+    await page.unroute('**/api/publishing/github/site/read', read);
+  }
 }
 
 /** Settings, Website, on the panel of `tab`, its card `card` in view. */

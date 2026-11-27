@@ -130,7 +130,7 @@
       {/if}
     </HubCard>
 
-    <HubCard title={FOLLOW_TITLE} label={FOLLOW_TITLE}>
+    <HubCard title={FOLLOW_TITLE} label={FOLLOW_TITLE} guide="settings.site-follow">
       {#each follow as one (one.id)}
         <p class="follow">{one.said}</p>
         <div class="copyline">

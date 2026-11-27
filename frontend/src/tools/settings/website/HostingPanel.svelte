@@ -39,7 +39,7 @@
     <GitHubPagesSettings {onchange} />
 
     <div class="hub-col">
-      <HubCard title={ADDRESS_TITLE} label={ADDRESS_TITLE}>
+      <HubCard title={ADDRESS_TITLE} label={ADDRESS_TITLE} guide="settings.site-address">
         {#snippet aside()}{#if address}<span class="hub-pill" class:ok={own}>{own ? ADDRESS_OWN : ADDRESS_GITHUB}</span>{/if}{/snippet}
         {#if address}
           <p class="address"><a href={address} target="_blank" rel="noopener noreferrer" title={HELP.siteOpen}>{address}</a></p>
@@ -54,7 +54,7 @@
         <p><a class="hub-ext" href={HOSTING_DOMAIN_GUIDE} target="_blank" rel="noopener noreferrer" title={HELP.siteOwnGuide}>{DOMAIN_LINK} <Icon name="external" size={11} /></a></p>
       </HubCard>
 
-      <HubCard title={LIMITS_TITLE} label={LIMITS_TITLE}>
+      <HubCard title={LIMITS_TITLE} label={LIMITS_TITLE} guide="settings.site-limits">
         <div class="usage">
           {#if !read}
             <p class="unread"><span class="hub-hint">{LIMITS_UNREAD}</span>

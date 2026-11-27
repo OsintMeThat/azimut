@@ -62,7 +62,7 @@
   </section>
 
   <div class="pair">
-    <HubCard title={OWNERS_TITLE} label={OWNERS_TITLE}>
+    <HubCard title={OWNERS_TITLE} label={OWNERS_TITLE} guide="settings.site-owners">
       <table class="owners">
         <thead><tr>{#each OWNERS_HEAD as head (head)}<th scope="col">{head}</th>{/each}</tr></thead>
         <tbody>
@@ -77,7 +77,7 @@
       </table>
       {#if !read}<p class="hub-hint more">{OWNERS_UNREAD}</p>{:else if read.truncated}<p class="hub-hint more">{OWNERS_TRUNCATED}</p>{/if}
     </HubCard>
-    <HubCard title={CHORES_TITLE} label={CHORES_TITLE}>
+    <HubCard title={CHORES_TITLE} label={CHORES_TITLE} guide="settings.site-chores">
       <div class="chores">
         {#each CHORES as [chore, how], index (chore)}
           <details open={index === 0}>

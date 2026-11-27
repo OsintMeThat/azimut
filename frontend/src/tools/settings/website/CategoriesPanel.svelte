@@ -181,7 +181,7 @@
   {/if}
 
   <div class="hub-grid cols">
-    <HubCard title={CATEGORIES_TITLE} label={CATEGORIES_TITLE}>
+    <HubCard title={CATEGORIES_TITLE} label={CATEGORIES_TITLE} guide="settings.site-categories">
       <p>{CATEGORIES_SAID}</p>
       {#if !rows.length}
         <p class="cats-none">{known ? CATEGORIES_NONE : CATEGORIES_UNREAD}</p>
@@ -217,7 +217,7 @@
       <p class="hub-hint foot">{CATEGORIES_NOTE}</p>
     </HubCard>
 
-    <HubCard title={CATEGORY_ADD_LABEL} label={CATEGORY_ADD_LABEL}>
+    <HubCard title={CATEGORY_ADD_LABEL} label={CATEGORY_ADD_LABEL} guide="settings.site-category-add">
       <form class="add" onsubmit={(event) => { event.preventDefault(); void add(); }}>
         <input class="input" bind:value={typed} maxlength={CATEGORY_MAX} placeholder={CATEGORY_ADD_PLACEHOLDER} aria-label={CATEGORY_ADD_LABEL}
           aria-describedby="category-add-said" title={HELP.categoryName} spellcheck="false" autocomplete="off" />

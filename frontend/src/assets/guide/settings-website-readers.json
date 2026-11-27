@@ -1,0 +1,18 @@
+{
+  "width": 1376,
+  "height": 856,
+  "anchors": {
+    "settings.statistics": {
+      "x": 186,
+      "y": 332.8,
+      "w": 534,
+      "h": 158.3
+    },
+    "settings.site-follow": {
+      "x": 736,
+      "y": 332.8,
+      "w": 534,
+      "h": 201.5
+    }
+  }
+}

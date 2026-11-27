@@ -137,7 +137,7 @@
       <p class="hub-hint when-said">{IDENTITY_SAID}</p>
     </HubCard>
 
-    <div class="side">
+    <div class="side" data-guide="settings.site-preview">
       <SitePreview name={shownName || UNNAMED} {tagline} {logoUrl} credit={prefs.siteCreditAzimut} version={appInfo.version} {read} />
       {#if read?.home === 'yours'}
         <p class="own-home"><span class="hub-pill info">{OWN_HOME_PILL}</span><span>{ownHomeSaid(hostOf(address))}</span></p>

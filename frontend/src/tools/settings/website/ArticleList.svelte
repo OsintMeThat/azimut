@@ -149,7 +149,7 @@
     {/if}
   </div>
 {:else}
-  <div class="list">
+  <div class="list" data-guide="settings.site-articles">
     <div class="item head" aria-hidden="true">
       <span></span><span>{COLUMNS[0]}</span><span>{COLUMNS[1]}</span><span>{COLUMNS[2]}</span><span>{COLUMNS[3]}</span><span class="end">{COLUMNS[4]}</span><span></span>
     </div>

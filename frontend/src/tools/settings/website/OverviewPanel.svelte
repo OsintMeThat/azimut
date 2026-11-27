@@ -66,7 +66,7 @@
     {#each FLOW_REFRESHES as what (what)}<span class="hub-pill">{what}</span>{/each}</p>
 
   <div class="hub-gap" class:hub-grid={big}>
-    <HubCard title={CHECKLIST_TITLE} label={CHECKLIST_TITLE}>
+    <HubCard title={CHECKLIST_TITLE} label={CHECKLIST_TITLE} guide="settings.site-checklist">
       <p>{progressSaid(steps)}</p>
       <div class="progress" role="progressbar" aria-label="Steps done" aria-valuemin="0" aria-valuemax={steps.length} aria-valuenow={done}>
         <i style:width="{(done / steps.length) * 100}%"></i>

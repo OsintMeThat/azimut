@@ -177,18 +177,129 @@ export const PAGES = {
     ],
   },
   'settings-website': {
-    lead: 'The site Azimut makes of the notes you publish, hosted free on GitHub Pages. Everything here is optional.',
+    lead: 'A website of your own, made from the notes you publish and hosted free on GitHub Pages. Everything here is optional, and nothing reaches GitHub until you press a button that needs it.',
     shot: 'settings-website',
     marks: [
-      { anchor: 'settings.website', title: 'The site at a glance', text: 'Its name, its address and its last change, with Open the site and Update the site.' },
-      { anchor: 'settings.website-hub', title: 'Panels', text: 'Overview says what is left to set up. Then its name and logo, hosting, articles, categories, readers, upkeep, and how to make it yours.' },
+      { anchor: 'settings.website', title: 'The site at a glance', text: 'Its name, its address, its last change and whether readers are counted, with Open the site and Update the site.' },
+      {
+        anchor: 'settings.site-checklist',
+        title: 'Your site, step by step',
+        text: 'What is set and what is left. The arrow at the end of a line opens the panel that sets it.',
+      },
+      {
+        anchor: 'settings.hub-identity',
+        title: 'Identity',
+        text: 'The name, the line under it and the logo readers see.',
+        opens: {
+          shot: 'settings-website-identity',
+          lead: 'What readers see in the header, the bar over each article and the feed. The preview follows as you type.',
+          marks: [
+            { anchor: 'settings.site', title: 'Name, tagline, logo', text: 'An empty name takes your Publishing name, else your GitHub account. The logo is a PNG. Made with Azimut ends the home page with a credit.' },
+            { anchor: 'settings.site-preview', title: 'The preview', text: 'The article bar, the home page or the feed as readers will see them, before anything is sent.' },
+          ],
+          tips: [{ title: 'When it shows', text: 'The lists change at the next publish or Update the site. An article’s bar changes when it is published again.' }],
+        },
+      },
+      {
+        anchor: 'settings.hub-hosting',
+        title: 'Hosting',
+        text: 'GitHub Pages, where the site lives, its address and its limits.',
+        opens: {
+          shot: 'settings-website-hosting',
+          lead: 'GitHub keeps the site’s files in one of your repositories and serves them for free. The token stays on this computer.',
+          marks: [
+            { anchor: 'settings.github', title: 'GitHub Pages', text: 'Your account, the repository, its branch and a token for that repository only. Test connection checks them. Until they are set, How to make the repository and the token stays open under them.' },
+            { anchor: 'settings.site-address', title: 'The address', text: 'your-account.github.io/repository, or your own domain, set in the repository’s CNAME file.' },
+            { anchor: 'settings.site-limits', title: 'Limits', text: 'What GitHub allows, such as 1 GB of site and 100 GB of traffic a month. After Read the site, two bars show how much is used.' },
+          ],
+        },
+      },
+      {
+        anchor: 'settings.hub-articles',
+        title: 'Articles',
+        text: 'What the site holds, read from GitHub when you press Read the site.',
+        opens: {
+          shot: 'settings-website-articles',
+          lead: 'Every article, map and page on the site, drafts included. The chips above the list filter it by category or kind.',
+          marks: [
+            {
+              anchor: 'settings.site-articles',
+              title: 'One line each',
+              text: 'Its category, its kind, the day it went up and its size. Open shows it online. Delete takes it down and off the lists, the feed and the sitemap, in one commit.',
+            },
+          ],
+          tips: [
+            { title: 'Three kinds', text: 'An Article is in the lists and the feed. A Page is linked from the header, for About or a legal notice. Unlisted is online at its address only, for a test or a draft to show someone.' },
+            { title: 'The kind is picked when you publish', text: 'Each time, in the publish window of the Notebook.' },
+            { title: 'Another category', text: 'Pick it on the article’s line. The article is not published again.' },
+            { title: 'Pages every site should have', text: 'Under the list, Start a Legal notice page and Start a Privacy page each make a note in the open case, the host already named.' },
+            { title: 'Not made by Azimut', text: 'A folder you put on the site yourself shows, but Delete is not offered for it.' },
+          ],
+        },
+      },
+      {
+        anchor: 'settings.hub-categories',
+        title: 'Categories',
+        text: 'How articles are grouped on the site.',
+        opens: {
+          shot: 'settings-website-categories',
+          lead: 'Each category with its number of articles. Rename and Delete rewrite the articles that carry it and the lists, in one commit, after a confirmation.',
+          marks: [
+            { anchor: 'settings.site-categories', title: 'The site’s categories', text: 'Read from the site. Pick one when you publish a note, or on an article’s line in Articles.' },
+            { anchor: 'settings.site-category-add', title: 'New category', text: 'Offered when you publish and on each line, and on the site with its first article.' },
+          ],
+          tips: [{ title: 'A page per category', text: 'Make it yours says which markers list one category on a page of your own.' }],
+        },
+      },
+      {
+        anchor: 'settings.hub-readers',
+        title: 'Readers',
+        text: 'Counting readers, the feed and the sitemap.',
+        opens: {
+          shot: 'settings-website-readers',
+          lead: 'Off until you pick a counter. Counting starts with the next publish or Update the site.',
+          marks: [
+            { anchor: 'settings.statistics', title: 'Count readers', text: 'Off, GoatCounter or Cloudflare Web Analytics, both free and with no cookie. Pick one and its field opens, with the steps to make an account.' },
+            { anchor: 'settings.site-follow', title: 'Follow and find', text: 'The feed’s address for readers, and the sitemap’s to give Google Search Console or Bing Webmaster Tools. Copy takes each.' },
+          ],
+          tips: [{ title: 'The numbers in Azimut', text: 'With Cloudflare, Read the numbers shows each article’s views over 7 and 30 days, where visits came from and their countries.' }],
+        },
+      },
+      {
+        anchor: 'settings.hub-upkeep',
+        title: 'Upkeep',
+        text: 'Update the site, who writes which file, and the usual chores.',
+        opens: {
+          shot: 'settings-website-upkeep',
+          lead: 'Keeping the site in shape once it is online.',
+          marks: [
+            { anchor: 'settings.update-site', title: 'Update the site', text: 'Rebuilds the home page, the list, the feed and the sitemap from the articles on GitHub, in one commit. Your own files stay as they are.' },
+            { anchor: 'settings.site-owners', title: 'Who writes what', text: 'Which files Azimut makes and rewrites, and which stay yours.' },
+            { anchor: 'settings.site-chores', title: 'Usual chores', text: 'Take an article down, move it, rename the site, fix a typo on GitHub, test before it shows, move to your own domain.' },
+          ],
+          tips: [{ title: 'A domain of your own', text: 'Set it on GitHub, then press Update the site so the pages published before give the new address. The panel counts those still left.' }],
+        },
+      },
+      {
+        anchor: 'settings.hub-yours',
+        title: 'Make it yours',
+        text: 'How far to change the site, with Azimut still filling its lists.',
+        opens: {
+          shot: 'settings-website-yours',
+          lead: 'Azimut’s site is a simple start. Change as much of it as you like.',
+          marks: [
+            {
+              anchor: 'settings.website-own',
+              title: 'Five ways',
+              text: 'Your own home page, your own bar and footer, a page per category, your own domain, and articles.json for your own scripts. Each card gives the file or the markers to use.',
+            },
+          ],
+        },
+      },
     ],
     tips: [
       { title: 'From a note', text: 'Export, Web folder, then Publish to GitHub Pages puts the note on the site, as an article, a page or unlisted.' },
-      { title: 'A domain of your own', text: 'Set it on GitHub, then press Update the site. Upkeep counts the pages that still give the old address.' },
-      { title: 'How many read it', text: 'Readers counts them on GoatCounter or Cloudflare. With Cloudflare, Read the numbers shows each article’s views.' },
-      { title: 'GitHub only when you press', text: 'Nothing here reaches GitHub until a button that needs it is pressed.' },
-      { title: 'WordPress stands apart', text: 'Its own panel sends a note as a draft to a WordPress site.' },
+      { title: 'WordPress stands apart', text: 'The last tab sends a note to a WordPress site as a draft, with or without the GitHub site.' },
     ],
   },
   'settings-imagery': {

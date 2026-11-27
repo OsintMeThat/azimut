@@ -1,0 +1,24 @@
+{
+  "width": 1376,
+  "height": 856,
+  "anchors": {
+    "settings.update-site": {
+      "x": 186,
+      "y": 332.8,
+      "w": 1084,
+      "h": 92.1
+    },
+    "settings.site-owners": {
+      "x": 186,
+      "y": 438.9,
+      "w": 640.8,
+      "h": 370.2
+    },
+    "settings.site-chores": {
+      "x": 842.8,
+      "y": 438.9,
+      "w": 427.2,
+      "h": 317.1
+    }
+  }
+}

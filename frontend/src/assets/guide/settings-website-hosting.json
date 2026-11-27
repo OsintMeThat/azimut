@@ -1,0 +1,24 @@
+{
+  "width": 1376,
+  "height": 856,
+  "anchors": {
+    "settings.github": {
+      "x": 186,
+      "y": 332.8,
+      "w": 534,
+      "h": 498
+    },
+    "settings.site-address": {
+      "x": 736,
+      "y": 332.8,
+      "w": 534,
+      "h": 109
+    },
+    "settings.site-limits": {
+      "x": 736,
+      "y": 567.7,
+      "w": 534,
+      "h": 288.3
+    }
+  }
+}

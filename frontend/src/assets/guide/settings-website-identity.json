@@ -1,0 +1,18 @@
+{
+  "width": 1376,
+  "height": 856,
+  "anchors": {
+    "settings.site": {
+      "x": 186,
+      "y": 332.8,
+      "w": 534,
+      "h": 407.5
+    },
+    "settings.site-preview": {
+      "x": 736,
+      "y": 332.8,
+      "w": 534,
+      "h": 285.3
+    }
+  }
+}

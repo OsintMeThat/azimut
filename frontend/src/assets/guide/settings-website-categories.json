@@ -1,0 +1,18 @@
+{
+  "width": 1376,
+  "height": 856,
+  "anchors": {
+    "settings.site-categories": {
+      "x": 186,
+      "y": 390,
+      "w": 534,
+      "h": 210.4
+    },
+    "settings.site-category-add": {
+      "x": 736,
+      "y": 390,
+      "w": 534,
+      "h": 131.2
+    }
+  }
+}
