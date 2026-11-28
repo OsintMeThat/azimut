@@ -51,6 +51,51 @@ describe('the tip line', () => {
     expect(document.querySelector('.tip')).toBeNull();
   });
 });
+
+describe('a page that plays, and the last page’s tip', () => {
+  const PLAYING = [
+    { title: 'Reports', text: 'Write as it will read.', reel: [{ shot: 'article-chart-kinds', chip: 'Pick a chart' }], version: '0.3.4' },
+    {
+      title: 'And also',
+      tiles: [{ icon: 'chart', name: 'Detect', text: 'Routine dashboard' }],
+      kofi: true,
+      help: 'The guide now walks six journeys.',
+      version: '0.3.4',
+    },
+  ];
+  const free = () => document.querySelector('.where .free');
+
+  it('plays a page’s reel in the picture’s room', () => {
+    show({ kind: 'news', pages: PLAYING });
+    expect(document.querySelector('.stage .reel, .stage .show')).not.toBeNull();
+    expect(document.querySelector('.stage .also')).toBeNull();
+  });
+
+  it('says Azimut is free on each page but the one whose tip says it', () => {
+    show({ kind: 'news', pages: PLAYING });
+    expect(free().textContent.trim()).toBe('Free · no account');
+    press('Next');
+    expect(free()).toBeNull();
+    expect(document.querySelector('.stage .also .kofi')).not.toBeNull();
+    // the tip is said once: the card, not the line under the words as well
+    expect(document.querySelector('.tip')).toBeNull();
+  });
+
+  it('still points at the `?` from the last page', () => {
+    const anchor = document.createElement('button');
+    document.body.append(anchor);
+    anchor.getBoundingClientRect = () => ({ left: 900, top: 8, right: 930, bottom: 38, width: 30, height: 30, x: 900, y: 8 });
+    show({ kind: 'news', pages: PLAYING }, { anchor });
+    press('Next');
+    expect(document.querySelector('.help').textContent).toContain('The guide now walks six journeys.');
+    expect(document.querySelector('.lit')).not.toBeNull();
+  });
+
+  it('keeps the tour free of it', () => {
+    show({ kind: 'tour', step: 0 });
+    expect(free()).toBeNull();
+  });
+});
 const press = (name) => {
   button(name).click();
   flushSync();

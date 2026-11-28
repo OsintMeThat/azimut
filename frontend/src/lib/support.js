@@ -12,6 +12,12 @@ export const DISCORD_URL = 'https://discord.gg/enCuR5m6SG';
 /** Who makes Azimut, named at the foot of the dialog. */
 export const SITE_URL = 'https://osintmethat.com';
 
+/** What the tip card on What's new's last page says above its button, two of the lines below. */
+export const KOFI_PITCH = Object.freeze({
+  title: 'Azimut: €0 a month, 0 ads, 0 accounts.',
+  line: 'If it ever spared you an evening squinting at a blurry video shot at night, a tip helps keep it going.',
+});
+
 /**
  * The line above the tip. One is drawn each time the dialog opens and another every
  * `TIP_LINE_SECONDS`, never the same twice in a row; a press draws the next at once.

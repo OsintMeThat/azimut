@@ -346,6 +346,17 @@ presses *Read the guide* on it, which opens the guide on its start page.
 - **A new version opens with What's new** in the same card: up to five pages from
   `lib/whatsNew.json`, newest version first for someone who skipped one, with no
   button that leaves for a tool, since that would end the reading on its first page.
+  A page may play a reel (`NewsReel.svelte`, `lib/newsReel.js`): a few beats fading one
+  into the next, each a guide picture slowly brought nearer with one control lit, a film,
+  a report's pages dealt out or a site scrolled in a browser, a chip naming each and a
+  strip saying where the loop stands; a reader who asked for less motion sees the first
+  beat still. What's new's own pictures and films (`src/assets/news/`) are made by
+  `npm run guide:news` in the example case the app ships: its notes printed by the app
+  itself, its story and a web map of its layers filmed as a reader plays them, and a
+  site's home written by the code that writes an analyst's. The "And also" page reads at
+  a glance (`NewsAlso.svelte`): a line for what may need a word first, a row of vehicle
+  models drawn by the icon library, a tile per smaller change and the tip, Azimut being
+  free; every other page says so in its corner. Its help line still lights the `?`.
   Closed early it waits for the next start, not the next reload; Skip or Done puts it
   away for that version. Home's footer takes the tour again and reads What's new
   again, and the front door and the guide's *Start here* offer the tour.

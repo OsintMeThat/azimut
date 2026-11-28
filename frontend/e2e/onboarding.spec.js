@@ -95,3 +95,23 @@ test('someone who updates reads what the version brings, once', async ({ page })
   await expect(page.locator('.onboarding')).toHaveCount(0);
   expect(fixture.settingsWrites.at(-1)).toEqual({ whats_new_seen: '0.3.3' });
 });
+
+test('a version’s pages play, say Azimut is free, and end on the tip and the `?`', async ({ page }) => {
+  await installAppFixture(page, { settings: { version: '0.3.4', whats_new_seen: '0.3.3' } });
+  await page.goto('/#overview');
+
+  await expect(card(page).locator('.where').first()).toContainText('New in 0.3.4');
+  await expect(card(page).locator('.where .free')).toHaveText('Free · no account');
+  // the first page plays: a report's pages dealt out, then the next beat
+  const reel = card(page).locator('.reel');
+  await expect(reel.locator('.sheet')).toHaveCount(5);
+  await expect(reel.locator('.beat.on')).toHaveCount(1);
+  await expect(reel.locator('.chip')).toContainText('An HTML page that reads offline', { timeout: 8_000 });
+
+  await card(page).locator('.dots button').last().click();
+  const tip = card(page).locator('.kofi a');
+  await expect(tip).toHaveAttribute('target', '_blank');
+  await expect(card(page).locator('.where .free')).toHaveCount(0);
+  await expect(card(page).locator('.tiles li')).toHaveCount(9);
+  await expect(page.locator('.onboarding .lit')).toBeVisible();
+});

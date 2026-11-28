@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
-import { readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import WHATS_NEW from './whatsNew.json';
 import { shotOf } from './guide.js';
+import { isModelId } from './icons/modelMeta.js';
+import { beatsOf } from './newsReel.js';
 import {
   FIND_BETA,
   FIND_GUIDE,
@@ -132,6 +134,23 @@ describe('the pages as written', () => {
     }
   }
 
+  /** A page that plays: every beat drawn, and each chip a few words. */
+  function played(page, where) {
+    if (!page.reel) return;
+    expect(beatsOf(page.reel), `${where}: a beat names a picture or a film never made (npm run guide:news, guide:shots)`).toBeTruthy();
+    for (const beat of page.reel) expect(`${beat.chip ?? ''}`.length, `${where}: ${beat.chip}`).toBeLessThanOrEqual(36);
+  }
+
+  /** The page read at a glance: a tile is a tool and a few words, the models ones the icon library draws. */
+  function glanced(page, where) {
+    for (const tile of page.tiles ?? []) {
+      expect(tile.name.length, `${where}: ${tile.name}`).toBeLessThanOrEqual(14);
+      expect(tile.text.length, `${where}: ${tile.text}`).toBeLessThanOrEqual(24);
+    }
+    if (page.update) expect(`${page.update.text} ${page.update.more ?? ''}`.length, where).toBeLessThanOrEqual(140);
+    for (const [id] of page.models?.fleet ?? []) expect(isModelId(id), `${where}: ${id}`).toBe(true);
+  }
+
   it('has a What’s new for the version being made', () => {
     expect(WHATS_NEW[VERSION], `whatsNew.json has no entry for ${VERSION}`).toBeTruthy();
   });
@@ -144,13 +163,31 @@ describe('the pages as written', () => {
       for (const page of entry.pages) {
         const where = `${version} "${page.title}"`;
         expect(page.title, where).toBeTruthy();
-        expect(Boolean(page.shot || page.film || page.items?.length), `${where}: a picture, the film or a list`).toBe(true);
+        expect(Boolean(page.shot || page.film || page.items?.length || page.reel?.length || page.tiles?.length), `${where}: a picture, the film, a reel or a list`).toBe(true);
         expect(`${page.text ?? ''}`.length, `${where}: one or two sentences`).toBeLessThanOrEqual(140);
         // opening a tool from here would end the reading on its first page
         expect(Object.keys(page).filter((key) => /try|tool|open/i.test(key)), where).toEqual([]);
         pictured(page, where);
+        played(page, where);
+        glanced(page, where);
       }
     }
+  });
+
+  it('keeps What’s new’s own pictures and films named by a reel, and light enough to ship', () => {
+    const folder = resolve('src/assets/news');
+    const files = readdirSync(folder).filter((name) => !name.startsWith('.'));
+    const named = new Set();
+    for (const entry of Object.values(WHATS_NEW)) {
+      for (const beat of entry.pages.flatMap((page) => page.reel ?? [])) {
+        for (const name of beat.deck ?? []) named.add(`${name}.webp`);
+        if (beat.page) named.add(`${beat.page}.webp`);
+        if (typeof beat.film === 'string') named.add(`${beat.film}.webm`).add(`${beat.film}.webp`);
+      }
+    }
+    expect(files.filter((name) => !named.has(name)), 'made but shown by no reel: run npm run guide:news').toEqual([]);
+    const weight = files.reduce((sum, name) => sum + statSync(resolve(folder, name)).size, 0);
+    expect(weight, 'every download carries these').toBeLessThan(3e6);
   });
 
   it('keeps the welcome’s film light enough to ship in every download', () => {

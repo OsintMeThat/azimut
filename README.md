@@ -319,6 +319,7 @@ release, remake the pictures and look at what changed:
 
 ```bash
 cd frontend && npm run guide:shots && cd ..
+cd frontend && npm run guide:news && cd ..   # What's new's own pictures and films
 ```
 
 It builds the UI into a scratch folder, runs a private Azimut on a throwaway

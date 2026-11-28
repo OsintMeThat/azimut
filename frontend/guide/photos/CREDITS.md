@@ -20,6 +20,12 @@ made up; the places and dates are the photos' own.
 | `miami_port_aerial.jpg` | The container port of Miami from the air | U.S. Customs and Border Protection | [Commons](https://commons.wikimedia.org/wiki/File:Aerial_photograph_of_the_Port_of_Miami_Container_Port.jpg) |
 | `half_dome_1901.jpg` | Half Dome, Vernal and Nevada Falls from Glacier Point, Yosemite, 1901, its plate border trimmed | California Historical Society, photographer unknown | [Commons](https://commons.wikimedia.org/wiki/File:Vernal_Falls,_Nevada_Falls_and_Half_Dome_from_Glacier_Point_in_Yosemite_National_Park,_California,_1901_(CHS-1175).jpg) |
 
+`bridge_channel.jpg`, `channel_departure.jpg`, `container_yard.jpg`,
+`miami_port_aerial.jpg` and `wando_terminal.jpg` are also the list pictures of the
+invented site whose home What's new shows (`src/assets/news/site-home.webp`, written by
+`scripts/whats_new_site.py`). What's new's other pictures and films are of the example
+case the app ships, its photographs credited in `src/azimut/assets/example/CREDITS.md`.
+
 `half_dome_1901.jpg` also ships in the app, which files it with its source when a
 reader presses *Try this search* (`src/lib/findExample.js`). It is also the ground
 photo of the sample proof Settings › Templates shows a proof template on

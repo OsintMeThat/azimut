@@ -7,7 +7,8 @@
    * lit, and ends on the case they are about to make, with the topbar's own `?` lit
    * through the veil and a line drawn to it: that is where help is, on any screen.
    * Someone who knows Azimut gets what their new version brings, in the same card, and
-   * its page about the guide points at the same `?`.
+   * its page about the guide points at the same `?`. A page may play (NewsReel), and the
+   * "And also" page may end on the tip (NewsAlso); every other page says Azimut is free.
    *
    * The tour is hard to leave by accident: the veil does nothing, Escape asks first, and
    * only Skip or its last page end it. Its page is kept as it turns, so a reload or the
@@ -25,6 +26,8 @@
   import { fly } from 'svelte/transition';
   import Icon from './Icon.svelte';
   import Logo from './Logo.svelte';
+  import NewsAlso from './NewsAlso.svelte';
+  import NewsReel from './NewsReel.svelte';
   import Spotlight from './Spotlight.svelte';
   import { portal } from '../lib/fullscreen.js';
   import { isTopOverlay, joinOverlays } from '../lib/overlayStack.js';
@@ -278,6 +281,10 @@
         <div class="show" in:fly={slide}>
           {#if page?.film}
             {@render filmed()}
+          {:else if page?.reel}
+            <NewsReel reel={page.reel} calm={still()} />
+          {:else if page?.tiles}
+            <NewsAlso {page} />
           {:else if shot}
             <Spotlight {shot} anchor={page?.anchor} label={page?.label ?? ''} />
           {:else if page?.items}
@@ -315,6 +322,8 @@
                 <Icon name="star" size={13} />New in {page.version}
               {/if}
               {#if page.badge}<span class="badge">{page.badge}</span>{/if}
+              <!-- said on every page but the one whose tip says it -->
+              {#if mode === 'news' && !page.kofi}<span class="free"><Icon name="heart" size={12} />Free · no account</span>{/if}
             </p>
             <h2 id="{uid}-title">{page.title}</h2>
             {#if page.text}<p class="text">{page.text}</p>{/if}
@@ -330,7 +339,7 @@
                 {/if}
               </p>
             {/if}
-            {#if mode === 'news' && last && KOFI_URL}
+            {#if mode === 'news' && last && KOFI_URL && !page.kofi}
               <p class="tip">
                 <a href={KOFI_URL} target="_blank" rel="noreferrer">Azimut is free. A tip on Ko-fi helps keep it going.</a>
               </p>
@@ -592,6 +601,19 @@
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--text-3);
+  }
+  .free {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-left: auto;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    color: var(--text-2);
+  }
+  .free :global(svg) {
+    color: #ff5e5b;
+    fill: currentColor;
   }
   .text {
     margin-top: 8px;
