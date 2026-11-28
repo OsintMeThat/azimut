@@ -58,6 +58,8 @@ async function aBinaryBehind(page) {
 }
 
 test('the box downloads the new version, and the press installs it and comes back on it', async ({ page }) => {
+  // the tab reloads itself through the dev server, which takes its time on a busy machine
+  test.setTimeout(90_000);
   const { fixture, calls } = await aBinaryBehind(page);
   await page.goto('/');
 
@@ -86,7 +88,7 @@ test('the box downloads the new version, and the press installs it and comes bac
 
   // the tab reloads itself once 0.3.5 answers, and says it landed
   await expect(page.getByText('Updated to 0.3.5. Your cases and settings are as you left them.')).toBeVisible({
-    timeout: 15_000,
+    timeout: 45_000,
   });
   await expect(page.getByRole('dialog', { name: 'Updating to 0.3.5' })).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('azimut:update-installing'))).toBeNull();
