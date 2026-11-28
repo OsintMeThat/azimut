@@ -399,6 +399,31 @@ Nothing about this touches development. `scripts/devext.py` still loads
 `extension/` straight into a dev Firefox as a temporary add-on, which needs no
 signature.
 
+### Signing a release for the one-click update
+
+A binary installs a new release by itself only when that release carries
+`azimut-manifest.json`, the SHA-256 and size of each binary, signed with the key
+listed in `src/azimut/engine/releasesign.py`. The key is made once and kept off
+GitHub, behind a passphrase:
+
+```bash
+uv run python scripts/release_signing.py new-key      # once; writes ~/.config/azimut-release/signing-key.json
+```
+
+Copy that file to two places offline. A lost key costs every user one manual
+download of a release that trusts a new one.
+
+After each release is published, from a checkout of its tag:
+
+```bash
+uv run python scripts/release_signing.py sign v0.3.5
+```
+
+It downloads the three binaries back from the release, so it signs what users get,
+checks the manifest with the app's own reader, and uploads it with its `.sig`. A
+release left unsigned still offers the manual download. Nothing about this touches
+development: the tests sign with keys of their own.
+
 ### Dependencies
 
 `pyproject.toml` declares **ranges** (the contract for `pip install azimut`
