@@ -188,6 +188,14 @@ program, make it runnable as above, and open it. Settings can disable that check
 and **Settings → System → Check for updates** runs it manually. To uninstall,
 delete the binary. Either way `~/Azimut` stays put, so cases open unchanged.
 
+Ticking **Download new versions automatically** in that pop-up (or in Settings →
+System, off by default) has the binary fetch each new release beside itself, check
+the project's signature and try it once. Nothing is installed until you press
+**Install and restart**: Azimut then swaps the program in place, opens again on the
+new version and keeps the previous one beside it as `<name>.old`, the file to rename
+back if a new version will not start. A binary in a folder it cannot write to, such as
+Program Files, keeps the manual download.
+
 The downloadable binaries bundle a static **ffmpeg** (and ffprobe), so video
 thumbnails, frame scans, video enhancement, and downloads that merge separate
 audio+video streams work out of the box. If you `pip install azimut` instead,

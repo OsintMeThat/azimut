@@ -387,7 +387,8 @@ stops making sense.
   imagery, templates, the capture extension, storage and system tools; keys
   stored locally and never bundled into a shared case, monthly usage counters,
   backup export/import, opt-out "new release is live" pop-up on load (per-version
-  "don't show again"). Display preferences affect presentation only; artifacts keep
+  "don't show again") with an opt-in box that downloads each release, installed on
+  Install and restart. Display preferences affect presentation only; artifacts keep
   decimal degrees + metres on disk.
 - **Distribution:** `pip install azimut` plus PyInstaller single-file binaries
   for Windows x86_64, Linux x86_64 and Apple Silicon macOS. Binaries bundle a
