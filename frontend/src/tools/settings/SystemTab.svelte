@@ -12,6 +12,7 @@
    */
   import { onMount } from 'svelte';
   import Icon from '../../components/Icon.svelte';
+  import InstallButton from '../../components/InstallButton.svelte';
   import UpdateButtons from '../../components/UpdateButtons.svelte';
   import UpdateSteps from '../../components/UpdateSteps.svelte';
   import { prefs } from '../../lib/state.svelte.js';
@@ -59,6 +60,8 @@
     }),
   );
   const line = $derived(progressLine(selfUpdate));
+  // how this copy updates: from the last check, else from this machine's server
+  const install = $derived(appUpdate?.install ?? selfUpdate.install);
 
   // Downloaders can be refreshed from PyPI between Azimut releases.
   const SCRAPER_LABELS = { 'yt-dlp': 'yt-dlp', 'gallery-dl': 'gallery-dl' };
@@ -161,6 +164,8 @@
         {#if line.kind === 'ready'}<Icon name="check" size={13} />{/if}
         {#if line.kind === 'failed'}<Icon name="alert" size={13} />{/if}
         <span class="grow">{line.text}</span>
+        <!-- the row above offers it once a check has found the release -->
+        {#if line.kind === 'ready' && !appUpdate?.update_available}<InstallButton />{/if}
       </div>
     {/if}
     <details class="what" open>
@@ -175,9 +180,9 @@
   <!-- a pip install has nothing to download: its terminal steps show at once -->
   {#if appUpdate?.update_available && (updateStarted || appUpdate.install?.kind === 'package')}
     <UpdateSteps update={appUpdate} framed />
-  {:else if appUpdate?.install?.kind === 'binary'}
+  {:else if install?.kind === 'binary'}
     <p class="note">An update replaces the program only; cases and settings stay in the workspace.</p>
-  {:else if appUpdate?.install?.kind === 'package'}
+  {:else if install?.kind === 'package'}
     <p class="note">Update with <span class="mono">{PIP_COMMAND}</span>.</p>
   {:else}
     <p class="note">

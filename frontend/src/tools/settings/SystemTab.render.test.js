@@ -114,3 +114,24 @@ describe('Download new versions automatically in Settings', () => {
     expect(target.querySelector('.auto-status').textContent).toContain('Nothing is installed yet.');
   });
 });
+
+describe('Install and restart in Settings', () => {
+  it('sits on the status line when no check this session found the release', () => {
+    prefs.updateAutoDownload = true;
+    adopt({ ...able, state: 'ready', version: '0.3.5', done: 1, total: 1 });
+    open();
+    const install = target.querySelector('.auto-status button');
+    expect(install.textContent).toContain('Install and restart');
+    expect(target.textContent).toContain('An update replaces the program only');
+    expect(target.textContent).not.toContain('pipx');
+  });
+
+  it('is offered once, on the row, once a check found the release', () => {
+    prefs.updateAutoDownload = true;
+    adopt({ ...able, state: 'ready', version: '0.3.5', done: 1, total: 1 });
+    open({ appUpdate: { update_available: true, latest: 'v0.3.5', url: 'https://x/r', install: binary } });
+    const installs = [...target.querySelectorAll('button')].filter((b) => b.textContent.includes('Install and restart'));
+    expect(installs).toHaveLength(1);
+    expect(target.querySelector('.auto-status button')).toBeNull();
+  });
+});
