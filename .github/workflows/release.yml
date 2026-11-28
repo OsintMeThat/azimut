@@ -179,6 +179,15 @@ jobs:
           else
             mv dist-bin/azimut "dist-bin/${{ matrix.asset }}"
           fi
+      # The digest the release's copy is signed against (scripts/release_signing.py):
+      # printed by the job that built it, whose log no later job of the run can rewrite,
+      # so a publish step that swapped the file would be caught before the signature.
+      - name: Record the binary's digest
+        shell: bash
+        run: >-
+          uv run --no-sync python -c "import hashlib, sys;
+          print('AZIMUT-SHA256', sys.argv[1], hashlib.sha256(open(sys.argv[2], 'rb').read()).hexdigest())"
+          "${{ matrix.asset }}" "dist-bin/${{ matrix.asset }}"
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.asset }}

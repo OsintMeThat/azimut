@@ -59,16 +59,45 @@ router = APIRouter(prefix="/api", tags=["events"])
 # just loses a refresh hint, never data.
 _subscribers: set[asyncio.Queue] = set()
 _QUEUE_SIZE = 64
+# The loop each stream waits on, so a stream can be ended from another thread.
+_loops: dict[asyncio.Queue, asyncio.AbstractEventLoop] = {}
+_END = None  # put on a queue, it ends that stream
 
 
 def subscribe() -> asyncio.Queue:
     q: asyncio.Queue = asyncio.Queue(maxsize=_QUEUE_SIZE)
     _subscribers.add(q)
+    try:
+        _loops[q] = asyncio.get_running_loop()
+    except RuntimeError:
+        pass  # subscribed outside a loop (tests); ended by a plain put
     return q
 
 
 def unsubscribe(q: asyncio.Queue) -> None:
     _subscribers.discard(q)
+    _loops.pop(q, None)
+
+
+def _put_end(q: asyncio.Queue) -> None:
+    try:
+        q.put_nowait(_END)
+    except asyncio.QueueFull:
+        q.get_nowait()  # the oldest nudge gives way; the end must get through
+        q.put_nowait(_END)
+
+
+def end_streams() -> None:
+    """End every open stream, so a server asked to stop can: uvicorn waits for open
+    responses before it lets go, and a stream only ends when its listener leaves.
+    Install and restart calls this (engine/selfupdate.py); the listeners reconnect
+    to whichever Azimut answers next."""
+    for q in list(_subscribers):
+        loop = _loops.get(q)
+        if loop is not None and not loop.is_closed():
+            loop.call_soon_threadsafe(_put_end, q)
+        else:
+            _put_end(q)
 
 
 def publish(event: dict[str, Any]) -> None:
@@ -101,6 +130,8 @@ async def sse_stream(q: asyncio.Queue, is_disconnected):
             except asyncio.TimeoutError:
                 yield ": ping\n\n"
                 continue
+            if event is _END:
+                return
             yield f"data: {json.dumps(event)}\n\n"
     finally:
         unsubscribe(q)

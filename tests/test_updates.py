@@ -201,7 +201,9 @@ def test_update_endpoint_without_check_touches_no_network(client, monkeypatch):
     monkeypatch.setattr(updates.httpx, "get", boom)
     body = client.get("/api/settings/update").json()
     install = body.pop("install")
+    self_update = body.pop("self_update")
     assert body == {"current": __version__, "latest": None, "update_available": False}
+    assert self_update["supported"] is False  # a pip install has no binary to swap
     assert install["kind"] == "package"  # the test run is not a frozen binary
     assert install["workspace"] == str(config.workspace_root())
 
@@ -303,3 +305,36 @@ def test_the_bundled_extension_is_never_ahead_of_the_app():
 def test_settings_reports_extension_version(client):
     body = client.get("/api/settings").json()
     assert body["extension_version"] == EXTENSION_VERSION
+
+
+# -- the rehearsal's stand-in for GitHub ------------------------------------
+
+
+@pytest.mark.parametrize(
+    "address", ["http://127.0.0.1:8999", "http://localhost:8999/", "http://[::1]:8999"]
+)
+def test_a_stand_in_on_this_machine_replaces_github(monkeypatch, address):
+    monkeypatch.setenv(updates.SOURCE_ENV, address)
+    base = address.rstrip("/")
+    assert updates.latest_release_url() == f"{base}/repos/OsintMeThat/azimut/releases/latest"
+    assert updates.download_url("v0.3.5", "a b") == f"{base}/releases/download/v0.3.5/a%20b"
+
+
+@pytest.mark.parametrize(
+    "address",
+    ["https://evil.example", "http://10.0.0.5:8999", "http://127.0.0.1.evil.example", "file:///etc"],
+)
+def test_a_stand_in_elsewhere_is_ignored(monkeypatch, address):
+    monkeypatch.setenv(updates.SOURCE_ENV, address)
+    assert updates.latest_release_url() == updates.LATEST_RELEASE_URL
+    assert updates.download_url("v0.3.5", "x").startswith("https://github.com/OsintMeThat/azimut/")
+
+
+def test_without_a_stand_in_the_check_asks_github(monkeypatch):
+    monkeypatch.delenv(updates.SOURCE_ENV, raising=False)
+    asked = []
+    monkeypatch.setattr(
+        updates.httpx, "get", lambda url, **k: asked.append(url) or FakeResponse({"tag_name": "v0.0.1"})
+    )
+    updates.check("0.3.4")
+    assert asked == [updates.LATEST_RELEASE_URL]

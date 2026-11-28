@@ -188,6 +188,14 @@ program, make it runnable as above, and open it. Settings can disable that check
 and **Settings → System → Check for updates** runs it manually. To uninstall,
 delete the binary. Either way `~/Azimut` stays put, so cases open unchanged.
 
+Ticking **Download new versions automatically** in that pop-up (or in Settings →
+System, off by default) has the binary fetch each new release beside itself, check
+the project's signature and try it once. Nothing is installed until you press
+**Install and restart**: Azimut then swaps the program in place, opens again on the
+new version and keeps the previous one beside it as `<name>.old`, the file to rename
+back if a new version will not start. A binary in a folder it cannot write to, such as
+Program Files, keeps the manual download.
+
 The downloadable binaries bundle a static **ffmpeg** (and ffprobe), so video
 thumbnails, frame scans, video enhancement, and downloads that merge separate
 audio+video streams work out of the box. If you `pip install azimut` instead,
@@ -399,6 +407,33 @@ manifest's shape.
 Nothing about this touches development. `scripts/devext.py` still loads
 `extension/` straight into a dev Firefox as a temporary add-on, which needs no
 signature.
+
+### Signing a release for the one-click update
+
+A binary installs a new release by itself only when that release carries
+`azimut-manifest.json`, the SHA-256 and size of each binary, signed with the key
+listed in `src/azimut/engine/releasesign.py`. The key is made once and kept off
+GitHub, behind a passphrase:
+
+```bash
+uv run python scripts/release_signing.py new-key      # once; writes ~/.config/azimut-release/signing-key.json
+```
+
+Copy that file to two places offline. A lost key costs every user one manual
+download of a release that trusts a new one.
+
+After each release is published, from a checkout of its tag:
+
+```bash
+uv run python scripts/release_signing.py sign v0.3.5
+```
+
+It downloads the three binaries back from the release, so it signs what users get,
+and refuses any that is not the file its build job made: each build job prints its
+binary's SHA-256 in its own log, which no later job can rewrite. It then checks the
+manifest with the app's own reader and uploads it with its `.sig`. A
+release left unsigned still offers the manual download. Nothing about this touches
+development: the tests sign with keys of their own.
 
 ### Dependencies
 

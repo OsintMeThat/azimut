@@ -37,6 +37,7 @@ from ..engine import (
     notes_wordpress,
     reveal,
     scrapers,
+    selfupdate,
     sentinel,
     site as site_engine,
     tiles,
@@ -219,6 +220,8 @@ class PrefsIn(BaseModel):
     # the user muted with "don't show again"
     update_check_on_start: bool | None = None
     update_dismissed_version: str | None = None
+    # the binary fetches each newer release on its own; installing waits for a press
+    update_auto_download: bool | None = None
     # the first-run tour: "" never started, the page it resumes on, or "done"
     tour: str | None = Field(default=None, pattern=TOUR_PATTERN)
     # the version whose What's new was put away for good
@@ -320,6 +323,7 @@ def _prefs(settings: dict[str, Any]) -> dict[str, Any]:
         "note_styles_default": {style: profile.as_json() for style, profile in notelook.PROFILES.items()},
         "update_check_on_start": bool(settings.get("update_check_on_start", True)),
         "update_dismissed_version": settings.get("update_dismissed_version", ""),
+        "update_auto_download": settings.get("update_auto_download") is True,
         "tour": settings.get("tour", ""),
         "whats_new_seen": settings.get("whats_new_seen", ""),
         "find_beta_seen": bool(settings.get("find_beta_seen", False)),
@@ -527,6 +531,10 @@ def _apply_prefs(settings: dict[str, Any], body: PrefsIn) -> None:
         settings["update_check_on_start"] = bool(body.update_check_on_start)
     if body.update_dismissed_version is not None:
         settings["update_dismissed_version"] = body.update_dismissed_version.strip()[:64]
+    if body.update_auto_download is not None:
+        settings["update_auto_download"] = bool(body.update_auto_download)
+        if not body.update_auto_download:
+            selfupdate.discard()  # unticked: no file left waiting beside the binary
     if body.tour is not None:
         settings["tour"] = body.tour
     if body.whats_new_seen is not None:
@@ -1006,6 +1014,7 @@ class ImportedSettings(BaseModel):
     ingest_token: str = Field(default="", max_length=128, pattern=r"^[A-Za-z0-9_-]*$")
     update_check_on_start: bool = True
     update_dismissed_version: str = Field(default="", max_length=64)
+    update_auto_download: bool = False
     tour: str = Field(default="", pattern=TOUR_PATTERN)
     whats_new_seen: str = Field(default="", max_length=64)
     find_beta_seen: bool = False
@@ -1619,15 +1628,50 @@ def check_app_update(check: bool = False) -> dict[str, Any]:
     workspace that stays put, or a pip install that has its own command.
     """
     install = {**updates.install(), "workspace": str(config.workspace_root())}
+    # where the one-click update stands: read from this process, never the network
+    self_update = selfupdate.status()
     if not check:
         return {
             "current": __version__,
             "latest": None,
             "update_available": False,
             "install": install,
+            "self_update": self_update,
         }
     asset = updates.asset_name() if install["kind"] == "binary" else None
-    return {**updates.check(__version__, asset=asset), "install": install}
+    return {**updates.check(__version__, asset=asset), "install": install, "self_update": self_update}
+
+
+class PrepareIn(BaseModel):
+    tag: str = Field(max_length=32)
+    # Try again: a release that failed in this run is otherwise left alone until the next start
+    retry: bool = False
+
+
+@router.post("/settings/update/prepare")
+def prepare_app_update(body: PrepareIn) -> dict[str, Any]:
+    """Fetch, check and try a newer release beside the binary. Installs nothing.
+
+    Only with Download new versions automatically ticked: the box is the analyst's
+    say-so for this download, and the server holds to it whoever asks."""
+    if config.load_settings().get("update_auto_download") is not True:
+        raise HTTPException(status_code=409, detail="Download new versions automatically is off.")
+    try:
+        return selfupdate.prepare(body.tag, retry=body.retry)
+    except selfupdate.UpdateRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/settings/update/install")
+def install_app_update() -> dict[str, Any]:
+    """Install the prepared release: the server stops, the binary is swapped and starts
+    again on the same port. The tab waits for /api/health to name the new version."""
+    from .. import server as server_module
+
+    try:
+        return selfupdate.install(server_module.SERVE_PORT or 0)
+    except selfupdate.UpdateRefused as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/settings/diagnostics")

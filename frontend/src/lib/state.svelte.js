@@ -65,6 +65,7 @@ export const prefs = $state({
   picturesRev: 0, // bumped when either picture changes, so what shows them asks again
   updateCheckOnStart: true, // ask GitHub for a newer release when the page loads
   updateDismissedVersion: '', // the release tag muted with "don't show again"
+  updateAutoDownload: false, // the binary fetches each newer release; installing waits for a press
   tour: '', // the first-run tour: '' never started, the page it resumes on, or 'done'
   whatsNewSeen: '', // the version whose What's new was put away for good
   findBetaSeen: false, // Horizon Find's beta notice was read
@@ -171,6 +172,7 @@ export function applyPrefs(s) {
   if (s.update_check_on_start !== undefined) prefs.updateCheckOnStart = s.update_check_on_start;
   if (s.update_dismissed_version !== undefined)
     prefs.updateDismissedVersion = s.update_dismissed_version;
+  if (s.update_auto_download !== undefined) prefs.updateAutoDownload = Boolean(s.update_auto_download);
   if (s.tour !== undefined) prefs.tour = s.tour;
   if (s.whats_new_seen !== undefined) prefs.whatsNewSeen = s.whats_new_seen;
   if (s.find_beta_seen !== undefined) prefs.findBetaSeen = s.find_beta_seen;

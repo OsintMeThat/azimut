@@ -259,8 +259,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     #   in Settings turns both halves off.
     # - update_dismissed_version: the release the user chose "don't show again"
     #   for. The pop-up stays quiet for that exact tag; a newer one shows again.
+    # - update_auto_download: the binary fetches, checks and tries a newer release
+    #   on its own (engine/selfupdate.py); installing still waits for a press. Off
+    #   until the analyst ticks the box, and moot while the startup check is off.
     "update_check_on_start": True,
     "update_dismissed_version": "",
+    "update_auto_download": False,
     # The first-run tour and the What's new a version opens with (frontend
     # lib/onboarding.js), kept with the workspace so another browser on it
     # doesn't start a newcomer's tour over:

@@ -1252,6 +1252,18 @@ export async function installAppFixture(page, options = {}) {
         staged: false,
       });
     }
+    // Where the one-click update stands, read by Settings › System on mount: this
+    // machine's server only, never the network. A pip install unless a spec routes
+    // a binary of its own over this one (self-update.spec.js).
+    if (path === '/api/settings/update' && !url.searchParams.has('check')) {
+      return json(route, {
+        current: fixtureSettings.version ?? '0.0.0',
+        latest: null,
+        update_available: false,
+        install: { kind: 'package', system: 'linux', program: null, workspace: '/tmp/fixture' },
+        self_update: { state: 'idle', supported: false, reason: 'A pip install updates with its own command.', busy: null },
+      });
+    }
     if (path === '/api/settings/ffmpeg') {
       return json(route, { available: true, version: 'fixture', source: 'bundled', path: '/tmp/ffmpeg' });
     }
@@ -2543,6 +2555,9 @@ export async function installAppFixture(page, options = {}) {
     exampleCalls,
     geoQueries,
     settingsWrites,
+    // the settings as GET /api/settings serves them, live: a spec can change what the
+    // next read answers, as a restart onto a new version does (self-update.spec.js)
+    settings: fixtureSettings,
     folderWrites,
     exportWrites,
     expectNoUnexpectedRequests: () => expect(unexpected).toEqual([]),

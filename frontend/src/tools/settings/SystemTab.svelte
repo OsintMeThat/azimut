@@ -10,9 +10,14 @@
    * The issue report is built by the server and shown in full before it is filed:
    * the tracker is public, so nothing leaves without being read first.
    */
+  import { onMount } from 'svelte';
   import Icon from '../../components/Icon.svelte';
+  import InstallButton from '../../components/InstallButton.svelte';
   import UpdateButtons from '../../components/UpdateButtons.svelte';
   import UpdateSteps from '../../components/UpdateSteps.svelte';
+  import { prefs } from '../../lib/state.svelte.js';
+  import { readSelfUpdate, retry, selfUpdate, setAutoDownload } from '../../lib/selfUpdateState.svelte.js';
+  import { AUTO, RETRY_LABEL, WHAT_HAPPENS, autoBox, progressLine } from '../../lib/selfUpdate.js';
   import { PIP_COMMAND } from '../../lib/updateSteps.js';
 
   let {
@@ -42,6 +47,21 @@
 
   // The download was pressed: the steps show under the row from then on.
   let updateStarted = $state(false);
+
+  // Download new versions automatically: read from this machine's server, so the box
+  // says the right thing even with the startup check switched off
+  onMount(() => {
+    readSelfUpdate().catch(() => {});
+  });
+  const box = $derived(
+    autoBox(selfUpdate.install ?? appUpdate?.install, selfUpdate, {
+      on: prefs.updateAutoDownload,
+      checkOnStart: updateOnStart,
+    }),
+  );
+  const line = $derived(progressLine(selfUpdate));
+  // how this copy updates: from the last check, else from this machine's server
+  const install = $derived(appUpdate?.install ?? selfUpdate.install);
 
   // Downloaders can be refreshed from PyPI between Azimut releases.
   const SCRAPER_LABELS = { 'yt-dlp': 'yt-dlp', 'gallery-dl': 'gallery-dl' };
@@ -123,12 +143,47 @@
       aria-label="Check for updates on startup"
     />
   </div>
+  {#if box.shown}
+    <!-- under the check it rides on: without it, there is nothing to download -->
+    <div class="row child">
+      <div class="row-label">
+        <span title={AUTO.title}>{AUTO.label}</span>
+        <span class="row-hint">{box.hint}</span>
+      </div>
+      <input
+        type="checkbox"
+        checked={prefs.updateAutoDownload}
+        disabled={box.disabled}
+        onchange={(e) => setAutoDownload(e.currentTarget.checked)}
+        aria-label={AUTO.label}
+        title={AUTO.title}
+      />
+    </div>
+    {#if prefs.updateAutoDownload && !box.disabled && line.kind}
+      <div class="auto-status {line.kind}" role="status">
+        {#if line.kind === 'ready'}<Icon name="check" size={13} />{/if}
+        {#if line.kind === 'failed'}<Icon name="alert" size={13} />{/if}
+        <span class="grow">{line.text}</span>
+        <!-- the row above offers it once a check has found the release -->
+        {#if line.kind === 'ready' && !appUpdate?.update_available}<InstallButton />{/if}
+        {#if line.kind === 'failed'}<button class="btn btn-sm" onclick={retry}>{RETRY_LABEL}</button>{/if}
+      </div>
+    {/if}
+    <details class="what" open>
+      <summary>What happens when it is on</summary>
+      <ul>
+        {#each WHAT_HAPPENS as item (item.text)}
+          <li><Icon name={item.icon} size={13} />{item.text}</li>
+        {/each}
+      </ul>
+    </details>
+  {/if}
   <!-- a pip install has nothing to download: its terminal steps show at once -->
   {#if appUpdate?.update_available && (updateStarted || appUpdate.install?.kind === 'package')}
     <UpdateSteps update={appUpdate} framed />
-  {:else if appUpdate?.install?.kind === 'binary'}
+  {:else if install?.kind === 'binary'}
     <p class="note">An update replaces the program only; cases and settings stay in the workspace.</p>
-  {:else if appUpdate?.install?.kind === 'package'}
+  {:else if install?.kind === 'package'}
     <p class="note">Update with <span class="mono">{PIP_COMMAND}</span>.</p>
   {:else}
     <p class="note">
@@ -261,6 +316,73 @@
     display: flex;
     flex-shrink: 0;
     gap: 8px;
+  }
+
+  /* Download new versions automatically, set under the check it depends on */
+  .row.child {
+    margin-left: 2px;
+    padding-left: 16px;
+    border-left: 1px solid var(--border);
+  }
+
+  .auto-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 6px 0 8px 18px;
+    padding: 7px 10px;
+    border-radius: var(--r-md);
+    background: var(--accent-soft);
+    color: var(--text-1);
+    font-size: var(--fs-xs);
+  }
+
+  .auto-status.ready :global(svg) {
+    color: var(--ok);
+  }
+
+  .auto-status.failed {
+    background: var(--danger-soft);
+  }
+
+  .auto-status .grow {
+    flex: 1;
+  }
+
+  .what {
+    margin: 4px 0 6px 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--bg-1);
+    color: var(--text-2);
+    font-size: var(--fs-xs);
+  }
+
+  .what summary {
+    padding: 7px 10px;
+    cursor: pointer;
+  }
+
+  .what ul {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin: 0;
+    padding: 2px 10px 10px;
+    list-style: none;
+  }
+
+  .what li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    line-height: 1.4;
+  }
+
+  .what li :global(svg) {
+    flex: none;
+    margin-top: 1px;
+    color: var(--accent);
   }
 
   /* the one state worth pulling the eye: this downloader will fail on real links */

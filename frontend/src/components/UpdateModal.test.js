@@ -52,3 +52,22 @@ describe('the way to the update', () => {
     expect(source).toContain('dismissUpdate(started ? false : mute)');
   });
 });
+
+describe('the box that downloads by itself', () => {
+  it('sits under the notes of a binary, where most analysts will meet it', () => {
+    expect(source).toMatch(/\{:else if update\?\.install\?\.kind === 'binary'\}\s*<AutoUpdateBox install=\{update\.install\} \/>/);
+  });
+
+  it('trades the download buttons for Later and Install and restart once ticked', () => {
+    expect(source).toMatch(/\{#if ticked\}\s*<InstallButton \/>\s*<button class="btn btn-sm" onclick=\{close\}>Later<\/button>\s*\{:else\}/);
+  });
+
+  it('brings the download buttons back when its download failed', () => {
+    expect(source).toContain("selfUpdate.state !== 'failed'");
+  });
+
+  it('says a downloaded version is ready to install, not installed', () => {
+    expect(source).toContain('`${updateState.latest} is ready to install`');
+  });
+});
+

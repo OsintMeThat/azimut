@@ -218,7 +218,12 @@ presses *Read the guide* on it, which opens the guide on its start page.
   folds its own body open on the page (the check returns it) with the download for this
   system and the release page, then the steps to put the new program in place
   (`components/UpdateButtons.svelte`, `UpdateSteps.svelte`, the same in the startup
-  pop-up and Settings → System), and
+  pop-up and Settings → System). With Download new versions automatically ticked, a
+  version already fetched and checked turns the download into **Install and restart**
+  (`InstallButton.svelte`, words in `lib/selfUpdate.js`); the box itself sits under the
+  release notes in the pop-up and under the startup check in Settings → System, and the
+  tab shows the restart's steps and reloads onto the new version (`UpdateRestart.svelte`),
+  and
   is silent when the release was muted or the check is switched off. A capture extension
   that was never installed gets one line pointing at the tab that installs it, and the
   line disappears the moment one is. Neither is dismissible state: both are conditions
