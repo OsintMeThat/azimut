@@ -2,8 +2,11 @@
   import Modal from './Modal.svelte';
   import UpdateButtons from './UpdateButtons.svelte';
   import UpdateSteps from './UpdateSteps.svelte';
+  import AutoUpdateBox from './AutoUpdateBox.svelte';
+  import InstallButton from './InstallButton.svelte';
   import { markdownHtml } from '../lib/markdown.js';
-  import { updateState, updatesState, dismissUpdate } from '../lib/state.svelte.js';
+  import { prefs, updateState, updatesState, dismissUpdate } from '../lib/state.svelte.js';
+  import { selfUpdate } from '../lib/selfUpdateState.svelte.js';
 
   let mute = $state(false);
   // Once the download is pressed the pop-up turns into its steps; the browser
@@ -12,6 +15,16 @@
 
   const notes = $derived(markdownHtml(updateState.notes));
   const update = $derived(updatesState.app);
+  // The box is ticked and can do its work: Later and Install and restart take the
+  // download buttons' place, unless the download failed, which brings them back.
+  const ticked = $derived(
+    update?.install?.kind === 'binary' &&
+      prefs.updateAutoDownload &&
+      prefs.updateCheckOnStart &&
+      selfUpdate.supported &&
+      selfUpdate.state !== 'failed',
+  );
+  const ready = $derived(ticked && selfUpdate.state === 'ready');
 
   function close() {
     dismissUpdate(started ? false : mute);
@@ -19,7 +32,11 @@
 </script>
 
 <Modal
-  title={started ? `Update to ${updateState.latest}` : `${updateState.latest} is live`}
+  title={started
+    ? `Update to ${updateState.latest}`
+    : ready
+      ? `${updateState.latest} is ready to install`
+      : `${updateState.latest} is live`}
   onclose={close}
   width="600px"
 >
@@ -43,6 +60,8 @@
     <!-- nothing to download for a pip install: its terminal steps are the way -->
     {#if update?.install?.kind === 'package'}
       <UpdateSteps {update} framed />
+    {:else if update?.install?.kind === 'binary'}
+      <AutoUpdateBox install={update.install} />
     {/if}
 
     <div class="actions">
@@ -51,7 +70,12 @@
         Don't show this again
       </label>
       <div class="buttons">
-        <UpdateButtons {update} onstart={() => (started = true)} />
+        {#if ticked}
+          <InstallButton />
+          <button class="btn btn-sm" onclick={close}>Later</button>
+        {:else}
+          <UpdateButtons {update} onstart={() => (started = true)} />
+        {/if}
       </div>
     </div>
 

@@ -3,6 +3,7 @@
   import { api } from '../lib/api.js';
   import { toast, prefs, applyPrefs, uiState, updatesState } from '../lib/state.svelte.js';
   import { updateBadges, carryLatest } from '../lib/staleness.js';
+  import { prepareIfTicked } from '../lib/selfUpdateState.svelte.js';
   import {
     templatesState, loadTemplates, saveTemplate, deleteTemplate,
   } from '../lib/state.svelte.js';
@@ -456,6 +457,7 @@
     try {
       const fresh = await api.get('/api/settings/update?check=true');
       updatesState.app = fresh;
+      prepareIfTicked(); // the box downloads what a manual check finds, as the startup one does
       if (fresh.error) toast(`Could not reach GitHub: ${fresh.error}`, 'danger');
       else if (!fresh.update_available) toast('Azimut is up to date', 'ok');
     } catch (e) {

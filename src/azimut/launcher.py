@@ -58,6 +58,23 @@ def _open_when_ready(server: uvicorn.Server, url: str) -> None:
     threading.Thread(target=wait_and_open, daemon=True).start()
 
 
+#: How long a stop for a restart waits on connections before it lets them go.
+RESTART_GRACE = 10.0
+
+
+def _stop_for_restart(server: uvicorn.Server) -> None:
+    """Stop serving so the new version can take the port. uvicorn waits for open
+    responses before it lets go, and the event streams never end on their own, so
+    they are ended first; anything still open after the grace is let go."""
+    from .api import events
+
+    events.end_streams()
+    server.should_exit = True
+    giving_up = threading.Timer(RESTART_GRACE, lambda: setattr(server, "force_exit", True))
+    giving_up.daemon = True
+    giving_up.start()
+
+
 def _port_is_free(port: int) -> bool:
     """Whether the server could bind this port. On POSIX the probe sets SO_REUSEADDR
     as uvicorn does, or a connection left in TIME-WAIT would read as a live holder;
@@ -142,6 +159,6 @@ def serve(port: int, *, open_browser: bool = True) -> None:
         _open_when_ready(server, f"http://127.0.0.1:{port}")
     # Install and restart stops the server and leaves the swap to this thread, once
     # nothing is left serving (engine/selfupdate.py)
-    selfupdate.on_restart(lambda: setattr(server, "should_exit", True))
+    selfupdate.on_restart(lambda: _stop_for_restart(server))
     server.run()
     selfupdate.finish()

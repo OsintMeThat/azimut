@@ -451,3 +451,43 @@ def test_the_box_is_off_until_ticked_and_unticking_it_discards(client, monkeypat
     assert discarded == []
     client.put("/api/settings/prefs", json={"update_auto_download": False})
     assert discarded == [True]
+
+
+STOP_PROBE = """
+import socket, sys, threading, time
+import httpx
+from azimut import launcher
+from azimut.api import events
+if sys.argv[1] == "without":
+    events.end_streams = lambda: None
+launcher.RESTART_GRACE = 60.0  # the streams must end themselves
+with socket.socket() as probe:
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+server = launcher._build_server(port)
+serving = threading.Thread(target=server.run, daemon=True)
+serving.start()
+while not server.started:
+    time.sleep(0.05)
+with httpx.Client(base_url=f"http://127.0.0.1:{port}", timeout=30) as http:
+    with http.stream("GET", "/api/events") as stream:
+        # held, as a tab holds it: a dropped iterator would close the connection
+        lines = stream.iter_lines()
+        assert next(lines) == ": connected"
+        launcher._stop_for_restart(server)
+        serving.join(timeout=6)
+        print("stopped" if not serving.is_alive() else "still serving", flush=True)
+"""
+
+
+@pytest.mark.parametrize(("ending", "expected"), [("with", "stopped"), ("without", "still serving")])
+def test_a_stop_for_restart_ends_the_event_streams_and_lets_the_port_go(tmp_path, ending, expected):
+    """uvicorn waits for open responses before it stops, and an event stream only
+    ends when its listener leaves: without ending them, Install and restart would
+    wait for ever on the tab's own stream. Run in a process of its own, as the app
+    runs, and with the stream held open the way a tab holds it."""
+    env = {**os.environ, "AZIMUT_HOME": str(tmp_path), "PYTHONPATH": str(Path(selfupdate.__file__).parents[2])}
+    done = subprocess.run(
+        [sys.executable, "-c", STOP_PROBE, ending], capture_output=True, text=True, timeout=90, env=env
+    )
+    assert done.stdout.strip().splitlines()[-1:] == [expected], done.stderr[-2000:]

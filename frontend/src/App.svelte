@@ -51,6 +51,8 @@
   import Coachmark from './components/Coachmark.svelte';
   import Toasts from './components/Toasts.svelte';
   import UpdateModal from './components/UpdateModal.svelte';
+  import UpdateRestart from './components/UpdateRestart.svelte';
+  import { announceRestart, prepareIfTicked, restart } from './lib/selfUpdateState.svelte.js';
   import DetectActivity from './components/DetectActivity.svelte';
   import GeolocatingPill from './components/GeolocatingPill.svelte';
   import PlateActivity from './components/PlateActivity.svelte';
@@ -392,7 +394,9 @@
     })
     .finally(() => {
       onboardOnStart();
-      checkForUpdatesOnStart();
+      announceRestart();
+      // the box's download follows the check it rides on (lib/selfUpdateState.svelte.js)
+      checkForUpdatesOnStart().then(prepareIfTicked);
     });
 
   // Live nudges from our own backend (SSE, same-origin — still local-first):
@@ -691,6 +695,11 @@
 <!-- after the welcome or the tour, rather than over it -->
 {#if updateState.show && !uiState.onboarding}
   <UpdateModal />
+{/if}
+
+<!-- Install and restart was pressed: the tab waits for the new version, then reloads -->
+{#if restart.phase}
+  <UpdateRestart />
 {/if}
 
 <style>
