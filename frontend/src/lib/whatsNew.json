@@ -1,5 +1,5 @@
 {
-  "0.3.4": {
+  "0.3.99": {
     "draft": true,
     "pages": [
       {
@@ -7,21 +7,79 @@
         "text": "Write as it will read, no Markdown. Cite the case with @, and it comes out as a PDF, an offline web page or an article.",
         "reel": [
           {
-            "deck": ["report-glance", "report-cover", "report-story", "report-wall", "report-before-after"],
-            "pills": ["PDF", "HTML page", "Web folder", "WordPress draft"],
+            "deck": [
+              "report-glance",
+              "report-cover",
+              "report-story",
+              "report-wall",
+              "report-before-after"
+            ],
+            "pills": [
+              "PDF",
+              "HTML page",
+              "Web folder",
+              "WordPress draft"
+            ],
             "seconds": 4.3
           },
-          { "film": "story-page", "browser": "The night the sea came into Saltmere.html", "file": true, "chip": "An HTML page that reads offline" },
-          { "shot": "article-lead", "film": true, "rate": 1.6, "from": [0.5, 0.32, 1.08], "chip": "Written as it prints" }
+          {
+            "film": "story-page",
+            "browser": "The night the sea came into Saltmere.html",
+            "file": true,
+            "chip": "An HTML page that reads offline"
+          },
+          {
+            "shot": "article-lead",
+            "film": true,
+            "rate": 1.6,
+            "from": [
+              0.5,
+              0.32,
+              1.08
+            ],
+            "chip": "Written as it prints"
+          }
         ]
       },
       {
         "title": "Interactive maps and charts",
         "text": "Your layers as a web map: readers play the days, step from place to place, hide a layer or find a mark. Charts too, fifteen kinds.",
         "reel": [
-          { "film": "web-map", "browser": "your-name.github.io/saltmere-after-the-storm/", "chip": "A web map of your layers" },
-          { "shot": "article-chart-kinds", "from": [0.29, 0.42, 1.5], "to": [0.29, 0.42, 1.66], "seconds": 2.3, "chip": "Fifteen kinds of chart" },
-          { "shot": "article-chart-added", "from": [0.27, 0.55, 1.55], "to": [0.27, 0.62, 1.82], "seconds": 2.6, "chip": "Drawn as you fill it" }
+          {
+            "film": "web-map",
+            "browser": "your-name.github.io/saltmere-after-the-storm/",
+            "chip": "A web map of your layers"
+          },
+          {
+            "shot": "article-chart-kinds",
+            "from": [
+              0.29,
+              0.42,
+              1.5
+            ],
+            "to": [
+              0.29,
+              0.42,
+              1.66
+            ],
+            "seconds": 2.3,
+            "chip": "Fifteen kinds of chart"
+          },
+          {
+            "shot": "article-chart-added",
+            "from": [
+              0.27,
+              0.55,
+              1.55
+            ],
+            "to": [
+              0.27,
+              0.62,
+              1.82
+            ],
+            "seconds": 2.6,
+            "chip": "Drawn as you fill it"
+          }
         ]
       },
       {
@@ -34,13 +92,36 @@
             "label": "Publish to GitHub Pages",
             "above": true,
             "light": 0.6,
-            "from": [0.5, 0.6, 1],
-            "to": [0.62, 0.84, 1.5],
+            "from": [
+              0.5,
+              0.6,
+              1
+            ],
+            "to": [
+              0.62,
+              0.84,
+              1.5
+            ],
             "seconds": 2.4,
             "chip": "Notebook › Export"
           },
-          { "page": "site-home", "browser": "your-name.github.io", "scroll": 0.44, "click": [0.76, 0.62], "seconds": 4.2, "chip": "Your site" },
-          { "shot": "article-result", "film": true, "browser": "your-name.github.io/ym-success/", "chip": "The article" }
+          {
+            "page": "site-home",
+            "browser": "your-name.github.io",
+            "scroll": 0.44,
+            "click": [
+              0.76,
+              0.62
+            ],
+            "seconds": 4.2,
+            "chip": "Your site"
+          },
+          {
+            "shot": "article-result",
+            "film": true,
+            "browser": "your-name.github.io/ym-success/",
+            "chip": "The article"
+          }
         ]
       },
       {
@@ -52,8 +133,16 @@
             "ring": "geo.pill",
             "label": "Geolocating",
             "light": 0.4,
-            "from": [0.5, 0.45, 1],
-            "to": [0.48, 0.28, 1.2],
+            "from": [
+              0.5,
+              0.45,
+              1
+            ],
+            "to": [
+              0.48,
+              0.28,
+              1.2
+            ],
             "seconds": 2.6,
             "chip": "Inspect"
           },
@@ -63,40 +152,423 @@
             "label": "Capture an area",
             "above": true,
             "light": 0.9,
-            "from": [0.45, 0.4, 1],
-            "to": [0.6, 0.62, 1.22],
+            "from": [
+              0.45,
+              0.4,
+              1
+            ],
+            "to": [
+              0.6,
+              0.62,
+              1.22
+            ],
             "seconds": 2.8,
             "chip": "The map"
           },
-          { "shot": "proof-video-result", "fit": "contain", "from": [0.5, 0.5, 1], "to": [0.5, 0.5, 1.07], "seconds": 2.4, "chip": "The proof" },
-          { "shot": "post-video", "from": [0.62, 0.3, 1.2], "to": [0.6, 0.42, 1.42], "seconds": 2.8, "chip": "Post" }
+          {
+            "shot": "proof-video-result",
+            "fit": "contain",
+            "from": [
+              0.5,
+              0.5,
+              1
+            ],
+            "to": [
+              0.5,
+              0.5,
+              1.07
+            ],
+            "seconds": 2.4,
+            "chip": "The proof"
+          },
+          {
+            "shot": "post-video",
+            "from": [
+              0.62,
+              0.3,
+              1.2
+            ],
+            "to": [
+              0.6,
+              0.42,
+              1.42
+            ],
+            "seconds": 2.8,
+            "chip": "Post"
+          }
         ]
       },
       {
         "title": "And also",
-        "update": { "icon": "download", "text": "Azimut can download its next versions for you.", "more": "Installing stays one press on Install and restart." },
+        "update": {
+          "icon": "download",
+          "text": "Azimut can download its next versions for you.",
+          "more": "Installing stays one press on Install and restart."
+        },
         "models": {
           "name": "Geo Proof",
           "text": "3D vehicle models, turned and tilted to match the picture",
           "fleet": [
-            ["model-tank", "#6b7a3a"],
-            ["model-pickup", "#c9b48a"],
-            ["model-heli", "#8b9a76"],
-            ["model-truck", "#7c6f55"],
-            ["model-warship", "#8a94a3"],
-            ["model-fpv", "#e05252"]
+            [
+              "model-tank",
+              "#6b7a3a"
+            ],
+            [
+              "model-pickup",
+              "#c9b48a"
+            ],
+            [
+              "model-heli",
+              "#8b9a76"
+            ],
+            [
+              "model-truck",
+              "#7c6f55"
+            ],
+            [
+              "model-warship",
+              "#8a94a3"
+            ],
+            [
+              "model-fpv",
+              "#e05252"
+            ]
           ]
         },
         "tiles": [
-          { "icon": "chart", "name": "Detect", "text": "Routine dashboard" },
-          { "icon": "layers", "name": "Collage", "text": "Panorama" },
-          { "icon": "zoneSearch", "name": "Inspect", "text": "Zone search" },
-          { "icon": "columns", "name": "Horizon", "text": "Live side by side" },
-          { "icon": "alignment", "name": "Align", "text": "On the map" },
-          { "icon": "plate", "name": "Map plate", "text": "Layers tab" },
-          { "icon": "unlink", "name": "Media", "text": "Unused files" },
-          { "icon": "crop", "name": "Extension", "text": "One press" },
-          { "icon": "brush", "name": "Settings", "text": "Eleven accents" }
+          {
+            "icon": "chart",
+            "name": "Detect",
+            "text": "Routine dashboard"
+          },
+          {
+            "icon": "layers",
+            "name": "Collage",
+            "text": "Panorama"
+          },
+          {
+            "icon": "zoneSearch",
+            "name": "Inspect",
+            "text": "Zone search"
+          },
+          {
+            "icon": "columns",
+            "name": "Horizon",
+            "text": "Live side by side"
+          },
+          {
+            "icon": "alignment",
+            "name": "Align",
+            "text": "On the map"
+          },
+          {
+            "icon": "plate",
+            "name": "Map plate",
+            "text": "Layers tab"
+          },
+          {
+            "icon": "unlink",
+            "name": "Media",
+            "text": "Unused files"
+          },
+          {
+            "icon": "crop",
+            "name": "Extension",
+            "text": "One press"
+          },
+          {
+            "icon": "brush",
+            "name": "Settings",
+            "text": "Eleven accents"
+          }
+        ],
+        "kofi": true,
+        "help": "The guide now walks six journeys on the real screens."
+      }
+    ]
+  },
+  "0.3.4": {
+    "draft": true,
+    "pages": [
+      {
+        "title": "Your notes, as finished reports",
+        "text": "Write as it will read, no Markdown. Cite the case with @, and it comes out as a PDF, an offline web page or an article.",
+        "reel": [
+          {
+            "deck": [
+              "report-glance",
+              "report-cover",
+              "report-story",
+              "report-wall",
+              "report-before-after"
+            ],
+            "pills": [
+              "PDF",
+              "HTML page",
+              "Web folder",
+              "WordPress draft"
+            ],
+            "seconds": 4.3
+          },
+          {
+            "film": "story-page",
+            "browser": "The night the sea came into Saltmere.html",
+            "file": true,
+            "chip": "An HTML page that reads offline"
+          },
+          {
+            "shot": "article-lead",
+            "film": true,
+            "rate": 1.6,
+            "from": [
+              0.5,
+              0.32,
+              1.08
+            ],
+            "chip": "Written as it prints"
+          }
+        ]
+      },
+      {
+        "title": "Interactive maps and charts",
+        "text": "Your layers as a web map: readers play the days, step from place to place, hide a layer or find a mark. Charts too, fifteen kinds.",
+        "reel": [
+          {
+            "film": "web-map",
+            "browser": "your-name.github.io/saltmere-after-the-storm/",
+            "chip": "A web map of your layers"
+          },
+          {
+            "shot": "article-chart-kinds",
+            "from": [
+              0.29,
+              0.42,
+              1.5
+            ],
+            "to": [
+              0.29,
+              0.42,
+              1.66
+            ],
+            "seconds": 2.3,
+            "chip": "Fifteen kinds of chart"
+          },
+          {
+            "shot": "article-chart-added",
+            "from": [
+              0.27,
+              0.55,
+              1.55
+            ],
+            "to": [
+              0.27,
+              0.62,
+              1.82
+            ],
+            "seconds": 2.6,
+            "chip": "Drawn as you fill it"
+          }
+        ]
+      },
+      {
+        "title": "Your own website",
+        "text": "Publish a note to your own free site on GitHub Pages in one press. Its home, lists, feed and map of places keep themselves up to date.",
+        "reel": [
+          {
+            "shot": "article-export-github",
+            "ring": "notebook.publish",
+            "label": "Publish to GitHub Pages",
+            "above": true,
+            "light": 0.6,
+            "from": [
+              0.5,
+              0.6,
+              1
+            ],
+            "to": [
+              0.62,
+              0.84,
+              1.5
+            ],
+            "seconds": 2.4,
+            "chip": "Notebook › Export"
+          },
+          {
+            "page": "site-home",
+            "browser": "your-name.github.io",
+            "scroll": 0.44,
+            "click": [
+              0.76,
+              0.62
+            ],
+            "seconds": 4.2,
+            "chip": "Your site"
+          },
+          {
+            "shot": "article-result",
+            "film": true,
+            "browser": "your-name.github.io/ym-success/",
+            "chip": "The article"
+          }
+        ]
+      },
+      {
+        "title": "Geolocate a video, then post it",
+        "text": "Mark each place a video shows as a scene, find it on the map and Make the proof. Post threads the proofs as X or Bluesky shows them.",
+        "reel": [
+          {
+            "shot": "inspect-scenes",
+            "ring": "geo.pill",
+            "label": "Geolocating",
+            "light": 0.4,
+            "from": [
+              0.5,
+              0.45,
+              1
+            ],
+            "to": [
+              0.48,
+              0.28,
+              1.2
+            ],
+            "seconds": 2.6,
+            "chip": "Inspect"
+          },
+          {
+            "shot": "satellite-video-leads",
+            "ring": "sat.capture",
+            "label": "Capture an area",
+            "above": true,
+            "light": 0.9,
+            "from": [
+              0.45,
+              0.4,
+              1
+            ],
+            "to": [
+              0.6,
+              0.62,
+              1.22
+            ],
+            "seconds": 2.8,
+            "chip": "The map"
+          },
+          {
+            "shot": "proof-video-result",
+            "fit": "contain",
+            "from": [
+              0.5,
+              0.5,
+              1
+            ],
+            "to": [
+              0.5,
+              0.5,
+              1.07
+            ],
+            "seconds": 2.4,
+            "chip": "The proof"
+          },
+          {
+            "shot": "post-video",
+            "from": [
+              0.62,
+              0.3,
+              1.2
+            ],
+            "to": [
+              0.6,
+              0.42,
+              1.42
+            ],
+            "seconds": 2.8,
+            "chip": "Post"
+          }
+        ]
+      },
+      {
+        "title": "And also",
+        "update": {
+          "icon": "download",
+          "text": "Azimut can download its next versions for you.",
+          "more": "Installing stays one press on Install and restart."
+        },
+        "models": {
+          "name": "Geo Proof",
+          "text": "3D vehicle models, turned and tilted to match the picture",
+          "fleet": [
+            [
+              "model-tank",
+              "#6b7a3a"
+            ],
+            [
+              "model-pickup",
+              "#c9b48a"
+            ],
+            [
+              "model-heli",
+              "#8b9a76"
+            ],
+            [
+              "model-truck",
+              "#7c6f55"
+            ],
+            [
+              "model-warship",
+              "#8a94a3"
+            ],
+            [
+              "model-fpv",
+              "#e05252"
+            ]
+          ]
+        },
+        "tiles": [
+          {
+            "icon": "chart",
+            "name": "Detect",
+            "text": "Routine dashboard"
+          },
+          {
+            "icon": "layers",
+            "name": "Collage",
+            "text": "Panorama"
+          },
+          {
+            "icon": "zoneSearch",
+            "name": "Inspect",
+            "text": "Zone search"
+          },
+          {
+            "icon": "columns",
+            "name": "Horizon",
+            "text": "Live side by side"
+          },
+          {
+            "icon": "alignment",
+            "name": "Align",
+            "text": "On the map"
+          },
+          {
+            "icon": "plate",
+            "name": "Map plate",
+            "text": "Layers tab"
+          },
+          {
+            "icon": "unlink",
+            "name": "Media",
+            "text": "Unused files"
+          },
+          {
+            "icon": "crop",
+            "name": "Extension",
+            "text": "One press"
+          },
+          {
+            "icon": "brush",
+            "name": "Settings",
+            "text": "Eleven accents"
+          }
         ],
         "kofi": true,
         "help": "The guide now walks six journeys on the real screens."
@@ -133,10 +605,22 @@
       {
         "title": "And also",
         "items": [
-          { "icon": "ruler", "text": "Measure turns a line into range rings, a view cone or a line of sight." },
-          { "icon": "image", "text": "Reference windows fade and play clips over the map." },
-          { "icon": "layers", "text": "Collage straightens a panorama." },
-          { "icon": "maximize", "text": "Media opens in one full-screen viewer." }
+          {
+            "icon": "ruler",
+            "text": "Measure turns a line into range rings, a view cone or a line of sight."
+          },
+          {
+            "icon": "image",
+            "text": "Reference windows fade and play clips over the map."
+          },
+          {
+            "icon": "layers",
+            "text": "Collage straightens a panorama."
+          },
+          {
+            "icon": "maximize",
+            "text": "Media opens in one full-screen viewer."
+          }
         ],
         "help": "The guide now shows every tool in pictures, and walks three tasks step by step."
       }
