@@ -587,7 +587,9 @@ stops making sense.
   who can read the workspace (as the API keys are), the hash-verified scraper updater,
   the release signing key (each binary trusts one Ed25519 public key for its own
   updates and the private half stays with the maintainer, off GitHub, so a forged update
-  needs that key and write access to the repository's releases; a lost key costs users
+  needs that key; the signing script also refuses a release file that is not the one its
+  build job printed the digest of, so the publish job's movable actions cannot swap a
+  binary in before it is signed; a lost key costs users
   one manual download of a release carrying a new key, and replacing a key that still
   exists takes a release signed with it that carries the next; a rehearsal points the
   check and the update at a stand-in for GitHub on this machine through

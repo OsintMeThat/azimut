@@ -428,7 +428,9 @@ uv run python scripts/release_signing.py sign v0.3.5
 ```
 
 It downloads the three binaries back from the release, so it signs what users get,
-checks the manifest with the app's own reader, and uploads it with its `.sig`. A
+and refuses any that is not the file its build job made: each build job prints its
+binary's SHA-256 in its own log, which no later job can rewrite. It then checks the
+manifest with the app's own reader and uploads it with its `.sig`. A
 release left unsigned still offers the manual download. Nothing about this touches
 development: the tests sign with keys of their own.
 
