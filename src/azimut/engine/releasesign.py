@@ -40,7 +40,9 @@ PROJECT = "azimut"
 #: nothing here every manifest is refused, and the pop-up offers the manual
 #: download as it always has. Replacing the key takes a release signed with the old
 #: one that lists both; the release after it can drop the old one.
-TRUSTED_KEYS: tuple[str, ...] = ()
+TRUSTED_KEYS: tuple[str, ...] = (
+    "bt3YHEjghRjw0WBBwheiID8K8Ol2dlRs0khtX9USEFM=",  # id e8249ea9, made 2026-11-28
+)
 
 #: A manifest names three binaries; anything near these sizes is not ours.
 MANIFEST_LIMIT = 64 * 1024
