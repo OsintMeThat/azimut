@@ -249,6 +249,13 @@ def check_sight(ask: dict[str, Any]) -> dict[str, Any]:
     return sight_state(state["id"])
 
 
+def sight_running() -> bool:
+    """Whether a check of water in sight is at work."""
+    with _SIGHT_LOCK:
+        state = _SIGHT.get("now")
+        return state is not None and state["status"] == "running"
+
+
 def sight_state(check: str) -> dict[str, Any]:
     """Where a check of water in sight stands, by its id: `missing` once another took its place."""
     with _SIGHT_LOCK:

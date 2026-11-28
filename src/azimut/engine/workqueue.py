@@ -195,6 +195,12 @@ def _run_loop() -> None:
                 _worker_running = False
 
 
+def busy() -> bool:
+    """Whether the background worker is draining a case's queue right now."""
+    with _worker_lock:
+        return _worker_running
+
+
 def wake(case: "CaseType") -> None:
     """Ensure the single background worker is draining ``case``'s queue. A no-op
     if the case is already pending."""

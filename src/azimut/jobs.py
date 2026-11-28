@@ -66,6 +66,12 @@ def start(kind: str, work: Callable[..., Any], *, stoppable: bool = False) -> st
     return job_id
 
 
+def running() -> list[str]:
+    """The kinds of the jobs still at work, oldest first."""
+    with _lock:
+        return [job["kind"] for job in _jobs.values() if job["status"] == "running"]
+
+
 def cancel(job_id: str) -> bool:
     """Ask a running job to stop at its next safe point. Answers whether it heard.
 

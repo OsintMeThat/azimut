@@ -129,7 +129,7 @@ def choose_port(port: int) -> tuple[int, bool]:
 def serve(port: int, *, open_browser: bool = True) -> None:
     """Run the server (blocking) and, unless told not to, open the browser tab."""
     from . import server as server_module
-    from .engine import workspacelock
+    from .engine import selfupdate, workspacelock
 
     # The app is built by uvicorn's factory, which takes no arguments, so the
     # port is left here for it: a second instance names the holder by host and
@@ -140,4 +140,8 @@ def serve(port: int, *, open_browser: bool = True) -> None:
     server = _build_server(port)
     if open_browser:
         _open_when_ready(server, f"http://127.0.0.1:{port}")
+    # Install and restart stops the server and leaves the swap to this thread, once
+    # nothing is left serving (engine/selfupdate.py)
+    selfupdate.on_restart(lambda: setattr(server, "should_exit", True))
     server.run()
+    selfupdate.finish()

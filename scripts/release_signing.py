@@ -113,7 +113,8 @@ def _sealed(key: Ed25519PrivateKey, passphrase: bytes) -> bytes:
         encryption_algorithm=serialization.NoEncryption(),
     )
     salt, nonce = os.urandom(16), os.urandom(12)
-    sealed = AESGCM(_wrapping_key(passphrase, salt, SCRYPT_N)).encrypt(nonce, raw, KEY_KIND.encode())
+    wrapping = _wrapping_key(passphrase, salt, SCRYPT_N)
+    sealed = AESGCM(wrapping).encrypt(nonce, raw, KEY_KIND.encode())
     body = {
         "kind": KEY_KIND,
         "public": public_line(key),
@@ -216,7 +217,8 @@ def find_binaries(folder: Path) -> dict[str, Path]:
                 break
     missing = [name for name in binaries() if name not in found]
     if missing:
-        raise SigningError(f"Not in {folder}: {', '.join(missing)}. Every binary is signed or none.")
+        listed = ", ".join(missing)
+        raise SigningError(f"Not in {folder}: {listed}. Every binary is signed or none.")
     return found
 
 

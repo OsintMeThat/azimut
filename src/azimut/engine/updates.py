@@ -9,11 +9,14 @@ breaking the app.
 
 from __future__ import annotations
 
+import ipaddress
+import logging
+import os
 import platform
 import re
 import sys
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 
@@ -22,6 +25,13 @@ import httpx
 LATEST_RELEASE_URL = "https://api.github.com/repos/OsintMeThat/azimut/releases/latest"
 RELEASES_PAGE_URL = "https://github.com/OsintMeThat/azimut/releases/latest"
 DOWNLOAD_URL = "https://github.com/OsintMeThat/azimut/releases/download/{tag}/{asset}"
+
+#: A rehearsal points the check and the one-click update at a stand-in for GitHub
+#: on this machine, so a branch build can install another before a release relies
+#: on it. Loopback only, and the update still requires the release's signature.
+SOURCE_ENV = "AZIMUT_UPDATE_SOURCE"
+
+logger = logging.getLogger(__name__)
 
 # The binary each release attaches per system and machine (release.yml names
 # them). A pair missing here has no binary: macOS on Intel and Linux on ARM
@@ -38,6 +48,34 @@ _MACHINES = {"x86_64": "x86_64", "amd64": "x86_64", "arm64": "arm64", "aarch64":
 # How much of the release body the pop-up carries. Enough for a changelog,
 # short enough that a runaway release note never bloats the response.
 NOTES_LIMIT = 4000
+
+
+def source() -> str | None:
+    """The rehearsal's stand-in for GitHub, when one is set and on this machine."""
+    raw = os.environ.get(SOURCE_ENV, "").strip().rstrip("/")
+    if not raw:
+        return None
+    parts = urlsplit(raw)
+    host = parts.hostname or ""
+    try:
+        loopback = host == "localhost" or ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = False
+    if parts.scheme not in {"http", "https"} or not loopback:
+        logger.warning("%s ignored: only an address on this machine is accepted", SOURCE_ENV)
+        return None
+    return raw
+
+
+def latest_release_url() -> str:
+    base = source()
+    return f"{base}/repos/OsintMeThat/azimut/releases/latest" if base else LATEST_RELEASE_URL
+
+
+def download_url(tag: str, asset: str) -> str:
+    base = source()
+    template = f"{base}/releases/download/{{tag}}/{{asset}}" if base else DOWNLOAD_URL
+    return template.format(tag=quote(tag, safe=""), asset=quote(asset, safe=""))
 
 
 def _clip(notes: str) -> str:
@@ -108,7 +146,7 @@ def _download_url(body: dict[str, object], tag: str, asset: str | None) -> str |
         str(a.get("name")) for a in listed if isinstance(a, dict)
     }:
         return None
-    return DOWNLOAD_URL.format(tag=quote(tag, safe=""), asset=quote(asset, safe=""))
+    return download_url(tag, asset)
 
 
 def check(current: str, *, asset: str | None = None, timeout: float = 6.0) -> dict[str, object]:
@@ -131,7 +169,7 @@ def check(current: str, *, asset: str | None = None, timeout: float = 6.0) -> di
     }
     try:
         resp = httpx.get(
-            LATEST_RELEASE_URL,
+            latest_release_url(),
             timeout=timeout,
             headers={"Accept": "application/vnd.github+json", "User-Agent": "azimut"},
         )

@@ -588,7 +588,9 @@ stops making sense.
   updates and the private half stays with the maintainer, off GitHub, so a forged update
   needs that key and write access to the repository's releases; a lost key costs users
   one manual download of a release carrying a new key, and replacing a key that still
-  exists takes a release signed with it that carries the next), Intel macOS staying on cryptography 48
+  exists takes a release signed with it that carries the next; a rehearsal points the
+  check and the update at a stand-in for GitHub on this machine through
+  `AZIMUT_UPDATE_SOURCE`, loopback only, the signature still required), Intel macOS staying on cryptography 48
   for want of later wheels (Azimut uses it for AES-GCM only, not the X.509 verifier its
   two open advisories concern), the release workflow's publish job
   running `softprops/action-gh-release` and `pypa/gh-action-pypi-publish` on mutable
