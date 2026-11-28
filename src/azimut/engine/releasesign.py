@@ -49,7 +49,7 @@ MANIFEST_LIMIT = 64 * 1024
 SIGNATURE_LIMIT = 1024
 ASSET_SIZE_LIMIT = 1024**3
 
-_VERSION = re.compile(r"\d+(\.\d+){1,3}")
+_VERSION = re.compile(r"[0-9]+(\.[0-9]+){1,3}")
 _ASSET_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 

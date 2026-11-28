@@ -75,10 +75,11 @@ describe('the progress line', () => {
     });
   });
 
-  it('passes the reason of a failure on', () => {
-    const line = progressLine({ state: 'failed', version: '0.3.5', error: 'The download did not complete.' });
+  it('passes the reason of a failure on, as the server says it', () => {
+    const line = progressLine({ state: 'failed', version: '0.3.5', error: 'This release is not signed yet. Download it by hand, or try again later.' });
     expect(line.kind).toBe('failed');
-    expect(line.text).toBe('0.3.5 did not download. The download did not complete.');
+    expect(line.text).toBe('This release is not signed yet. Download it by hand, or try again later.');
+    expect(progressLine({ state: 'failed', version: '0.3.5' }).text).toBe('0.3.5 did not download.');
   });
 
   it('says nothing while idle', () => {
@@ -116,12 +117,12 @@ describe('when the box downloads', () => {
     expect(shouldPrepare({ ...update, update_available: false }, able, ticked)).toBe(false);
   });
 
-  it('leaves a download under way or ready alone, and tries a failed one again', () => {
-    for (const state of ['downloading', 'checking', 'ready']) {
+  it('leaves a download under way, ready or failed alone: a failure waits for Try again', () => {
+    for (const state of ['downloading', 'checking', 'ready', 'failed']) {
       expect(shouldPrepare(update, { ...able, state, version: '0.3.5' }, ticked)).toBe(false);
     }
-    expect(shouldPrepare(update, { ...able, state: 'failed', version: '0.3.5' }, ticked)).toBe(true);
     expect(shouldPrepare(update, { ...able, state: 'ready', version: '0.3.4' }, ticked)).toBe(true);
+    expect(shouldPrepare(update, { ...able, state: 'failed', version: '0.3.4' }, ticked)).toBe(true);
   });
 });
 

@@ -73,9 +73,10 @@ export async function readSelfUpdate() {
   if (underWay()) follow();
 }
 
-export async function prepare(tag) {
+/** Fetch, check and try `tag`. `retry` is Try again, for a version that failed this run. */
+export async function prepare(tag, { retry = false } = {}) {
   try {
-    adopt(await api.post('/api/settings/update/prepare', { tag }));
+    adopt(await api.post('/api/settings/update/prepare', retry ? { tag, retry } : { tag }));
     follow();
   } catch (e) {
     selfUpdate.state = 'failed';
@@ -90,6 +91,12 @@ export async function prepareIfTicked() {
   if (update?.self_update) adopt(update.self_update, update.install);
   const allowed = { on: prefs.updateAutoDownload, checkOnStart: prefs.updateCheckOnStart };
   if (shouldPrepare(update, selfUpdate, allowed)) await prepare(update.latest);
+}
+
+/** Try again, after a download or a trial that failed. */
+export function retry() {
+  const tag = updatesState.app?.latest || (selfUpdate.version ? `v${selfUpdate.version}` : '');
+  if (tag) prepare(tag, { retry: true });
 }
 
 /** Tick or untick the box. Unticking forgets the download and its file. */

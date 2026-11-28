@@ -73,6 +73,14 @@ describe('the box in the pop-up', () => {
     expect(box.textContent).toContain('Downloaded and signed. Nothing is installed yet.');
   });
 
+  it('offers Try again under a failure, with the reason', () => {
+    prefs.updateAutoDownload = true;
+    adopt({ ...able, state: 'failed', version: '0.3.5', error: 'This release is not signed yet. Download it by hand, or try again later.' });
+    const box = show(AutoUpdateBox, { install: binary });
+    expect(box.textContent).toContain('not signed yet');
+    expect([...box.querySelectorAll('button')].map((b) => b.textContent.trim())).toEqual(['Try again']);
+  });
+
   it('is greyed, with the reason, on a copy that cannot update itself', () => {
     adopt({ ...able, supported: false, reason: "Azimut can't write to its own folder." });
     const box = show(AutoUpdateBox, { install: binary });

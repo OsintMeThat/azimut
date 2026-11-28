@@ -56,11 +56,14 @@ class Release:
         self.binary = binary
         self.asked: list[str] = []
         self.fail_binary = False
+        self.manifest_missing = False
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         url = str(request.url)
         self.asked.append(url)
         if url == updates.download_url(TAG, releasesign.MANIFEST_ASSET):
+            if self.manifest_missing:
+                return httpx.Response(404)
             return httpx.Response(200, content=self.manifest)
         if url == updates.download_url(TAG, releasesign.SIGNATURE_ASSET):
             return httpx.Response(200, content=self.signature)
@@ -74,7 +77,9 @@ class Release:
         return httpx.Response(404)
 
     def client(self) -> httpx.Client:
-        return httpx.Client(transport=httpx.MockTransport(self.handler), follow_redirects=True)
+        return httpx.Client(
+            transport=httpx.MockTransport(lambda request: self.handler(request)), follow_redirects=True
+        )
 
     @property
     def binary_asked(self) -> bool:
@@ -174,14 +179,63 @@ def test_a_cut_download_says_so_and_leaves_nothing(key, binary, tried):
     assert [p.name for p in binary.parent.iterdir()] == [binary.name]
 
 
-def test_a_version_that_does_not_start_is_thrown_away(key, binary, monkeypatch):
+def test_a_version_that_does_not_start_is_kept_for_the_next_try_without_a_new_download(
+    key, binary, monkeypatch
+):
+    """It matches the signed manifest, so trying again only starts it again: a
+    version an antivirus blocks costs one download, not one per start."""
     def refuse(path, version):
-        raise selfupdate.UpdateRefused("The new version did not start as 9.9.9.")
+        raise selfupdate.UpdateRefused("The new version did not start as 9.9.9 on this computer.")
 
     monkeypatch.setattr(selfupdate, "trial", refuse)
-    state = prepare(Release(key))
+    release = Release(key)
+    state = prepare(release)
     assert state["state"] == "failed" and "did not start" in state["error"]
+    assert selfupdate.staged_path(binary).read_bytes() == NEW
+    assert binary.read_bytes() == b"the old binary"
+    tried = []
+    monkeypatch.setattr(selfupdate, "trial", lambda path, version: tried.append(version))
+    downloads = release.asked.count("https://objects.example/blob")
+    assert selfupdate.prepare(TAG, retry=True, client=release.client, wait=True)["state"] == "ready"
+    assert release.asked.count("https://objects.example/blob") == downloads
+    assert tried == ["9.9.9"]
+
+
+def test_a_failed_release_is_tried_again_only_when_asked(key, binary, tried):
+    release = Release(key)
+    release.fail_binary = True
+    prepare(release)
+    asked = len(release.asked)
+    assert prepare(release)["state"] == "failed"  # the next page load: left alone
+    assert len(release.asked) == asked
+    release.fail_binary = False
+    assert selfupdate.prepare(TAG, retry=True, client=release.client, wait=True)["state"] == "ready"
+
+
+def test_a_release_not_signed_yet_says_so(key, binary, tried):
+    release = Release(key)
+    release.manifest_missing = True
+    state = prepare(release)
+    assert state["state"] == "failed" and "not signed yet" in state["error"]
+    assert not release.binary_asked
+
+
+def test_unticking_stops_a_download_under_way_and_takes_its_file_away(key, binary, tried):
+    release = Release(key)
+    original = release.handler
+
+    def untick_midway(request):
+        answer = original(request)
+        if str(request.url) == "https://objects.example/blob":
+            selfupdate.discard()  # the box unticked while the bytes arrive
+            return httpx.Response(200, content=NEW[: len(NEW) // 2] + NEW[len(NEW) // 2 :])
+        return answer
+
+    release.handler = untick_midway
+    state = prepare(release)
+    assert state["state"] == "idle"
     assert [p.name for p in binary.parent.iterdir()] == [binary.name]
+    assert tried == []
 
 
 def test_a_file_already_downloaded_is_not_fetched_again(key, binary, tried):
@@ -236,11 +290,46 @@ def test_a_binary_in_a_folder_it_cannot_write_says_how_to_fix_it(binary):
 def test_the_trial_starts_the_binary_afresh_and_reads_its_version(tmp_path):
     fake = tmp_path / "azimut.new"
     # answers only when started with PyInstaller's environment reset, as the real one must be
-    fake.write_text('#!/bin/sh\n[ "$PYINSTALLER_RESET_ENVIRONMENT" = 1 ] && echo "azimut 9.9.9"\n')
+    fake.write_text(
+        '#!/bin/sh\n[ "$1" = --self-check ] && [ "$PYINSTALLER_RESET_ENVIRONMENT" = 1 ] '
+        '&& echo "loading..." && echo "azimut 9.9.9 ok"\n'
+    )
     fake.chmod(0o755)
     selfupdate.trial(fake, "9.9.9")
     with pytest.raises(selfupdate.UpdateRefused, match="did not start as 9.9.8"):
         selfupdate.trial(fake, "9.9.8")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a shell script stands in for the binary")
+def test_a_trial_that_hangs_is_given_up_on_time(tmp_path, monkeypatch):
+    fake = tmp_path / "azimut.new"
+    fake.write_text("#!/bin/sh\nsleep 30\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr(selfupdate, "TRIAL_TIMEOUT", 1)
+    started = __import__("time").monotonic()
+    with pytest.raises(selfupdate.UpdateRefused, match="did not start"):
+        selfupdate.trial(fake, "9.9.9")
+    assert __import__("time").monotonic() - started < 10
+
+
+def test_the_trial_asks_for_the_self_check_every_version_answers():
+    """An installed copy tries the next version with this flag: the two must agree."""
+    from azimut import cli
+
+    assert selfupdate.SELF_CHECK_FLAG == cli.SELF_CHECK_FLAG == "--self-check"
+
+
+def test_the_self_check_loads_the_server_and_opens_no_workspace(tmp_path):
+    env = {**os.environ, "AZIMUT_HOME": str(tmp_path / "workspace"), "PYTHONPATH": str(Path(selfupdate.__file__).parents[2])}
+    done = subprocess.run(
+        [sys.executable, "-c", "from azimut.cli import main; main()", "--self-check"],
+        capture_output=True, text=True, timeout=180, env=env,
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    from azimut import __version__
+
+    assert done.stdout.strip().splitlines()[-1] == f"azimut {__version__} ok"
+    assert not (tmp_path / "workspace").exists()
 
 
 def test_a_binary_that_will_not_run_fails_the_trial(tmp_path):
@@ -349,6 +438,83 @@ def test_a_swap_that_fails_puts_the_old_binary_back_and_starts_it(key, binary, t
     assert relaunched == [[str(binary), "--no-browser", "--port", "8477"]]
 
 
+def test_a_new_binary_that_will_not_start_gives_way_to_the_old_one(
+    key, binary, tried, monkeypatch
+):
+    prepare(Release(key))
+    armed_server()
+    selfupdate.install(8477)
+    monkeypatch.setattr(selfupdate.atexit, "_run_exitfuncs", lambda: None)
+    started = []
+
+    def relaunch(command):
+        started.append(Path(command[0]).read_bytes())
+        if len(started) == 1:
+            raise OSError("Exec format error")
+
+    monkeypatch.setattr(selfupdate, "relaunch", relaunch)
+    selfupdate.finish()
+    assert started == [NEW, b"the old binary"]
+    assert binary.read_bytes() == b"the old binary"
+    assert selfupdate.staged_path(binary).read_bytes() == NEW  # kept for another try
+
+
+def test_work_started_while_stopping_ends_before_the_swap(key, binary, tried, relaunched, monkeypatch):
+    prepare(Release(key))
+    armed_server()
+    selfupdate.install(8477)
+    answers = iter(["Waits for the media download to finish.", "Waits for the media download to finish.", None])
+    monkeypatch.setattr(selfupdate, "busy_reason", lambda: next(answers, None))
+    monkeypatch.setattr(selfupdate.time, "sleep", lambda seconds: None)
+    selfupdate.finish()
+    assert binary.read_bytes() == NEW
+    assert next(answers, "drained") == "drained"
+
+
+def test_a_broken_console_does_not_stop_the_restart(key, binary, tried, relaunched, monkeypatch):
+    prepare(Release(key))
+    armed_server()
+    selfupdate.install(8477)
+
+    def broken(*args, **kwargs):
+        raise OSError("the console is gone")
+
+    monkeypatch.setattr("builtins.print", broken)
+    selfupdate.finish()
+    assert binary.read_bytes() == NEW
+    assert len(relaunched) == 1
+
+
+def test_nothing_is_imported_between_the_swap_and_the_new_start(key, binary, tried, monkeypatch):
+    """A PyInstaller binary reads its modules from its own file as it imports them,
+    so once the file is swapped an import would read the new binary's bytes."""
+    prepare(Release(key))
+    armed_server()
+    selfupdate.install(8477)
+    monkeypatch.setattr(selfupdate.atexit, "_run_exitfuncs", lambda: None)
+    imported: list[str] = []
+
+    class Watch:
+        def find_spec(self, name, path=None, target=None):
+            imported.append(name)
+            return None
+
+    watch = Watch()
+    real_swap = selfupdate.swap
+
+    def swap_then_watch(*args):
+        real_swap(*args)
+        sys.meta_path.insert(0, watch)
+
+    def relaunch(command):
+        sys.meta_path.remove(watch)
+
+    monkeypatch.setattr(selfupdate, "swap", swap_then_watch)
+    monkeypatch.setattr(selfupdate, "relaunch", relaunch)
+    selfupdate.finish()
+    assert imported == []
+
+
 def test_a_swap_replaces_the_previous_old_binary(tmp_path):
     binary, staged, old = tmp_path / "azimut", tmp_path / "azimut.new", tmp_path / "azimut.old"
     binary.write_bytes(b"2"), staged.write_bytes(b"3"), old.write_bytes(b"1")
@@ -423,11 +589,12 @@ def test_prepare_with_the_box_ticked_asks_the_engine(client, monkeypatch):
     client.put("/api/settings/prefs", json={"update_auto_download": True})
     asked = []
     monkeypatch.setattr(
-        selfupdate, "prepare", lambda tag: asked.append(tag) or {"state": "downloading"}
+        selfupdate, "prepare", lambda tag, retry: asked.append((tag, retry)) or {"state": "downloading"}
     )
     answer = client.post("/api/settings/update/prepare", json={"tag": TAG})
     assert answer.json() == {"state": "downloading"}
-    assert asked == [TAG]
+    client.post("/api/settings/update/prepare", json={"tag": TAG, "retry": True})
+    assert asked == [(TAG, False), (TAG, True)]
 
 
 def test_a_pip_install_is_told_why_with_the_box_ticked(client):

@@ -156,6 +156,23 @@ def check_processes(binary: Path, env: dict[str, str]) -> None:
         raise RuntimeError(f"the binary's processes did not answer: {done.stderr.strip()[-400:]!r}")
 
 
+#: What an older Azimut tries a downloaded version with before installing it (cli.py).
+SELF_CHECK_FLAG = "--self-check"
+
+
+def check_self_check(binary: Path, env: dict[str, str]) -> None:
+    """The binary loads everything its server serves, as the one-click update asks of it.
+
+    An older copy installs this one only after this answers, so a binary that cannot
+    load its own modules here would never reach anyone through the update."""
+    done = subprocess.run(
+        [str(binary), SELF_CHECK_FLAG], env=env, capture_output=True, text=True, timeout=180, check=False
+    )
+    last = (done.stdout.strip().splitlines() or [""])[-1]
+    if done.returncode != 0 or not re.fullmatch(r"azimut \S+ ok", last):
+        raise RuntimeError(f"the binary failed its self-check: {done.stderr.strip()[-400:]!r}")
+
+
 def smoke(binary: Path) -> None:
     binary = binary.resolve()
     if not binary.is_file():
@@ -168,6 +185,7 @@ def smoke(binary: Path) -> None:
         env["AZIMUT_HOME"] = workspace
         check_gallery_dl(binary, env)
         check_processes(binary, env)
+        check_self_check(binary, env)
         process = subprocess.Popen(
             [str(binary), "--no-browser", "--port", str(port)],
             env=env,

@@ -7,8 +7,8 @@
    */
   import Icon from './Icon.svelte';
   import { prefs } from '../lib/state.svelte.js';
-  import { selfUpdate, setAutoDownload } from '../lib/selfUpdateState.svelte.js';
-  import { AUTO, autoBox, progressLine } from '../lib/selfUpdate.js';
+  import { retry, selfUpdate, setAutoDownload } from '../lib/selfUpdateState.svelte.js';
+  import { AUTO, RETRY_LABEL, autoBox, progressLine } from '../lib/selfUpdate.js';
 
   let { install } = $props();
 
@@ -44,6 +44,7 @@
         {#if line.kind === 'ready'}<Icon name="check" size={12} />{/if}
         {#if line.kind === 'failed'}<Icon name="alert" size={12} />{/if}
         {line.text}
+        {#if line.kind === 'failed'}<button class="btn btn-xs" onclick={retry}>{RETRY_LABEL}</button>{/if}
       </p>
     {/if}
   </div>

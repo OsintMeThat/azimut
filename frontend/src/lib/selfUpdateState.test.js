@@ -143,3 +143,12 @@ describe('back from the restart', () => {
     expect(state.uiState.toasts.length).toBe(before);
   });
 });
+
+describe('Try again', () => {
+  it('asks the server to try a failed version again', async () => {
+    store.adopt({ ...able, state: 'failed', version: '0.3.5', error: 'The download did not complete.' }, binary);
+    api.post.mockResolvedValue({ ...able, state: 'ready', version: '0.3.5' });
+    store.retry();
+    await vi.waitFor(() => expect(api.post).toHaveBeenCalledWith('/api/settings/update/prepare', { tag: 'v0.3.5', retry: true }));
+  });
+});

@@ -1644,6 +1644,8 @@ def check_app_update(check: bool = False) -> dict[str, Any]:
 
 class PrepareIn(BaseModel):
     tag: str = Field(max_length=32)
+    # Try again: a release that failed in this run is otherwise left alone until the next start
+    retry: bool = False
 
 
 @router.post("/settings/update/prepare")
@@ -1655,7 +1657,7 @@ def prepare_app_update(body: PrepareIn) -> dict[str, Any]:
     if config.load_settings().get("update_auto_download") is not True:
         raise HTTPException(status_code=409, detail="Download new versions automatically is off.")
     try:
-        return selfupdate.prepare(body.tag)
+        return selfupdate.prepare(body.tag, retry=body.retry)
     except selfupdate.UpdateRefused as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

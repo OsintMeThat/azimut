@@ -8,6 +8,7 @@
  */
 
 export const INSTALL_LABEL = 'Install and restart';
+export const RETRY_LABEL = 'Try again';
 
 export const AUTO = {
   label: 'Download new versions automatically',
@@ -71,7 +72,7 @@ export function progressLine(status) {
     case 'ready':
       return { kind: 'ready', text: 'Downloaded and signed. Nothing is installed yet.', percent: 100 };
     case 'failed':
-      return { kind: 'failed', text: `${version} did not download. ${status.error ?? ''}`.trim(), percent: 0 };
+      return { kind: 'failed', text: status.error || `${version} did not download.`, percent: 0 };
     default:
       return { kind: '', text: '', percent: 0 };
   }
@@ -87,8 +88,8 @@ export function shouldPrepare(update, status, { on, checkOnStart }) {
   if (!on || !checkOnStart || !update?.update_available || !update.latest) return false;
   if (update.install?.kind !== 'binary' || !status?.supported) return false;
   const same = status.version === update.latest.replace(/^v/i, '');
-  // under way or ready already; a failed one is tried again, once per page load
-  return !(same && ['downloading', 'checking', 'ready'].includes(status.state));
+  // under way, ready, or failed already: a failed one waits for Try again or the next start
+  return !(same && ['downloading', 'checking', 'ready', 'failed'].includes(status.state));
 }
 
 /**

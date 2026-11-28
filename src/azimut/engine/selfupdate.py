@@ -30,6 +30,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -46,19 +47,28 @@ logger = logging.getLogger(__name__)
 #: reading the environment its parent left as if it were a child of it.
 RESET_ENV = "PYINSTALLER_RESET_ENVIRONMENT"
 
-TAG = re.compile(r"v\d+(\.\d+){1,3}")
+TAG = re.compile(r"v[0-9]+(\.[0-9]+){1,3}")
 TRIAL_TIMEOUT = 180  # a first start unpacks the whole binary, slow under an antivirus
 CHUNK = 1 << 20
+#: How the trial asks a downloaded version to load what its server serves (cli.py).
+SELF_CHECK_FLAG = "--self-check"
+#: How long the swap waits for work that started while the server was stopping.
+SETTLE_SECONDS = 60
 
 _lock = threading.Lock()
 _state: dict[str, Any] = {"state": "idle"}
 _expected: releasesign.Asset | None = None
 _stop_server: Callable[[], None] | None = None
 _armed: list[str] | None = None
+_cancel = threading.Event()
 
 
 class UpdateRefused(RuntimeError):
     """An install that cannot go ahead now. The message can be shown as it is."""
+
+
+class _Cancelled(Exception):
+    """The box was unticked while its download ran."""
 
 
 # ---- where things are ------------------------------------------------------------
@@ -166,6 +176,9 @@ def _progress(done: int) -> None:
 
 def _get(client: httpx.Client, url: str, limit: int) -> bytes:
     with client.stream("GET", url) as response:
+        if response.status_code == 404:
+            # the window between a tag and its signing, when the release has no manifest yet
+            raise UpdateRefused("This release is not signed yet. Download it by hand, or try again later.")
         response.raise_for_status()
         body = bytearray()
         for chunk in response.iter_bytes():
@@ -197,6 +210,8 @@ def _download(client: httpx.Client, url: str, expected: releasesign.Asset, targe
     with client.stream("GET", url) as response, target.open("wb") as out:
         response.raise_for_status()
         for chunk in response.iter_bytes(CHUNK):
+            if _cancel.is_set():
+                raise _Cancelled()
             done += len(chunk)
             if done > expected.size:
                 raise UpdateRefused("The download is larger than the release states.")
@@ -217,22 +232,30 @@ def _quiet() -> int:
 
 
 def trial(binary: Path, version: str) -> None:
-    """Start ``binary`` once with ``--version`` and expect it to name ``version``."""
-    try:
-        done = subprocess.run(
-            [str(binary), "--version"],
-            capture_output=True,
-            text=True,
-            timeout=TRIAL_TIMEOUT,
-            env=_fresh_environment(),
-            creationflags=_quiet(),
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise UpdateRefused(f"The new version did not start: {exc}") from exc
-    answer = done.stdout.strip()
-    if done.returncode != 0 or answer != f"azimut {version}":
-        raise UpdateRefused(f"The new version did not start as {version}.")
+    """Start ``binary`` once with ``--self-check``: it loads everything its server
+    serves, native libraries included, and answers "azimut <version> ok".
+
+    Its answer goes to a file rather than a pipe. On Windows the timeout ends the
+    bootloader only, and a pipe the unpacked child still held would keep the wait
+    going past it."""
+    with tempfile.TemporaryFile() as out:
+        try:
+            done = subprocess.run(
+                [str(binary), SELF_CHECK_FLAG],
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=subprocess.DEVNULL,
+                timeout=TRIAL_TIMEOUT,
+                env=_fresh_environment(),
+                creationflags=_quiet(),
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise UpdateRefused(f"The new version did not start: {exc}") from exc
+        out.seek(0)
+        lines = out.read().decode("utf-8", "replace").strip().splitlines()
+    if done.returncode != 0 or lines[-1:] != [f"azimut {version} ok"]:
+        raise UpdateRefused(f"The new version did not start as {version} on this computer.")
 
 
 def _make_runnable(staged: Path, binary: Path) -> None:
@@ -268,13 +291,15 @@ def _fetch(tag: str, binary: Path, client: httpx.Client) -> None:
             part.replace(staged)
         finally:
             _remove(part)
+    if _cancel.is_set():
+        raise _Cancelled()
     _make_runnable(staged, binary)
     _set(state="checking", version=found.version, done=expected.size, total=expected.size)
-    try:
-        trial(staged, found.version)
-    except UpdateRefused:
-        _remove(staged)
-        raise
+    # A trial that fails keeps the file: it matches the signed manifest, so the next
+    # try only starts it again rather than downloading it all over.
+    trial(staged, found.version)
+    if _cancel.is_set():
+        raise _Cancelled()
     with _lock:
         _expected = expected
     _set(state="ready", version=found.version, done=expected.size, total=expected.size)
@@ -289,12 +314,18 @@ def _client() -> httpx.Client:
 
 
 def prepare(
-    tag: str, *, client: Callable[[], httpx.Client] = _client, wait: bool = False
+    tag: str,
+    *,
+    retry: bool = False,
+    client: Callable[[], httpx.Client] = _client,
+    wait: bool = False,
 ) -> dict[str, Any]:
     """Fetch, check and try release ``tag`` in the background. Installs nothing.
 
     A second call while one is under way, or once that release is ready, changes
-    nothing. ``wait`` runs it in the calling thread instead, for tests."""
+    nothing; nor does one for a release that already failed in this run, unless
+    ``retry`` (Try again) asks, so a failure costs one download per start at most.
+    ``wait`` runs it in the calling thread instead, for tests."""
     reason = unsupported_reason()
     if reason:
         raise UpdateRefused(reason)
@@ -304,8 +335,12 @@ def prepare(
     assert binary is not None  # unsupported_reason said so
     with _lock:
         under_way = _state["state"] in {"downloading", "checking"}
-        settled = _state["state"] == "ready" and _state.get("version") == tag[1:]
+        same = _state.get("version") == tag[1:]
+        settled = same and (_state["state"] == "ready" or (_state["state"] == "failed" and not retry))
+        if under_way and same:
+            _cancel.clear()  # ticked again before an untick had stopped it: it carries on
         if not (under_way or settled):
+            _cancel.clear()
             _state.clear()
             _state.update(state="downloading", version=tag[1:], done=0, total=0)
     if under_way or settled:
@@ -315,6 +350,9 @@ def prepare(
         try:
             with client() as http:
                 _fetch(tag, binary, http)
+        except _Cancelled:
+            _remove(staged_path(binary), _part_path(binary))
+            _set(state="idle")
         except (UpdateRefused, releasesign.ManifestRefused) as exc:
             _set(state="failed", version=tag[1:], error=str(exc))
         except (httpx.HTTPError, OSError) as exc:
@@ -329,12 +367,14 @@ def prepare(
 
 
 def discard() -> None:
-    """Forget a prepared update and its file, when the box is unticked."""
+    """Forget a prepared update and its file, when the box is unticked. A download
+    under way stops at its next chunk and takes its file away itself."""
     global _expected
     binary = program()
     with _lock:
         if _state["state"] in {"downloading", "checking"}:
-            return  # the run under way owns the file; it ends on its own
+            _cancel.set()
+            return
         _state.clear()
         _state.update(state="idle")
         _expected = None
@@ -402,6 +442,15 @@ def swap(binary: Path, staged: Path, old: Path) -> None:
         raise
 
 
+def _settle(timeout: float = SETTLE_SECONDS) -> None:
+    """Let work that started while the server was stopping end before the swap: the
+    press checked nothing was at work, but a request already in flight may start some.
+    The server no longer answers, so nothing new can begin while this waits."""
+    deadline = time.monotonic() + timeout
+    while busy_reason() and time.monotonic() < deadline:
+        time.sleep(0.5)
+
+
 def relaunch(command: list[str]) -> None:
     """Become the new binary. On Windows, start it in this console and end here."""
     environment = _fresh_environment()
@@ -422,16 +471,45 @@ def finish() -> None:
     if command is None:
         return
     binary = Path(command[0])
+    staged, old = staged_path(binary), old_path(binary)
+    _settle()
     atexit._run_exitfuncs()
     try:
-        swap(binary, staged_path(binary), old_path(binary))
-        version, kept = _state.get("version"), old_path(binary).name
-        print(f"Installing Azimut {version}... done. Previous version kept as {kept}.")
+        swap(binary, staged, old)
+        swapped = True
     except OSError as exc:
-        print(f"The update could not be installed ({exc}). Azimut {__version__} starts again.")
-        if not binary.exists():
-            print(f"Rename {old_path(binary).name} back to {binary.name} to start Azimut.")
+        swapped = False
+        _say(f"The update could not be installed ({exc}). Azimut {__version__} starts again.")
+    if swapped:
+        _say(f"Installing Azimut {_state.get('version')}... done. Previous version kept as {old.name}.")
+    if not binary.exists():
+        _say(f"Rename {old.name} back to {binary.name} to start Azimut.")
+        time.sleep(30)
+        os._exit(1)
+    try:
+        relaunch(command)
+    except OSError as exc:
+        # the new binary would not start at all: the old one goes back and starts instead
+        _say(f"Azimut {_state.get('version')} would not start ({exc}).")
+        if swapped:
+            try:
+                _replace(binary, staged)
+                _replace(old, binary)
+            except OSError:
+                _say(f"Rename {old.name} back to {binary.name} to start Azimut.")
+                time.sleep(30)
+                os._exit(1)
+        try:
+            relaunch(command)
+        except OSError as again:
+            _say(f"Azimut could not start again ({again}). Start it yourself.")
             time.sleep(30)
             os._exit(1)
-    sys.stdout.flush()
-    relaunch(command)
+
+
+def _say(line: str) -> None:
+    """A line in the console, which a closed or broken console must not stop."""
+    try:
+        print(line, flush=True)
+    except (OSError, ValueError):
+        pass

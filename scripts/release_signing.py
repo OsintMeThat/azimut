@@ -11,12 +11,15 @@ Usage, from the repo root::
     uv run python scripts/release_signing.py new-key          # once, ever
     uv run python scripts/release_signing.py public-key       # the line the code trusts
     uv run python scripts/release_signing.py sign v0.3.5      # after each release is published
-    uv run python scripts/release_signing.py sign v0.3.5 --from DIR   # binaries on disk, no upload
+    uv run python scripts/release_signing.py sign v0.3.5 --from DIR --run ID   # a branch build
 
-``sign`` hashes the three binaries the release carries, writes the manifest, signs
-it, checks the result with the very rules the app reads it by, and uploads the two
-files to the release. With ``--from`` it reads the binaries from a folder (a
-branch build's artifacts) and leaves the two files beside them.
+``sign`` downloads the three binaries the release carries and checks each is the
+file its build job made: that job printed its digest in its own log, which the
+publish job cannot rewrite. Then it writes the manifest, signs it, checks the result
+with the very rules the app reads it by, and uploads the two files to the release.
+With ``--from`` it reads the binaries from a folder (a branch build's artifacts),
+checks them against that build's run when ``--run`` names it, and leaves the two
+files beside them.
 
 Losing the key costs every user one manual download of a release that trusts a new
 key, so ``new-key`` never overwrites one and refuses a place inside the repository.
@@ -51,7 +54,10 @@ KEY_KIND = "azimut-release-signing-key"
 PASSPHRASE_MIN = 12
 #: scrypt's cost: about 256 MB and half a second per opening, once per release.
 SCRYPT_N = 2**18
-TAG = re.compile(r"v\d+(\.\d+){1,3}")
+TAG = re.compile(r"v[0-9]+(\.[0-9]+){1,3}")
+#: What release.yml's build jobs print for each binary they make, in their own logs.
+DIGEST_LINE = re.compile(r"AZIMUT-SHA256 (\S+) ([0-9a-f]{64})(?![0-9a-f])")
+BUILD_JOB = "Binary ("
 
 sys.path.insert(0, str(REPO / "src"))
 from azimut.engine import releasesign, updates  # noqa: E402
@@ -276,6 +282,52 @@ def _run(cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(list(cmd), capture_output=True, text=True, check=False)
 
 
+def release_run(run: Run, tag: str) -> str:
+    """The release workflow's successful run for ``tag``, built from the tag's own commit."""
+    commit = _gh(run, "api", f"repos/{GITHUB_REPO}/commits/{tag}", "--jq", ".sha").strip()
+    runs = json.loads(
+        _gh(
+            run, "run", "list", "--repo", GITHUB_REPO, "--workflow", "release.yml",
+            "--branch", tag, "--event", "push", "--json", "databaseId,conclusion,headSha", "--limit", "20",
+        )
+    )
+    built = [r for r in runs if r.get("conclusion") == "success" and r.get("headSha") == commit]
+    if not built:
+        raise SigningError(f"No successful release build of {tag} was found.")
+    return str(built[0]["databaseId"])
+
+
+def built_digests(run: Run, run_id: str) -> dict[str, str]:
+    """Each binary's SHA-256 as its build job printed it.
+
+    Read from the build jobs' own logs only. The publish job holds a write token
+    and runs third-party actions on movable refs (SPEC §9); it could replace a
+    release file, and it could print a line like these in its own log, but it
+    cannot rewrite another job's log."""
+    jobs = json.loads(_gh(run, "api", f"repos/{GITHUB_REPO}/actions/runs/{run_id}/jobs?per_page=100"))
+    found: dict[str, str] = {}
+    for job in jobs.get("jobs", []):
+        if not str(job.get("name", "")).startswith(BUILD_JOB) or job.get("conclusion") != "success":
+            continue
+        log = _gh(run, "run", "view", "--repo", GITHUB_REPO, "--job", str(job["id"]), "--log")
+        for name, digest in DIGEST_LINE.findall(log):
+            if found.setdefault(name, digest) != digest:
+                raise SigningError(f"The build printed two digests for {name}. Nothing was signed.")
+    missing = [name for name in binaries() if name not in found]
+    if missing:
+        raise SigningError(f"The build of run {run_id} printed no digest for {', '.join(missing)}.")
+    return found
+
+
+def check_built(files: dict[str, Path], built: dict[str, str]) -> None:
+    """Every file to sign is the very file its build job made."""
+    for name, path in sorted(files.items()):
+        if sha256_of(path) != built.get(name):
+            raise SigningError(
+                f"{name} is not the file the build made. Nothing was signed: look at the release."
+            )
+
+
 def sign_published(
     tag: str,
     key: Ed25519PrivateKey,
@@ -287,7 +339,7 @@ def sign_published(
     """Sign the binaries the release ``tag`` serves, and attach the manifest to it.
 
     Signs what users download, not a local build: the bytes are fetched back from
-    the release first."""
+    the release, and each must be the file its build job made (``built_digests``)."""
     listed = json.loads(_gh(run, "release", "view", tag, "--repo", GITHUB_REPO, "--json", "assets"))
     names = {str(asset.get("name")) for asset in listed.get("assets", [])}
     if releasesign.MANIFEST_ASSET in names and not replace:
@@ -296,7 +348,9 @@ def sign_published(
         folder = Path(scratch)
         patterns = [arg for name in binaries() for arg in ("--pattern", name)]
         _gh(run, "release", "download", tag, "--repo", GITHUB_REPO, "--dir", scratch, *patterns)
-        manifest, signature = sign_manifest(tag, find_binaries(folder), key, trusted)
+        files = find_binaries(folder)
+        check_built(files, built_digests(run, release_run(run, tag)))
+        manifest, signature = sign_manifest(tag, files, key, trusted)
         pair = [str(path) for path in write_pair(folder, manifest, signature)]
         clobber = ["--clobber"] if replace else []
         _gh(run, "release", "upload", tag, "--repo", GITHUB_REPO, *pair, *clobber)
@@ -316,6 +370,7 @@ def main(argv: list[str] | None = None, ask: Ask = getpass.getpass, run: Run = _
     sign.add_argument("tag")
     sign.add_argument("--key", type=Path, default=DEFAULT_KEY)
     sign.add_argument("--from", dest="source", type=Path, help="binaries on disk; no upload")
+    sign.add_argument("--run", help="with --from: the workflow run whose build made them")
     sign.add_argument("--replace", action="store_true", help="sign a signed release again")
     args = parser.parse_args(argv)
 
@@ -334,6 +389,8 @@ def main(argv: list[str] | None = None, ask: Ask = getpass.getpass, run: Run = _
             require_trusted(public_of(args.key))
             if args.source is not None:
                 files = find_binaries(args.source)
+                if args.run:
+                    check_built(files, built_digests(run, args.run))
                 manifest, signature = sign_manifest(args.tag, files, load_key(args.key, ask))
                 for path in write_pair(args.source, manifest, signature):
                     print(f"Wrote {path}")

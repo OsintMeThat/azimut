@@ -16,8 +16,8 @@
   import UpdateButtons from '../../components/UpdateButtons.svelte';
   import UpdateSteps from '../../components/UpdateSteps.svelte';
   import { prefs } from '../../lib/state.svelte.js';
-  import { readSelfUpdate, selfUpdate, setAutoDownload } from '../../lib/selfUpdateState.svelte.js';
-  import { AUTO, WHAT_HAPPENS, autoBox, progressLine } from '../../lib/selfUpdate.js';
+  import { readSelfUpdate, retry, selfUpdate, setAutoDownload } from '../../lib/selfUpdateState.svelte.js';
+  import { AUTO, RETRY_LABEL, WHAT_HAPPENS, autoBox, progressLine } from '../../lib/selfUpdate.js';
   import { PIP_COMMAND } from '../../lib/updateSteps.js';
 
   let {
@@ -166,6 +166,7 @@
         <span class="grow">{line.text}</span>
         <!-- the row above offers it once a check has found the release -->
         {#if line.kind === 'ready' && !appUpdate?.update_available}<InstallButton />{/if}
+        {#if line.kind === 'failed'}<button class="btn btn-sm" onclick={retry}>{RETRY_LABEL}</button>{/if}
       </div>
     {/if}
     <details class="what" open>

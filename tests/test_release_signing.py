@@ -328,7 +328,8 @@ def test_sign_from_a_folder_leaves_the_pair_beside_the_binaries(tmp_path, key, b
 
 
 class FakeGh:
-    """Answers gh as a release with the three binaries, and records each call."""
+    """Answers gh as a release with the three binaries and the run that built them,
+    and records each call."""
 
     def __init__(self, builds: dict[str, Path], already_signed: bool = False):
         self.builds = builds
@@ -336,23 +337,52 @@ class FakeGh:
         names = [*builds, *([releasesign.MANIFEST_ASSET] if already_signed else [])]
         self.view = json.dumps({"assets": [{"name": name} for name in names]})
         self.uploaded: dict[str, bytes] = {}
+        self.served = {name: path.read_bytes() for name, path in builds.items()}
+        self.digests = {name: release_signing.sha256_of(path) for name, path in builds.items()}
+        # what the publish job could print in its own log; never to be believed
+        self.publish_log = ""
+
+    def build_log(self, name: str) -> str:
+        return (
+            "Binary (x)\tRecord the binary's digest\t2026-11-28T00:00:00Z "
+            "uv run --no-sync python -c \"print('AZIMUT-SHA256', sys.argv[1], ...)\"\n"
+            f"Binary (x)\tRecord the binary's digest\t2026-11-28T00:00:01Z AZIMUT-SHA256 {name} {self.digests[name]}\n"
+        )
 
     def __call__(self, cmd):
         cmd = list(cmd)
         self.calls.append(cmd)
-        verb = cmd[2]
-        if verb == "view":
-            return subprocess.CompletedProcess(cmd, 0, self.view, "")
-        if verb == "download":
+        done = lambda out="": subprocess.CompletedProcess(cmd, 0, out, "")  # noqa: E731
+        head = cmd[1:3]
+        if head == ["release", "view"]:
+            return done(self.view)
+        if head == ["release", "download"]:
             folder = Path(cmd[cmd.index("--dir") + 1])
-            for name, path in self.builds.items():
-                (folder / name).write_bytes(path.read_bytes())
-            return subprocess.CompletedProcess(cmd, 0, "", "")
-        if verb == "upload":
+            for name, body in self.served.items():
+                (folder / name).write_bytes(body)
+            return done()
+        if head == ["release", "upload"]:
             for arg in cmd:
                 if arg.endswith((releasesign.MANIFEST_ASSET, releasesign.SIGNATURE_ASSET)):
                     self.uploaded[Path(arg).name] = Path(arg).read_bytes()
-            return subprocess.CompletedProcess(cmd, 0, "", "")
+            return done()
+        if cmd[1] == "api" and "/commits/" in cmd[2]:
+            return done("abc123\n")
+        if head == ["run", "list"]:
+            return done(json.dumps([
+                {"databaseId": 7, "conclusion": "failure", "headSha": "abc123"},
+                {"databaseId": 9, "conclusion": "success", "headSha": "abc123"},
+            ]))
+        if cmd[1] == "api" and cmd[2].startswith(f"repos/{release_signing.GITHUB_REPO}/actions/runs/9/jobs"):
+            jobs = [{"id": 100 + i, "name": f"Binary ({name})", "conclusion": "success"}
+                    for i, name in enumerate(self.builds)]
+            jobs.append({"id": 900, "name": "GitHub release + PyPI publish", "conclusion": "success"})
+            return done(json.dumps({"jobs": jobs}))
+        if head == ["run", "view"]:
+            job = int(cmd[cmd.index("--job") + 1])
+            if job == 900:
+                return done(self.publish_log)
+            return done(self.build_log(list(self.builds)[job - 100]))
         raise AssertionError(cmd)
 
 
@@ -402,3 +432,49 @@ def test_an_untrusted_key_is_turned_away_before_its_passphrase(tmp_path, capsys)
     )
     assert code == 1
     assert "not one this Azimut trusts" in capsys.readouterr().err
+
+
+def test_a_release_file_the_build_did_not_make_is_never_signed(key, trusted, builds):
+    """The publish job could swap a release file before it is signed: the build
+    job's own log, which it cannot rewrite, says what the file should be."""
+    gh = FakeGh(builds)
+    gh.served["azimut-linux-x86_64"] = b"swapped after the build"
+    with pytest.raises(release_signing.SigningError, match="not the file the build made"):
+        release_signing.sign_published("v0.3.5", key, run=gh, trusted=trusted)
+    assert not any(call[1:3] == ["release", "upload"] for call in gh.calls)
+
+
+def test_a_digest_printed_by_the_publish_job_is_not_believed(key, trusted, builds):
+    gh = FakeGh(builds)
+    gh.served["azimut-linux-x86_64"] = b"swapped after the build"
+    forged = release_signing.sha256_of(builds["azimut-linux-x86_64"]).replace("a", "b")
+    gh.publish_log = f"AZIMUT-SHA256 azimut-linux-x86_64 {forged}\n"
+    with pytest.raises(release_signing.SigningError, match="not the file the build made"):
+        release_signing.sign_published("v0.3.5", key, run=gh, trusted=trusted)
+    read_jobs = [call[call.index("--job") + 1] for call in gh.calls if "--job" in call]
+    assert read_jobs and "900" not in read_jobs  # the publish job's log is never read
+
+
+def test_only_the_successful_build_of_the_tags_own_commit_is_read(key, trusted, builds):
+    gh = FakeGh(builds)
+    release_signing.sign_published("v0.3.5", key, run=gh, trusted=trusted)
+    jobs = next(call for call in gh.calls if call[1] == "api" and "/jobs" in call[2])
+    assert "/runs/9/" in jobs[2]
+
+
+def test_a_build_that_printed_no_digest_signs_nothing(key, trusted, builds):
+    gh = FakeGh(builds)
+    gh.build_log = lambda name: "no digest here\n"
+    with pytest.raises(release_signing.SigningError, match="printed no digest"):
+        release_signing.sign_published("v0.3.5", key, run=gh, trusted=trusted)
+
+
+def test_the_build_workflow_prints_the_digest_the_script_reads():
+    workflow = (REPO / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    assert "print('AZIMUT-SHA256', sys.argv[1], hashlib.sha256(" in workflow
+    assert workflow.index("Record the binary's digest") < workflow.index("name: ${{ matrix.asset }}")
+    assert release_signing.DIGEST_LINE.findall(f"AZIMUT-SHA256 azimut-linux-x86_64 {'0' * 64}") == [
+        ("azimut-linux-x86_64", "0" * 64)
+    ]
+    assert release_signing.BUILD_JOB in "Binary (ubuntu-24.04)"
+    assert "name: Binary (${{ matrix.os }})" in workflow
